@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package peerlink.v1;
+
+import "peerlink/v1/common.proto";
+
+option java_package = "org.peerlink.protocol.v1";
+option java_multiple_files = true;
+
+enum ObjectType {
+  OBJECT_TYPE_UNSPECIFIED = 0;
+  OBJECT_TYPE_FILE = 1;
+  OBJECT_TYPE_DIRECTORY = 2;
+  OBJECT_TYPE_COLLECTION = 3;
+  OBJECT_TYPE_TOMBSTONE = 4;
+}
+
+// Logical object reference across the distributed system.
+// Invariants enforced:
+// 1. Never encode OS-specific filesystem paths as object identity (ObjectId is independent).
+// 2. Object ID and ContentHash are strictly separated.
+// 3. Timestamps are NOT conflict authority (CausalClock provides deterministic precedence).
+message ObjectReference {
+  ObjectId object_id = 1;
+  ContentHash content_hash = 2;
+  VersionId version_id = 3;
+  ObjectType object_type = 4;
+  int64 byte_size = 5;
+  string mime_type = 6;
+  string logical_name = 7; // Relative display label, NOT an OS filesystem path
+  CausalClock causal_clock = 8; // Authoritative causal clock for conflict resolution
+  int64 client_modified_hint_utc_ms = 9; // Advisory metadata only; never conflict authority
+  bool is_tombstone = 10;
+  map<string, string> metadata = 11;
+}

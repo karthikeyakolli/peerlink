@@ -1,0 +1,118 @@
+syntax = "proto3";
+
+package peerlink.v1;
+
+import "peerlink/v1/common.proto";
+import "peerlink/v1/error.proto";
+import "peerlink/v1/object_reference.proto";
+
+option java_package = "org.peerlink.protocol.v1";
+option java_multiple_files = true;
+
+enum AccessRequestType {
+  ACCESS_REQUEST_TYPE_UNSPECIFIED = 0;
+  ACCESS_REQUEST_TYPE_BROWSE = 1;
+  ACCESS_REQUEST_TYPE_METADATA = 2;
+  ACCESS_REQUEST_TYPE_SEARCH = 3;
+  ACCESS_REQUEST_TYPE_PREVIEW = 4;
+  ACCESS_REQUEST_TYPE_DOWNLOAD = 5;
+  ACCESS_REQUEST_TYPE_ARCHIVE_INSPECT = 6;
+}
+
+enum AccessScope {
+  ACCESS_SCOPE_UNSPECIFIED = 0;
+  ACCESS_SCOPE_READ_METADATA = 1;
+  ACCESS_SCOPE_BROWSE = 2;
+  ACCESS_SCOPE_SEARCH = 3;
+  ACCESS_SCOPE_PREVIEW = 4;
+  ACCESS_SCOPE_DOWNLOAD = 5;
+  ACCESS_SCOPE_FULL = 6;
+}
+
+// Remote Object Reference returned during Browse, Search, or Metadata queries
+message RemoteObjectReference {
+  ObjectId object_id = 1;
+  string relative_path = 2;
+  string display_name = 3;
+  ObjectType object_type = 4;
+  int64 byte_size = 5;
+  string mime_type = 6;
+  int64 modified_time_utc_ms = 7;
+  string content_hash_sha256 = 8;
+  bool is_symlink = 9;
+  bool is_executable = 10;
+  bool is_previewable = 11;
+  bool is_hidden = 12;
+  map<string, string> attributes = 13;
+}
+
+// Archive entry descriptor for safe inspection without disk extraction
+message ArchiveEntryDescriptor {
+  string entry_path = 1;
+  int64 uncompressed_size_bytes = 2;
+  int64 compressed_size_bytes = 3;
+  bool is_directory = 4;
+  int64 modified_time_utc_ms = 5;
+  bool is_safe = 6;
+  string warning = 7;
+}
+
+// Access Request sent from client to remote peer
+message AccessRequest {
+  ProtocolHeader header = 1;
+  string request_id = 2;
+  PeerId requester_peer_id = 3;
+  PeerId target_peer_id = 4;
+  AccessRequestType request_type = 5;
+  string share_id = 6;
+  string relative_path = 7;
+  string search_query = 8;
+  int32 max_results = 9;
+  int32 max_depth = 10;
+  int64 timeout_ms = 11;
+  string pagination_cursor = 12;
+  string authorization_token = 13;
+  bool preview_thumbnail_only = 14;
+  int32 preview_max_bytes = 15;
+  int64 client_timestamp_utc_ms = 16;
+}
+
+// Access Response returned from remote peer
+message AccessResponse {
+  ProtocolHeader header = 1;
+  string request_id = 2;
+  bool success = 3;
+  repeated RemoteObjectReference items = 4;
+  string next_pagination_cursor = 5;
+  bool has_more = 6;
+  int32 total_matching = 7;
+  bytes preview_data = 8;
+  string preview_mime_type = 9;
+  repeated ArchiveEntryDescriptor archive_entries = 10;
+  ErrorDetail error = 11;
+  int64 execution_time_ms = 12;
+}
+
+// Request to cancel an ongoing access operation
+message AccessCancelRequest {
+  string request_id = 1;
+  string reason = 2;
+  PeerId requester_peer_id = 3;
+}
+
+// Response acknowledging cancellation
+message AccessCancelResponse {
+  string request_id = 1;
+  bool cancelled = 2;
+  string message = 3;
+}
+
+// Wire carrier wrapper for remote access protocol messages
+message AccessWireMessage {
+  oneof payload {
+    AccessRequest request = 1;
+    AccessResponse response = 2;
+    AccessCancelRequest cancel_request = 3;
+    AccessCancelResponse cancel_response = 4;
+  }
+}

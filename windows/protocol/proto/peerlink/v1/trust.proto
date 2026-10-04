@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package peerlink.v1;
+
+import "peerlink/v1/identity.proto";
+import "peerlink/v1/error.proto";
+
+option java_package = "org.peerlink.protocol.v1";
+option java_multiple_files = true;
+
+message PairingRequest {
+  PeerIdentity initiator = 1;
+  int64 timestamp_utc_ms = 2;
+  string pairing_secret_hash = 3;
+}
+
+message PairingResponse {
+  bool accepted = 1;
+  PeerIdentity responder = 2;
+  ErrorDetail error = 3;
+}

@@ -1,0 +1,210 @@
+syntax = "proto3";
+
+package peerlink.v1;
+
+import "peerlink/v1/common.proto";
+import "peerlink/v1/error.proto";
+
+option java_package = "org.peerlink.protocol.v1";
+option java_multiple_files = true;
+
+enum TransferState {
+  TRANSFER_STATE_UNSPECIFIED = 0;
+  TRANSFER_STATE_PREPARING = 1;
+  TRANSFER_STATE_CONNECTING = 2;
+  TRANSFER_STATE_TRANSFERRING = 3;
+  TRANSFER_STATE_RECEIVED = 4;
+  TRANSFER_STATE_VERIFYING = 5;
+  TRANSFER_STATE_COMMITTING = 6;
+  TRANSFER_STATE_COMPLETED = 7;
+  TRANSFER_STATE_FAILED = 8;
+  TRANSFER_STATE_CANCELLED = 9;
+  TRANSFER_STATE_OUTCOME_UNKNOWN = 10;
+  TRANSFER_STATE_PAUSED = 11;
+}
+
+enum ChunkStatus {
+  CHUNK_STATUS_UNSPECIFIED = 0;
+  CHUNK_STATUS_PENDING = 1;
+  CHUNK_STATUS_IN_FLIGHT = 2;
+  CHUNK_STATUS_ACKED = 3;
+  CHUNK_STATUS_FAILED = 4;
+}
+
+enum DuplicateDestinationPolicy {
+  DUPLICATE_DESTINATION_POLICY_UNSPECIFIED = 0;
+  DUPLICATE_DESTINATION_POLICY_FAIL_IF_EXISTS = 1;
+  DUPLICATE_DESTINATION_POLICY_OVERWRITE = 2;
+  DUPLICATE_DESTINATION_POLICY_RENAME_WITH_SUFFIX = 3;
+}
+
+message TransferItem {
+  string relative_path = 1;
+  int64 file_size_bytes = 2;
+  string sha256_hex = 3;
+  bool is_directory = 4;
+  int64 modified_time_utc_ms = 5;
+}
+
+message TransferManifest {
+  string transfer_id = 1;
+  OperationId operation_id = 2;
+  repeated TransferItem items = 3;
+  int64 total_bytes = 4;
+  int32 chunk_size_bytes = 5;
+  PeerId sender_peer_id = 6;
+  PeerId receiver_peer_id = 7;
+  string display_name = 8;
+  DuplicateDestinationPolicy duplicate_policy = 9;
+  string target_directory = 10;
+}
+
+message TransferOffer {
+  TransferManifest manifest = 1;
+  int64 timestamp_utc_ms = 2;
+}
+
+message TransferResponse {
+  string transfer_id = 1;
+  bool accepted = 2;
+  string rejection_reason = 3;
+  ErrorDetail error = 4;
+}
+
+message TransferChunk {
+  string transfer_id = 1;
+  int32 item_index = 2;
+  int64 chunk_index = 3;
+  int64 offset_bytes = 4;
+  bytes data = 5;
+  bool is_last_chunk = 6;
+  string chunk_sha256 = 7;
+}
+
+message TransferChunkAck {
+  string transfer_id = 1;
+  int32 item_index = 2;
+  int64 chunk_index = 3;
+  int64 bytes_received = 4;
+  bool success = 5;
+  string error_message = 6;
+  bool retry_requested = 7;
+}
+
+message TransferVerifyResult {
+  string transfer_id = 1;
+  int32 item_index = 2;
+  bool verified = 3;
+  string computed_sha256 = 4;
+  string expected_sha256 = 5;
+  string details = 6;
+}
+
+message TransferCommitSignal {
+  string transfer_id = 1;
+  bool commit_confirmed = 2;
+}
+
+message TransferCompletedReceipt {
+  string transfer_id = 1;
+  OperationId operation_id = 2;
+  int64 completion_timestamp_utc_ms = 3;
+  int64 total_bytes_transferred = 4;
+  bool success = 5;
+  string final_destination_path = 6;
+  string error_message = 7;
+}
+
+message TransferCancelRequest {
+  string transfer_id = 1;
+  string reason = 2;
+}
+
+message TransferPauseRequest {
+  string transfer_id = 1;
+  string reason = 2;
+}
+
+message TransferPauseResponse {
+  string transfer_id = 1;
+  bool acknowledged = 2;
+}
+
+message TransferResumeOffer {
+  string transfer_id = 1;
+  OperationId operation_id = 2;
+  TransferManifest manifest = 3;
+  int64 resume_timestamp_utc_ms = 4;
+}
+
+message TransferResumeState {
+  string transfer_id = 1;
+  OperationId operation_id = 2;
+  repeated int64 acked_chunk_indices = 3;
+  int64 bytes_already_staged = 4;
+  TransferState current_state = 5;
+  bool can_resume = 6;
+  string message = 7;
+}
+
+message TransferOperationStatusQuery {
+  string transfer_id = 1;
+  OperationId operation_id = 2;
+}
+
+message TransferOperationStatusResponse {
+  string transfer_id = 1;
+  OperationId operation_id = 2;
+  TransferState state = 3;
+  bool is_committed = 4;
+  TransferCompletedReceipt receipt = 5;
+  string error_message = 6;
+}
+
+message TransferWireMessage {
+  oneof payload {
+    TransferOffer offer = 1;
+    TransferResponse response = 2;
+    TransferChunk chunk = 3;
+    TransferChunkAck ack = 4;
+    TransferVerifyResult verify = 5;
+    TransferCommitSignal commit = 6;
+    TransferCompletedReceipt receipt = 7;
+    TransferCancelRequest cancel = 8;
+    TransferPauseRequest pause = 9;
+    TransferPauseResponse pause_response = 10;
+    TransferResumeOffer resume_offer = 11;
+    TransferResumeState resume_state = 12;
+    TransferOperationStatusQuery status_query = 13;
+    TransferOperationStatusResponse status_response = 14;
+  }
+}
+
+message TransferDescriptor {
+  string transfer_id = 1;
+  OperationId operation_id = 2;
+  ObjectId object_id = 3;
+  PeerId source_peer = 4;
+  PeerId destination_peer = 5;
+  string display_name = 6;
+  int64 total_bytes = 7;
+  int32 chunk_size_bytes = 8;
+  ContentHash expected_hash = 9;
+  int64 created_at_utc_ms = 10;
+  repeated TransferItem items = 11;
+  string local_source_path = 12;
+  string destination_path = 13;
+}
+
+message TransferProgress {
+  string transfer_id = 1;
+  int64 transferred_bytes = 2;
+  int64 total_bytes = 3;
+  TransferState state = 4;
+  int64 speed_bps = 5;
+  ErrorDetail error = 6;
+  string current_file = 7;
+  int32 current_item_index = 8;
+  int32 total_items = 9;
+  string destination_path = 10;
+}

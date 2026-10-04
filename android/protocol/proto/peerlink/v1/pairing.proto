@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package peerlink.v1;
+
+import "peerlink/v1/identity.proto";
+import "peerlink/v1/error.proto";
+
+option java_package = "org.peerlink.protocol.v1";
+option java_multiple_files = true;
+
+enum PairingState {
+  PAIRING_STATE_UNSPECIFIED = 0;
+  PAIRING_STATE_INITIATED = 1;
+  PAIRING_STATE_OFFERED = 2;
+  PAIRING_STATE_VERIFYING = 3;
+  PAIRING_STATE_CONFIRMED = 4;
+  PAIRING_STATE_REJECTED = 5;
+  PAIRING_STATE_REVOKED = 6;
+  PAIRING_STATE_EXPIRED = 7;
+}
+
+enum PairingMethod {
+  PAIRING_METHOD_UNSPECIFIED = 0;
+  PAIRING_METHOD_QR_CODE = 1;
+  PAIRING_METHOD_NUMERIC_CODE = 2;
+  PAIRING_METHOD_MANUAL_VERIFICATION = 3;
+}
+
+message PairingOffer {
+  string pairing_session_id = 1;
+  PeerIdentity initiator_peer = 2;
+  DeviceIdentity initiator_device = 3;
+  string pairing_code = 4;
+  string qr_payload = 5;
+  string expected_fingerprint = 6;
+  PairingMethod method = 7;
+  int64 expires_at_utc_ms = 8;
+  bytes offer_signature = 9;
+}
+
+message PairingVerification {
+  string pairing_session_id = 1;
+  PeerIdentity responder_peer = 2;
+  DeviceIdentity responder_device = 3;
+  string entered_code = 4;
+  string verified_fingerprint = 5;
+  int64 timestamp_utc_ms = 6;
+  bytes verification_signature = 7;
+}
+
+message PairingResult {
+  string pairing_session_id = 1;
+  PairingState state = 2;
+  ErrorDetail error = 3;
+  int64 completed_at_utc_ms = 4;
+  PeerIdentity paired_peer = 5;
+}

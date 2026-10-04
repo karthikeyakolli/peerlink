@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package peerlink.v1;
+
+option java_package = "org.peerlink.protocol.v1";
+option java_multiple_files = true;
+
+// Semantic protocol versioning
+message ProtocolVersion {
+  uint32 major = 1;
+  uint32 minor = 2;
+  uint32 patch = 3;
+  string pre_release = 4;
+}
+
+// Universal protocol header for inter-node control and data messages
+message ProtocolHeader {
+  ProtocolVersion version = 1;
+  ProtocolVersion min_supported_version = 2;
+  string trace_id = 3;
+  int64 timestamp_utc_ms = 4;
+  map<string, string> feature_flags = 5;
+}
+
+// Causal vector clock for deterministic conflict resolution.
+// Invariant: Timestamps are metadata/hints only, NEVER conflict authority.
+message CausalClock {
+  int64 logical_counter = 1;
+  string actor_peer_id = 2;
+  map<string, int64> peer_vectors = 3;
+}
+
+enum HashAlgorithm {
+  HASH_ALGORITHM_UNSPECIFIED = 0;
+  HASH_ALGORITHM_SHA256 = 1;
+  HASH_ALGORITHM_BLAKE3 = 2;
+}
+
+// Content-addressed cryptographic hash.
+// Invariant: Content hash is verification/integrity, NOT logical object identity.
+message ContentHash {
+  HashAlgorithm algorithm = 1;
+  bytes hash_bytes = 2;
+  string hex_digest = 3;
+}
+
+// Logical object identity.
+// Invariant: Independent of physical filesystem paths.
+message ObjectId {
+  string value = 1;
+}
+
+message DeviceId {
+  string value = 1;
+}
+
+message PeerId {
+  string value = 1;
+}
+
+message ConnectionId {
+  string value = 1;
+}
+
+message SessionId {
+  string value = 1;
+}
+
+message OperationId {
+  string value = 1;
+}
+
+message VersionId {
+  string value = 1;
+}
+
+message ChunkId {
+  string value = 1;
+  int64 index = 2;
+}

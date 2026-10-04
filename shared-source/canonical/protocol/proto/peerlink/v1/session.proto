@@ -1,0 +1,111 @@
+syntax = "proto3";
+
+package peerlink.v1;
+
+import "peerlink/v1/common.proto";
+import "peerlink/v1/identity.proto";
+import "peerlink/v1/capability.proto";
+import "peerlink/v1/error.proto";
+
+option java_package = "org.peerlink.protocol.v1";
+option java_multiple_files = true;
+
+enum SessionState {
+  SESSION_STATE_UNSPECIFIED = 0;
+  SESSION_STATE_INITIATING = 1;
+  SESSION_STATE_ESTABLISHED = 2;
+  SESSION_STATE_REKEYING = 3;
+  SESSION_STATE_CLOSING = 4;
+  SESSION_STATE_CLOSED = 5;
+  SESSION_STATE_REJECTED = 6;
+}
+
+enum TransportType {
+  TRANSPORT_TYPE_UNSPECIFIED = 0;
+  TRANSPORT_TYPE_DIRECT_QUIC = 1;
+  TRANSPORT_TYPE_DIRECT_TCP_TLS = 2;
+  TRANSPORT_TYPE_RELAY_TURN = 3;
+}
+
+// Inter-peer authenticated communication session descriptor
+message SessionDescriptor {
+  SessionId session_id = 1;
+  PeerId initiator_peer_id = 2;
+  PeerId responder_peer_id = 3;
+  SessionState state = 4;
+  TransportType transport_type = 5;
+  int64 established_at_utc_ms = 6;
+  int64 expires_at_utc_ms = 7;
+  repeated FeatureCapability negotiated_capabilities = 8;
+  ProtocolVersion protocol_version = 9;
+}
+
+message SessionInitiateRequest {
+  ProtocolHeader header = 1;
+  SessionId proposed_session_id = 2;
+  PeerId initiator_peer_id = 3;
+  TransportType preferred_transport = 4;
+  CapabilityNegotiationRequest capability_offer = 5;
+}
+
+message SessionInitiateResponse {
+  ProtocolHeader header = 1;
+  SessionId session_id = 2;
+  SessionState state = 3;
+  TransportType selected_transport = 4;
+  CapabilityNegotiationResponse capability_response = 5;
+  ErrorDetail error = 6;
+}
+
+enum HandshakePhase {
+  HANDSHAKE_PHASE_UNSPECIFIED = 0;
+  HANDSHAKE_PHASE_SYN = 1;
+  HANDSHAKE_PHASE_SYN_ACK = 2;
+  HANDSHAKE_PHASE_ACK = 3;
+  HANDSHAKE_PHASE_REJECT = 4;
+}
+
+message HandshakeFrame {
+  HandshakePhase phase = 1;
+  ProtocolVersion protocol_version = 2;
+  ProtocolVersion min_supported_version = 3;
+  ConnectionId connection_id = 4;
+  SessionId session_id = 5;
+  PeerIdentity peer_identity = 6;
+  DeviceIdentity device_identity = 7;
+  bytes nonce = 8;
+  int64 timestamp_utc_ms = 9;
+  bytes signature = 10;
+  repeated TransportType supported_transports = 11;
+  TransportType selected_transport = 12;
+  repeated string supported_features = 13;
+  ErrorDetail error = 14;
+}
+
+message KeepalivePing {
+  string ping_id = 1;
+  int64 timestamp_utc_ms = 2;
+}
+
+message KeepalivePong {
+  string ping_id = 1;
+  int64 echo_timestamp_utc_ms = 2;
+  int64 responder_timestamp_utc_ms = 3;
+}
+
+message SessionCloseFrame {
+  SessionId session_id = 1;
+  uint32 reason_code = 2;
+  string reason_message = 3;
+}
+
+message TransportFrame {
+  oneof frame {
+    HandshakeFrame handshake = 1;
+    KeepalivePing ping = 2;
+    KeepalivePong pong = 3;
+    SessionCloseFrame close = 4;
+    bytes payload = 5;
+  }
+}
+

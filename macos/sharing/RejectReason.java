@@ -1,0 +1,17 @@
+package org.peerlink.core.sharing;
+
+public enum RejectReason {
+    NONE,
+    INVALID_TOKEN,
+    SHARE_NOT_FOUND,
+    INVALID_SIGNATURE,
+    SHARE_REVOKED,
+    SHARE_EXPIRED,
+    TOKEN_EXPIRED,
+    PEER_NOT_ALLOWED,
+    PEER_MISMATCH,
+    INSUFFICIENT_PERMISSION,
+    ONE_TIME_CONSUMED,
+    GUEST_IDENTITY_VIOLATION,
+    OWNER_OFFLINE
+}

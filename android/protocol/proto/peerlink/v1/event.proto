@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package peerlink.v1;
+
+import "peerlink/v1/common.proto";
+import "peerlink/v1/error.proto";
+import "peerlink/v1/identity.proto";
+import "peerlink/v1/capability.proto";
+import "peerlink/v1/session.proto";
+import "peerlink/v1/operation.proto";
+
+option java_package = "org.peerlink.protocol.v1";
+option java_multiple_files = true;
+
+// Universal versionable event contract across the distributed system
+message PeerLinkEvent {
+  string event_id = 1;
+  ProtocolHeader header = 2;
+  oneof payload {
+    SessionDescriptor session_event = 3;
+    CapabilityNegotiationResponse capability_event = 4;
+    OperationRecord operation_event = 5;
+    ErrorDetail error_event = 6;
+    PeerIdentity peer_event = 7;
+  }
+}

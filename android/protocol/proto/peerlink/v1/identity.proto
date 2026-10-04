@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package peerlink.v1;
+
+import "peerlink/v1/common.proto";
+
+option java_package = "org.peerlink.protocol.v1";
+option java_multiple_files = true;
+
+enum DeviceType {
+  DEVICE_TYPE_UNSPECIFIED = 0;
+  DEVICE_TYPE_DESKTOP_WINDOWS = 1;
+  DEVICE_TYPE_DESKTOP_MACOS = 2;
+  DEVICE_TYPE_DESKTOP_LINUX = 3;
+  DEVICE_TYPE_MOBILE_ANDROID = 4;
+  DEVICE_TYPE_MOBILE_IOS = 5;
+  DEVICE_TYPE_HEADLESS_SERVER = 6;
+}
+
+enum KeyType {
+  KEY_TYPE_UNSPECIFIED = 0;
+  KEY_TYPE_ED25519 = 1;
+  KEY_TYPE_X25519 = 2;
+}
+
+message CryptographicKey {
+  KeyType key_type = 1;
+  bytes public_key_bytes = 2;
+  string key_id = 3;
+  int64 created_at_utc_ms = 4;
+}
+
+// Supabase account binding (strictly decoupled from device crypto identity)
+message AccountBinding {
+  string account_id = 1;
+  string account_email = 2;
+  int64 bound_at_utc_ms = 3;
+  bytes ownership_proof_signature = 4;
+}
+
+// Physical device identification
+message DeviceIdentity {
+  DeviceId device_id = 1;
+  string device_name = 2;
+  DeviceType device_type = 3;
+  string os_version = 4;
+  string app_version = 5;
+  CryptographicKey identity_key = 6;
+  AccountBinding account_binding = 7;
+  map<string, string> ownership_metadata = 8;
+}
+
+enum TrustLevel {
+  TRUST_LEVEL_UNSPECIFIED = 0;
+  TRUST_LEVEL_UNTRUSTED = 1;
+  TRUST_LEVEL_PAIRING_PENDING = 2;
+  TRUST_LEVEL_TRUSTED_PAIRED = 3;
+  TRUST_LEVEL_REVOKED = 4;
+  TRUST_LEVEL_BLOCKED = 5;
+}
+
+// Peer identification and cryptographic binding
+message PeerIdentity {
+  PeerId peer_id = 1;
+  DeviceId device_id = 2;
+  string display_name = 3;
+  CryptographicKey identity_key = 4;
+  string fingerprint_hex = 5;
+  TrustLevel trust_level = 6;
+  int64 paired_at_utc_ms = 7;
+  AccountBinding account_binding = 8;
+  map<string, string> metadata = 9;
+}
+
+// Explicit revocation record
+message RevocationRecord {
+  PeerId revoked_peer_id = 1;
+  PeerId revoked_by_peer_id = 2;
+  string reason = 3;
+  int64 revoked_at_utc_ms = 4;
+  bytes revocation_signature = 5;
+}
+
+// Device replacement and recovery authorization record
+message DeviceReplacementRecord {
+  DeviceId old_device_id = 1;
+  DeviceId new_device_id = 2;
+  PeerId peer_id = 3;
+  string replacement_token = 4;
+  int64 replaced_at_utc_ms = 5;
+  bytes authorization_signature = 6;
+}
+
+// Durable trust store snapshot for backup and restore
+message TrustStoreSnapshot {
+  int32 version = 1;
+  int64 snapshot_timestamp_utc_ms = 2;
+  repeated PeerIdentity trusted_peers = 3;
+  repeated RevocationRecord revocations = 4;
+  bytes integrity_signature = 5;
+}

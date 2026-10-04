@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# PeerLink Cross-Platform sync-shared CLI
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -n "${COMSPEC:-}" ] && command -v powershell.exe &>/dev/null; then
+    powershell.exe -ExecutionPolicy Bypass -File "$SCRIPT_DIR/sync-shared.ps1" "$@"
+else
+    exec bash "$SCRIPT_DIR/sync-shared.sh" "$@"
+fi

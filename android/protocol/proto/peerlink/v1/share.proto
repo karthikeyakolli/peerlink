@@ -1,0 +1,168 @@
+﻿syntax = "proto3";
+
+package peerlink.v1;
+
+import "peerlink/v1/common.proto";
+import "peerlink/v1/error.proto";
+import "peerlink/v1/access.proto";
+
+option java_package = "org.peerlink.protocol.v1";
+option java_multiple_files = true;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Share type semantics
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ShareType {
+  SHARE_TYPE_UNSPECIFIED = 0;
+  // Peer-specific: bound to explicit trusted peer ID(s)
+  SHARE_TYPE_PEER_SPECIFIC = 1;
+  // Temporary: scoped to a finite time window; unavailable when owner offline
+  SHARE_TYPE_TEMPORARY = 2;
+  // One-time: capability consumed after first successful complete operation
+  SHARE_TYPE_ONE_TIME = 3;
+  // Guest/browser: isolated, untrusted, no trusted-identity privileges
+  SHARE_TYPE_GUEST = 4;
+  // QR-link: opaque capability encoded for QR rendering
+  SHARE_TYPE_QR = 5;
+}
+
+enum ShareStatus {
+  SHARE_STATUS_UNSPECIFIED = 0;
+  SHARE_STATUS_ACTIVE = 1;
+  SHARE_STATUS_EXPIRED = 2;
+  SHARE_STATUS_REVOKED = 3;
+  SHARE_STATUS_CONSUMED = 4;   // one-time: completed
+  SHARE_STATUS_OWNER_OFFLINE = 5;
+}
+
+enum SharePermission {
+  SHARE_PERMISSION_UNSPECIFIED = 0;
+  SHARE_PERMISSION_BROWSE = 1;
+  SHARE_PERMISSION_SEARCH = 2;
+  SHARE_PERMISSION_PREVIEW = 3;
+  SHARE_PERMISSION_DOWNLOAD = 4;
+  SHARE_PERMISSION_DOWNLOAD_SINGLE = 5;  // exactly one file, for one-time shares
+}
+
+enum ShareAuditEvent {
+  SHARE_AUDIT_UNSPECIFIED = 0;
+  SHARE_AUDIT_CREATED = 1;
+  SHARE_AUDIT_CAPABILITY_ISSUED = 2;
+  SHARE_AUDIT_ACCESS_AUTHORIZED = 3;
+  SHARE_AUDIT_ACCESS_REJECTED = 4;
+  SHARE_AUDIT_REVOKED = 5;
+  SHARE_AUDIT_EXPIRED = 6;
+  SHARE_AUDIT_CONSUMED = 7;
+  SHARE_AUDIT_OPERATION_RETRY = 8;
+  SHARE_AUDIT_GRACE_PERIOD_STARTED = 9;
+  SHARE_AUDIT_GRACE_PERIOD_ENDED = 10;
+  SHARE_AUDIT_GUEST_ACCESS = 11;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Core domain objects
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Opaque capability token carried by the holder.
+// A share link is a capability, not a URL to cloud storage.
+message ShareCapabilityToken {
+  string token_id = 1;
+  string share_id = 2;
+  ShareType share_type = 3;
+  repeated SharePermission permissions = 4;
+  int64 issued_at_utc_ms = 5;
+  int64 expires_at_utc_ms = 6;   // 0 = no expiry
+  string bound_peer_id = 7;      // empty for guest/QR
+  bool is_guest_token = 8;
+  string hmac_signature_hex = 9;
+  string operation_id = 10;      // set for one-time tokens
+}
+
+// Represents a live share object on the owner's device.
+message ShareObject {
+  string share_id = 1;
+  string owner_peer_id = 2;
+  ShareType share_type = 3;
+  ShareStatus status = 4;
+  string display_label = 5;
+  repeated string allowed_peer_ids = 6;
+  repeated SharePermission permissions = 7;
+  int64 created_at_utc_ms = 8;
+  int64 expires_at_utc_ms = 9;   // 0 = no expiry
+  int64 grace_period_ms = 10;    // active-operation grace beyond expiry
+  bool is_one_time = 11;
+  string consumed_by_operation_id = 12;
+  bool revoked = 13;
+  int64 revoked_at_utc_ms = 14;
+  string revoke_reason = 15;
+  bool guest_allowed = 16;
+  string qr_payload = 17;        // populated for SHARE_TYPE_QR
+  int64 last_activity_utc_ms = 18;
+}
+
+// UI approval state surface (what the owner's UI shows)
+message ShareApprovalState {
+  string share_id = 1;
+  ShareStatus status = 2;
+  bool pending_owner_approval = 3;
+  bool owner_approved = 4;
+  bool owner_denied = 5;
+  string denial_reason = 6;
+  int64 approval_timestamp_utc_ms = 7;
+  repeated string pending_guest_requests = 8;
+}
+
+// Audit record for share lifecycle events
+message ShareAuditRecord {
+  int64 timestamp_utc_ms = 1;
+  string share_id = 2;
+  string actor_peer_id = 3;
+  ShareAuditEvent event = 4;
+  string operation_id = 5;
+  string detail = 6;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Protocol messages
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Request to use a share capability (sent by holder to owner)
+message ShareUseRequest {
+  string request_id = 1;
+  string token_id = 2;
+  string share_id = 3;
+  PeerId requester_peer_id = 4;
+  SharePermission requested_permission = 5;
+  string operation_id = 6;
+  int64 timestamp_utc_ms = 7;
+  bool is_guest = 8;
+}
+
+// Owner's response to a ShareUseRequest
+message ShareUseResponse {
+  string request_id = 1;
+  bool authorized = 2;
+  ShareStatus share_status = 3;
+  ErrorDetail error = 4;
+  int64 authorized_until_utc_ms = 5;
+  bool within_grace_period = 6;
+}
+
+// Revocation notice broadcast to known holders
+message ShareRevocationNotice {
+  string share_id = 1;
+  string owner_peer_id = 2;
+  string revoke_reason = 3;
+  int64 revoked_at_utc_ms = 4;
+  int64 active_grace_ends_at_utc_ms = 5;
+}
+
+// Wire envelope
+message ShareWireMessage {
+  oneof payload {
+    ShareUseRequest use_request = 1;
+    ShareUseResponse use_response = 2;
+    ShareRevocationNotice revocation_notice = 3;
+  }
+}

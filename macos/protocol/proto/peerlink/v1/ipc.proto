@@ -1,0 +1,200 @@
+syntax = "proto3";
+
+package peerlink.v1;
+
+import "peerlink/v1/common.proto";
+import "peerlink/v1/capability.proto";
+import "peerlink/v1/operation.proto";
+import "peerlink/v1/transfer.proto";
+
+option java_package = "org.peerlink.protocol.v1";
+option java_multiple_files = true;
+
+enum NodeExecutionStatus {
+  NODE_EXECUTION_STATUS_UNSPECIFIED = 0;
+  NODE_EXECUTION_STATUS_STARTING = 1;
+  NODE_EXECUTION_STATUS_RUNNING = 2;
+  NODE_EXECUTION_STATUS_DEGRADED = 3;
+  NODE_EXECUTION_STATUS_STOPPING = 4;
+  NODE_EXECUTION_STATUS_STOPPED = 5;
+}
+
+message AuthenticateIpcRequest {
+  string auth_token = 1;
+  int64 client_pid = 2;
+  string client_version = 3;
+}
+
+message AuthenticateIpcResponse {
+  bool authenticated = 1;
+  string session_token = 2;
+  string node_version = 3;
+  PeerId local_peer_id = 4;
+  string error_message = 5;
+  bool is_compatible = 6;
+  string min_compatible_version = 7;
+}
+
+message GetNodeStatusRequest {
+  string session_token = 1;
+}
+
+message GetNodeStatusResponse {
+  NodeExecutionStatus status = 1;
+  PeerId peer_id = 2;
+  int32 listen_port = 3;
+  repeated FeatureCapability supported_capabilities = 4;
+  int64 uptime_seconds = 5;
+  int64 memory_used_bytes = 6;
+  string node_version = 7;
+  int32 active_subscribers = 8;
+}
+
+message NodeEventSubscriptionRequest {
+  string session_token = 1;
+}
+
+message NodeHeartbeat {
+  int64 timestamp_utc_ms = 1;
+  NodeExecutionStatus status = 2;
+  int64 uptime_seconds = 3;
+  int64 memory_used_bytes = 4;
+  int64 sequence_number = 5;
+}
+
+message NodeEvent {
+  int64 timestamp_utc_ms = 1;
+  oneof event {
+    NodeHeartbeat heartbeat = 2;
+    OperationRecord operation_update = 3;
+    string security_alert = 4;
+    string lifecycle_event = 5;
+    TransferProgress transfer_progress = 6;
+    TransferCompletedReceipt transfer_receipt = 7;
+  }
+}
+
+message RestartNodeRequest {
+  string session_token = 1;
+  int32 delay_ms = 2;
+}
+
+message RestartNodeResponse {
+  bool accepted = 1;
+  string message = 2;
+}
+
+message StopNodeRequest {
+  string session_token = 1;
+}
+
+message StopNodeResponse {
+  bool accepted = 1;
+  string message = 2;
+}
+
+message InitiateSendRequest {
+  string session_token = 1;
+  PeerId target_peer_id = 2;
+  repeated string source_paths = 3;
+  string destination_folder = 4;
+  DuplicateDestinationPolicy duplicate_policy = 5;
+  string display_name = 6;
+}
+
+message InitiateSendResponse {
+  bool accepted = 1;
+  string transfer_id = 2;
+  OperationId operation_id = 3;
+  int64 total_bytes = 4;
+  int32 file_count = 5;
+  string error_message = 6;
+}
+
+message CancelTransferRequest {
+  string session_token = 1;
+  string transfer_id = 2;
+  string reason = 3;
+}
+
+message CancelTransferResponse {
+  bool accepted = 1;
+  string message = 2;
+}
+
+message GetTransferRequest {
+  string session_token = 1;
+  string transfer_id = 2;
+}
+
+message GetTransferResponse {
+  TransferDescriptor transfer_descriptor = 1;
+  TransferProgress progress = 2;
+  bool found = 3;
+}
+
+message ListTransfersRequest {
+  string session_token = 1;
+  bool active_only = 2;
+}
+
+message ListTransfersResponse {
+  repeated TransferProgress transfers = 1;
+}
+
+message RevealInFolderRequest {
+  string session_token = 1;
+  string file_or_folder_path = 2;
+}
+
+message RevealInFolderResponse {
+  bool opened = 1;
+  string error_message = 2;
+}
+
+message PauseTransferRequest {
+  string session_token = 1;
+  string transfer_id = 2;
+  string reason = 3;
+}
+
+message PauseTransferResponse {
+  bool accepted = 1;
+  string message = 2;
+}
+
+message ResumeTransferRequest {
+  string session_token = 1;
+  string transfer_id = 2;
+}
+
+message ResumeTransferResponse {
+  bool accepted = 1;
+  string message = 2;
+}
+
+message SetBandwidthLimitRequest {
+  string session_token = 1;
+  int64 max_bytes_per_sec = 2;
+}
+
+message SetBandwidthLimitResponse {
+  bool accepted = 1;
+  int64 current_limit_bps = 2;
+}
+
+service DesktopLocalNodeService {
+  rpc Authenticate(AuthenticateIpcRequest) returns (AuthenticateIpcResponse);
+  rpc GetStatus(GetNodeStatusRequest) returns (GetNodeStatusResponse);
+  rpc SubscribeEvents(NodeEventSubscriptionRequest) returns (stream NodeEvent);
+  rpc Restart(RestartNodeRequest) returns (RestartNodeResponse);
+  rpc Stop(StopNodeRequest) returns (StopNodeResponse);
+  rpc InitiateSend(InitiateSendRequest) returns (InitiateSendResponse);
+  rpc CancelTransfer(CancelTransferRequest) returns (CancelTransferResponse);
+  rpc PauseTransfer(PauseTransferRequest) returns (PauseTransferResponse);
+  rpc ResumeTransfer(ResumeTransferRequest) returns (ResumeTransferResponse);
+  rpc SetBandwidthLimit(SetBandwidthLimitRequest) returns (SetBandwidthLimitResponse);
+  rpc GetTransfer(GetTransferRequest) returns (GetTransferResponse);
+  rpc ListTransfers(ListTransfersRequest) returns (ListTransfersResponse);
+  rpc RevealInFolder(RevealInFolderRequest) returns (RevealInFolderResponse);
+}

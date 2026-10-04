@@ -1,0 +1,73 @@
+﻿syntax = "proto3";
+
+package peerlink.v1;
+
+option java_package = "org.peerlink.protocol.v1";
+option java_multiple_files = true;
+
+enum BackupTypeProto {
+  BACKUP_TYPE_UNSPECIFIED = 0;
+  BACKUP_TYPE_FULL = 1;
+  BACKUP_TYPE_INCREMENTAL = 2;
+  BACKUP_TYPE_DIFFERENTIAL = 3;
+}
+
+enum BackupStatusProto {
+  BACKUP_STATUS_UNSPECIFIED = 0;
+  BACKUP_STATUS_PENDING = 1;
+  BACKUP_STATUS_IN_PROGRESS = 2;
+  BACKUP_STATUS_COMPLETED = 3;
+  BACKUP_STATUS_FAILED = 4;
+  BACKUP_STATUS_CANCELLED = 5;
+  BACKUP_STATUS_VERIFYING = 6;
+}
+
+enum RestoreConflictPolicyProto {
+  RESTORE_CONFLICT_POLICY_UNSPECIFIED = 0;
+  RESTORE_CONFLICT_OVERWRITE_WITH_NEW_VERSION = 1;
+  RESTORE_CONFLICT_FAIL_ON_CONFLICT = 2;
+  RESTORE_CONFLICT_ALTERNATIVE_PATH = 3;
+}
+
+message HistoricalVersionProto {
+  string object_id = 1;
+  string relative_path = 2;
+  string content_hash = 3;
+  int64 size_bytes = 4;
+  int64 version_sequence = 5;
+  int64 captured_at_utc_ms = 6;
+  bool is_deleted = 7;
+  string storage_hash = 8;
+  bool is_encrypted = 9;
+  bool is_protected = 10;
+}
+
+message BackupManifestProto {
+  string backup_id = 1;
+  string job_id = 2;
+  BackupTypeProto backup_type = 3;
+  int64 snapshot_timestamp_utc_ms = 4;
+  string parent_backup_id = 5;
+  int64 total_files = 6;
+  int64 total_bytes = 7;
+  bool is_blind = 8;
+  string manifest_digest = 9;
+  repeated HistoricalVersionProto items = 10;
+}
+
+message RestorePlanProto {
+  string backup_id = 1;
+  string target_directory = 2;
+  RestoreConflictPolicyProto conflict_policy = 3;
+  repeated string selected_paths = 4;
+}
+
+message RestoreResultProto {
+  string restore_id = 1;
+  string backup_id = 2;
+  bool success = 3;
+  int64 restored_files_count = 4;
+  int64 restored_bytes = 5;
+  int64 created_versions_count = 6;
+  string error_message = 7;
+}
