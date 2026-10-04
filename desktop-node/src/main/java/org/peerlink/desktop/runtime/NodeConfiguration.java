@@ -23,7 +23,10 @@ public final class NodeConfiguration {
     public NodeConfiguration(Path dataDirectory, int ipcPort, String ipcAuthToken) {
         this.dataDirectory = Objects.requireNonNull(dataDirectory);
         this.ipcPort = ipcPort;
-        this.ipcAuthToken = Objects.requireNonNull(ipcAuthToken);
+        if (ipcAuthToken == null || ipcAuthToken.isBlank()) {
+            throw new IllegalArgumentException("ipcAuthToken must not be blank");
+        }
+        this.ipcAuthToken = ipcAuthToken;
     }
 
     public static NodeConfiguration loadOrCreate(Path dataDir, int port) throws IOException {
@@ -39,6 +42,12 @@ public final class NodeConfiguration {
             Files.writeString(tokenFile, token);
         } else if (Files.exists(tokenFile)) {
             token = Files.readString(tokenFile).trim();
+            if (token.isBlank()) {
+                byte[] randomBytes = new byte[32];
+                new SecureRandom().nextBytes(randomBytes);
+                token = Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes);
+                Files.writeString(tokenFile, token);
+            }
         } else {
             byte[] randomBytes = new byte[32];
             new SecureRandom().nextBytes(randomBytes);

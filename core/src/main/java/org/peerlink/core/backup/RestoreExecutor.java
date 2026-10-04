@@ -53,9 +53,32 @@ public final class RestoreExecutor {
                     throw new IOException("Content verification failed for " + item.getRelativePath());
                 }
 
-                Path destFile = plan.targetDirectory().resolve(item.getRelativePath());
+                // Validate relative path against traversal attacks
+                String relPath = item.getRelativePath();
+                if (relPath == null || relPath.isBlank() || relPath.contains("\0") || relPath.contains(":")
+                        || relPath.startsWith("/") || relPath.startsWith("\\")
+                        || (relPath.length() >= 2 && Character.isLetter(relPath.charAt(0)) && relPath.charAt(1) == ':')) {
+                    throw new SecurityException("Illegal characters or absolute prefix in relative path: " + relPath);
+                }
+
+                Path normalizedRel = Path.of(relPath).normalize();
+                for (Path part : normalizedRel) {
+                    if ("..".equals(part.toString())) {
+                        throw new SecurityException("Parent directory traversal prohibited: " + relPath);
+                    }
+                }
+
+                Path canonicalTarget = plan.targetDirectory().toAbsolutePath().normalize();
+                Path destFile = canonicalTarget.resolve(normalizedRel).normalize();
+                if (!destFile.startsWith(canonicalTarget)) {
+                    throw new SecurityException("Resolved restore path escapes target directory: " + relPath);
+                }
+
                 if (Files.exists(destFile) && plan.conflictPolicy() == RestoreConflictPolicy.RESTORE_TO_ALTERNATIVE_PATH) {
-                    destFile = plan.targetDirectory().resolve(item.getRelativePath() + ".restored." + System.currentTimeMillis());
+                    destFile = canonicalTarget.resolve(normalizedRel + ".restored." + System.currentTimeMillis()).normalize();
+                    if (!destFile.startsWith(canonicalTarget)) {
+                        throw new SecurityException("Alternative restore path escapes target directory: " + relPath);
+                    }
                 }
 
                 if (destFile.getParent() != null) {

@@ -4,6 +4,7 @@ import org.peerlink.protocol.v1.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.*;
@@ -113,8 +114,12 @@ public final class FileManifestBuilder {
     }
 
     private TransferItem buildFileItem(Path file, String relativePath) throws IOException {
-        long size = Files.size(file);
-        long modifiedTime = Files.getLastModifiedTime(file).toMillis();
+        return buildFileItem(file, relativePath, null);
+    }
+
+    private TransferItem buildFileItem(Path file, String relativePath, BasicFileAttributes attrs) throws IOException {
+        long size = attrs != null ? attrs.size() : Files.size(file);
+        long modifiedTime = attrs != null ? attrs.lastModifiedTime().toMillis() : Files.getLastModifiedTime(file).toMillis();
         String sha256 = calculateSha256Hex(file);
 
         return TransferItem.newBuilder()
@@ -151,7 +156,7 @@ public final class FileManifestBuilder {
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                 Path relative = rootDir.relativize(file);
                 String relPathStr = prefixName + "/" + relative.toString().replace('\\', '/');
-                results.add(buildFileItem(file, relPathStr));
+                results.add(buildFileItem(file, relPathStr, attrs));
                 return FileVisitResult.CONTINUE;
             }
         });
@@ -160,7 +165,7 @@ public final class FileManifestBuilder {
     }
 
     /**
-     * Compute SHA-256 checksum using streaming 64KB buffers.
+     * Compute SHA-256 checksum using streaming 128KB buffered streams.
      * Never loads the full file into memory. Correctly hashes 0-byte files.
      */
     public static String calculateSha256Hex(Path path) throws IOException {
@@ -171,8 +176,8 @@ public final class FileManifestBuilder {
             throw new IllegalStateException("SHA-256 algorithm not available", e);
         }
 
-        try (InputStream in = Files.newInputStream(path)) {
-            byte[] buffer = new byte[64 * 1024];
+        try (InputStream in = new BufferedInputStream(Files.newInputStream(path), 128 * 1024)) {
+            byte[] buffer = new byte[128 * 1024];
             int read;
             while ((read = in.read(buffer)) != -1) {
                 digest.update(buffer, 0, read);
@@ -197,12 +202,6 @@ public final class FileManifestBuilder {
     }
 
     private static String toHexString(byte[] hash) {
-        StringBuilder hexString = new StringBuilder(2 * hash.length);
-        for (byte b : hash) {
-            String hex = Integer.toHexString(0xff & b);
-            if (hex.length() == 1) hexString.append('0');
-            hexString.append(hex);
-        }
-        return hexString.toString();
+        return java.util.HexFormat.of().formatHex(hash);
     }
 }

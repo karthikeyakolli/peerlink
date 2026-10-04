@@ -164,6 +164,51 @@ class _FilesScreenState extends State<FilesScreen> {
     }
   }
 
+  Future<void> _pauseTransfer(String transferId) async {
+    try {
+      final res = await _client.pauseTransfer(transferId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res.accepted
+                ? 'Transfer paused: ${res.message}'
+                : 'Failed to pause: ${res.message}'),
+          ),
+        );
+        _refreshTransfers();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error pausing transfer: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _resumeTransfer(String transferId) async {
+    try {
+      final res = await _client.resumeTransfer(transferId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res.accepted
+                ? 'Transfer resumed: ${res.message}'
+                : 'Failed to resume: ${res.message}'),
+            backgroundColor: Colors.green.shade700,
+          ),
+        );
+        _refreshTransfers();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error resuming transfer: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _revealInFolder(String path) async {
     try {
       final res = await _client.revealInFolder(path);
@@ -206,14 +251,17 @@ class _FilesScreenState extends State<FilesScreen> {
       case TransferState.TRANSFER_STATE_COMMITTING:
       case TransferState.TRANSFER_STATE_VERIFYING:
         return Colors.blue;
+      case TransferState.TRANSFER_STATE_PAUSED:
+        return Colors.amber.shade800;
       case TransferState.TRANSFER_STATE_PREPARING:
       case TransferState.TRANSFER_STATE_CONNECTING:
       case TransferState.TRANSFER_STATE_RECEIVED:
         return Colors.orange;
       case TransferState.TRANSFER_STATE_CANCELLED:
         return Colors.grey;
-      case TransferState.TRANSFER_STATE_FAILED:
       case TransferState.TRANSFER_STATE_OUTCOME_UNKNOWN:
+        return Colors.deepPurple;
+      case TransferState.TRANSFER_STATE_FAILED:
       default:
         return Colors.red;
     }
@@ -434,9 +482,12 @@ class _FilesScreenState extends State<FilesScreen> {
 
     final isTerminated = t.state == TransferState.TRANSFER_STATE_COMPLETED ||
         t.state == TransferState.TRANSFER_STATE_FAILED ||
-        t.state == TransferState.TRANSFER_STATE_CANCELLED;
+        t.state == TransferState.TRANSFER_STATE_CANCELLED ||
+        t.state == TransferState.TRANSFER_STATE_OUTCOME_UNKNOWN;
 
     final isCompleted = t.state == TransferState.TRANSFER_STATE_COMPLETED;
+    final isPaused = t.state == TransferState.TRANSFER_STATE_PAUSED;
+    final isOutcomeUnknown = t.state == TransferState.TRANSFER_STATE_OUTCOME_UNKNOWN;
 
     return Card(
       elevation: 2,
@@ -460,19 +511,22 @@ class _FilesScreenState extends State<FilesScreen> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: stateColor.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: stateColor),
-                  ),
-                  child: Text(
-                    t.state.name.replaceFirst('TRANSFER_STATE_', ''),
-                    style: TextStyle(
-                      color: stateColor,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
+                Semantics(
+                  label: 'Transfer state is ${t.state.name.replaceFirst("TRANSFER_STATE_", "")}',
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: stateColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: stateColor),
+                    ),
+                    child: Text(
+                      t.state.name.replaceFirst('TRANSFER_STATE_', ''),
+                      style: TextStyle(
+                        color: stateColor,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
                     ),
                   ),
                 ),
@@ -505,23 +559,107 @@ class _FilesScreenState extends State<FilesScreen> {
                 ),
                 Text(
                   isTerminated
-                      ? (isCompleted ? 'Verified SHA-256 ✓' : 'Terminated')
-                      : _formatSpeed(t.speedBps.toDouble()),
+                      ? (isCompleted
+                          ? 'Verified SHA-256 ✓'
+                          : (isOutcomeUnknown ? 'Outcome Unconfirmed' : 'Terminated'))
+                      : (isPaused ? 'Paused' : _formatSpeed(t.speedBps.toDouble())),
                   style: theme.textTheme.bodySmall?.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: isCompleted ? Colors.green : null,
+                    color: isCompleted
+                        ? Colors.green
+                        : (isPaused ? Colors.amber.shade900 : null),
                   ),
                 ),
               ],
             ),
-            if (t.hasError() && t.error.humanSummary.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                t.error.humanSummary,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: t.state == TransferState.TRANSFER_STATE_FAILED
-                      ? Colors.red
-                      : theme.colorScheme.onSurfaceVariant,
+            if (isOutcomeUnknown) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.deepPurple.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.deepPurple.shade200),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.help_outline_rounded, color: Colors.deepPurple.shade700, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Outcome Unconfirmed (Network Interruption)',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.deepPurple.shade900,
+                              fontSize: 13,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Data was staged remotely, but the final confirmation was interrupted. Do NOT re-send blindly to avoid duplicate copies. Verify remote destination or click "Reconcile Status" below.',
+                            style: TextStyle(color: Colors.deepPurple.shade900, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            if (t.hasError()) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (t.error.humanSummary.isNotEmpty)
+                      Row(
+                        children: [
+                          Icon(Icons.error_outline_rounded, size: 18, color: Colors.red.shade800),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              t.error.humanSummary,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.red.shade900,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    if (t.error.humanExplanation.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Why: ${t.error.humanExplanation}',
+                        style: TextStyle(color: Colors.red.shade800, fontSize: 12),
+                      ),
+                    ],
+                    if (t.error.suggestedRecoveryAction.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Action: ${t.error.suggestedRecoveryAction}',
+                        style: TextStyle(
+                          color: Colors.red.shade900,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ],
@@ -529,13 +667,36 @@ class _FilesScreenState extends State<FilesScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                if (!isTerminated)
+                if (isPaused) ...[
+                  FilledButton.tonalIcon(
+                    onPressed: () => _resumeTransfer(t.transferId),
+                    icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                    label: const Text('Resume'),
+                  ),
+                  const SizedBox(width: 8),
+                ] else if (!isTerminated) ...[
+                  OutlinedButton.icon(
+                    onPressed: () => _pauseTransfer(t.transferId),
+                    icon: const Icon(Icons.pause_rounded, size: 18),
+                    label: const Text('Pause'),
+                    style: OutlinedButton.styleFrom(foregroundColor: Colors.amber.shade900),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                if (!isTerminated && !isPaused)
                   OutlinedButton.icon(
                     onPressed: () => _cancelTransfer(t.transferId),
                     icon: const Icon(Icons.cancel_outlined, size: 18),
                     label: const Text('Cancel'),
                     style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
                   ),
+                if (isOutcomeUnknown) ...[
+                  FilledButton.tonalIcon(
+                    onPressed: _refreshTransfers,
+                    icon: const Icon(Icons.sync_problem_rounded, size: 18),
+                    label: const Text('Reconcile Status'),
+                  ),
+                ],
                 if (isCompleted && t.destinationPath.isNotEmpty) ...[
                   const SizedBox(width: 8),
                   FilledButton.tonalIcon(

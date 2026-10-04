@@ -29,21 +29,32 @@ public class NettyTcpTlsTransportProvider implements TransportProvider {
     private final EventLoopGroup bossGroup;
     private final EventLoopGroup workerGroup;
     private final boolean ownsEventLoops;
+    private final String bindHost;
 
     private Channel serverChannel;
     private int listeningPort = 0;
     private final AtomicBoolean isListening = new AtomicBoolean(false);
 
     public NettyTcpTlsTransportProvider() {
+        this("0.0.0.0");
+    }
+
+    public NettyTcpTlsTransportProvider(String bindHost) {
         this.bossGroup = new NioEventLoopGroup(1);
         this.workerGroup = new NioEventLoopGroup(2);
         this.ownsEventLoops = true;
+        this.bindHost = bindHost != null ? bindHost : "0.0.0.0";
     }
 
     public NettyTcpTlsTransportProvider(EventLoopGroup bossGroup, EventLoopGroup workerGroup) {
+        this(bossGroup, workerGroup, "0.0.0.0");
+    }
+
+    public NettyTcpTlsTransportProvider(EventLoopGroup bossGroup, EventLoopGroup workerGroup, String bindHost) {
         this.bossGroup = bossGroup;
         this.workerGroup = workerGroup;
         this.ownsEventLoops = false;
+        this.bindHost = bindHost != null ? bindHost : "0.0.0.0";
     }
 
     @Override
@@ -95,7 +106,7 @@ public class NettyTcpTlsTransportProvider implements TransportProvider {
                     .childOption(ChannelOption.SO_KEEPALIVE, true)
                     .childOption(ChannelOption.TCP_NODELAY, true);
 
-            ChannelFuture f = b.bind(new InetSocketAddress("127.0.0.1", port)).sync();
+            ChannelFuture f = b.bind(new InetSocketAddress(bindHost, port)).sync();
             this.serverChannel = f.channel();
             this.listeningPort = ((InetSocketAddress) serverChannel.localAddress()).getPort();
             log.info("Netty TCP/TLS transport listening on port {}", listeningPort);

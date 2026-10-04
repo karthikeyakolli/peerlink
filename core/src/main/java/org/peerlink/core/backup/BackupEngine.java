@@ -166,8 +166,26 @@ public final class BackupEngine {
 
         Map<ObjectIdentity, HistoricalVersion> items = new HashMap<>();
 
+        Path canonicalSource = sourceDir.toAbsolutePath().normalize();
         for (String relPath : targetRelativePaths) {
-            Path file = sourceDir.resolve(relPath);
+            if (relPath == null || relPath.isBlank() || relPath.contains("\0") || relPath.contains(":")
+                    || relPath.startsWith("/") || relPath.startsWith("\\")
+                    || (relPath.length() >= 2 && Character.isLetter(relPath.charAt(0)) && relPath.charAt(1) == ':')) {
+                throw new SecurityException("Illegal path traversal sequence in partial backup: " + relPath);
+            }
+
+            Path normalizedRel = Path.of(relPath).normalize();
+            for (Path part : normalizedRel) {
+                if ("..".equals(part.toString())) {
+                    throw new SecurityException("Parent directory traversal prohibited: " + relPath);
+                }
+            }
+
+            Path file = canonicalSource.resolve(normalizedRel).normalize();
+            if (!file.startsWith(canonicalSource)) {
+                throw new SecurityException("Partial backup path escaped source directory: " + relPath);
+            }
+
             if (!Files.exists(file) || !Files.isRegularFile(file)) continue;
 
             byte[] content = Files.readAllBytes(file);

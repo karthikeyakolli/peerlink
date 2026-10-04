@@ -88,7 +88,12 @@ public final class DesktopLocalNodeServiceImpl extends DesktopLocalNodeServiceGr
             return;
         }
 
-        boolean validToken = expectedAuthToken.equals(request.getAuthToken());
+        boolean validToken = expectedAuthToken != null && !expectedAuthToken.isBlank()
+                && request.getAuthToken() != null
+                && java.security.MessageDigest.isEqual(
+                        expectedAuthToken.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                        request.getAuthToken().getBytes(java.nio.charset.StandardCharsets.UTF_8)
+                );
         if (validToken) {
             log.info("Client authenticated successfully (pid: {}, version: {})", request.getClientPid(), request.getClientVersion());
             AuthenticateIpcResponse response = AuthenticateIpcResponse.newBuilder()

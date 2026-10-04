@@ -4,10 +4,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.RandomAccessFile;
+import java.nio.channels.FileChannel;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.DosFileAttributeView;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Manages isolated staging directories for receiving incoming transfer payloads.
@@ -24,7 +26,11 @@ import java.nio.file.attribute.DosFileAttributeView;
 public final class StagingDirectoryManager {
     private static final Logger log = LoggerFactory.getLogger(StagingDirectoryManager.class);
 
+    private static final boolean SUPPORTS_POSIX =
+            FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+
     private final Path stagingRoot;
+    private final Map<Path, FileChannel> openChannels = new ConcurrentHashMap<>();
 
     public StagingDirectoryManager(Path stagingRoot) {
         this.stagingRoot = stagingRoot;
@@ -63,6 +69,7 @@ public final class StagingDirectoryManager {
     /**
      * Write a received chunk to the staged partial file at the given offset.
      * Optionally validates chunk SHA-256 before writing to disk.
+     * Reuses open FileChannel for high-throughput streaming.
      *
      * @throws CorruptChunkException if chunkSha256 is present and does not match computed digest
      */
@@ -84,14 +91,16 @@ public final class StagingDirectoryManager {
         }
 
         Path partPath = getStagedPartPath(transferId, itemIndex);
-        if (!Files.exists(partPath.getParent())) {
-            Files.createDirectories(partPath.getParent());
+        FileChannel channel = openChannels.get(partPath);
+        if (channel == null || !channel.isOpen()) {
+            if (!Files.exists(partPath.getParent())) {
+                Files.createDirectories(partPath.getParent());
+            }
+            channel = FileChannel.open(partPath, StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE);
+            openChannels.put(partPath, channel);
         }
 
-        try (RandomAccessFile raf = new RandomAccessFile(partPath.toFile(), "rw")) {
-            raf.seek(offsetBytes);
-            raf.write(data);
-        }
+        channel.write(java.nio.ByteBuffer.wrap(data), offsetBytes);
     }
 
     public synchronized void writeChunk(String transferId, int itemIndex, long offsetBytes, byte[] data)
@@ -103,8 +112,20 @@ public final class StagingDirectoryManager {
         }
     }
 
+    private void closeChannel(Path partPath) {
+        FileChannel ch = openChannels.remove(partPath);
+        if (ch != null && ch.isOpen()) {
+            try {
+                ch.force(false);
+                ch.close();
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
     public synchronized long getStagedFileSize(String transferId, int itemIndex) {
         Path partPath = getStagedPartPath(transferId, itemIndex);
+        closeChannel(partPath);
         if (Files.exists(partPath)) {
             try {
                 return Files.size(partPath);
@@ -121,19 +142,14 @@ public final class StagingDirectoryManager {
 
     /**
      * Verify that the staged item matches the expected SHA-256 digest.
-     *
-     * @param transferId The transfer session ID
-     * @param itemIndex The index of the item in the manifest
-     * @param expectedSha256 Expected SHA-256 hexadecimal string
-     * @param relativePath Relative path for diagnostic reporting
-     * @return Calculated SHA-256 string
-     * @throws HashMismatchException if the checksum does not match
-     * @throws IOException if the staged file cannot be read
+     * Flushes and closes any active open FileChannel handle prior to hashing.
      */
     public String verifyStagedItem(String transferId, int itemIndex, String expectedSha256, String relativePath)
             throws HashMismatchException, IOException {
 
         Path partPath = getStagedPartPath(transferId, itemIndex);
+        closeChannel(partPath);
+
         if (!Files.exists(partPath)) {
             // For a 0-byte file that received no chunks, create an empty file if needed
             Files.createFile(partPath);
@@ -159,6 +175,8 @@ public final class StagingDirectoryManager {
     public synchronized void commitItem(String transferId, int itemIndex, Path finalDestination)
             throws IOException {
         Path partPath = getStagedPartPath(transferId, itemIndex);
+        closeChannel(partPath);
+
         if (!Files.exists(partPath)) {
             throw new NoSuchFileException("Staged file not found for commit: " + partPath);
         }
@@ -176,13 +194,13 @@ public final class StagingDirectoryManager {
         }
 
         // Security check: strip execute permissions on POSIX systems
-        try {
-            if (Files.getFileStore(finalDestination).supportsFileAttributeView("posix")) {
+        if (SUPPORTS_POSIX) {
+            try {
                 Files.setPosixFilePermissions(finalDestination,
                         java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--r--"));
+            } catch (Exception ignored) {
+                // Non-POSIX systems ignore
             }
-        } catch (Exception ignored) {
-            // Windows / non-POSIX systems ignore
         }
 
         log.info("Committed verified item to final destination: {}", finalDestination);
@@ -193,6 +211,18 @@ public final class StagingDirectoryManager {
      */
     public synchronized void cleanupStaging(String transferId) {
         Path dir = getTransferStagingDir(transferId);
+
+        openChannels.keySet().removeIf(p -> {
+            if (p.startsWith(dir)) {
+                FileChannel ch = openChannels.get(p);
+                if (ch != null && ch.isOpen()) {
+                    try { ch.close(); } catch (IOException ignored) {}
+                }
+                return true;
+            }
+            return false;
+        });
+
         if (!Files.exists(dir)) {
             return;
         }

@@ -50,14 +50,14 @@ class MainNavigationShell extends StatefulWidget {
 class _MainNavigationShellState extends State<MainNavigationShell> {
   int _currentIndex = 0;
 
-  static const List<Widget> _screens = [
-    HomeScreen(),
-    DevicesScreen(),
-    FilesScreen(),
-    ActivityScreen(),
-    SpacesScreen(),
-    SearchScreen(),
-    SettingsScreen(),
+  List<Widget> get _screens => [
+    HomeScreen(onNavigate: (index) => setState(() => _currentIndex = index)),
+    const DevicesScreen(),
+    const FilesScreen(),
+    const ActivityScreen(),
+    const SpacesScreen(),
+    const SearchScreen(),
+    const SettingsScreen(),
   ];
 
   @override

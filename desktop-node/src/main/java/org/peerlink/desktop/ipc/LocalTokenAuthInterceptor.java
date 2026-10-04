@@ -18,6 +18,9 @@ public final class LocalTokenAuthInterceptor implements ServerInterceptor {
     private final String expectedToken;
 
     public LocalTokenAuthInterceptor(String expectedToken) {
+        if (expectedToken == null || expectedToken.isBlank()) {
+            throw new IllegalArgumentException("expectedToken must not be blank");
+        }
         this.expectedToken = expectedToken;
     }
 
@@ -35,7 +38,13 @@ public final class LocalTokenAuthInterceptor implements ServerInterceptor {
         }
 
         String providedToken = headers.get(AUTH_HEADER);
-        if (providedToken == null || !providedToken.equals(expectedToken)) {
+        boolean matches = providedToken != null &&
+                java.security.MessageDigest.isEqual(
+                        providedToken.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                        expectedToken.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+                );
+
+        if (!matches) {
             log.warn("Rejected unauthorized local IPC call to {} from local client", methodName);
             call.close(Status.UNAUTHENTICATED.withDescription("Invalid or missing local IPC auth token"), new Metadata());
             return new ServerCall.Listener<>() {};

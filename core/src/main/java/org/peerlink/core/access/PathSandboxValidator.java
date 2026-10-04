@@ -119,6 +119,25 @@ public final class PathSandboxValidator {
             } catch (IOException e) {
                 throw new PathTraversalException("Failed to resolve real path: " + raw, e);
             }
+        } else {
+            // Verify existing ancestors do not escape through symlinks/junctions
+            Path existingAncestor = resolved.getParent();
+            while (existingAncestor != null && !Files.exists(existingAncestor, LinkOption.NOFOLLOW_LINKS)) {
+                existingAncestor = existingAncestor.getParent();
+            }
+            if (existingAncestor != null) {
+                try {
+                    Path realAncestor = existingAncestor.toRealPath();
+                    if (!realAncestor.startsWith(canonicalRoot)) {
+                        throw new PathTraversalException("Ancestor symlink escapes share boundary: " + raw + " -> " + realAncestor);
+                    }
+                    if (Files.isSymbolicLink(existingAncestor) && !allowSymlinksWithinRoot) {
+                        throw new PathTraversalException("Symlinks are disallowed by policy: " + raw);
+                    }
+                } catch (IOException e) {
+                    throw new PathTraversalException("Failed to resolve real path of ancestor: " + raw, e);
+                }
+            }
         }
 
         return resolved;

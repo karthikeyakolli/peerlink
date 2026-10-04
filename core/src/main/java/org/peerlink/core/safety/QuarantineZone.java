@@ -45,7 +45,29 @@ public final class QuarantineZone {
     }
 
     public Path commitFile(QuarantineRecord record, Path destinationDirectory) throws IOException {
-        Path targetPath = destinationDirectory.resolve(record.originalRelativePath());
+        if (record.status() == QuarantineRecord.QuarantineStatus.QUARANTINED_MALICIOUS) {
+            throw new SecurityException("Cannot commit malicious file from quarantine: " + record.quarantineId());
+        }
+        String rawRel = record.originalRelativePath();
+        if (rawRel == null || rawRel.isBlank() || rawRel.contains("\0") || rawRel.contains(":")
+                || rawRel.startsWith("/") || rawRel.startsWith("\\")
+                || (rawRel.length() >= 2 && Character.isLetter(rawRel.charAt(0)) && rawRel.charAt(1) == ':')) {
+            throw new SecurityException("Path traversal attempt in quarantine record: " + rawRel);
+        }
+
+        Path normalizedRel = Path.of(rawRel).normalize();
+        for (Path part : normalizedRel) {
+            if ("..".equals(part.toString())) {
+                throw new SecurityException("Parent directory traversal prohibited: " + rawRel);
+            }
+        }
+
+        Path canonicalDest = destinationDirectory.toAbsolutePath().normalize();
+        Path targetPath = canonicalDest.resolve(normalizedRel).normalize();
+        if (!targetPath.startsWith(canonicalDest)) {
+            throw new SecurityException("Committed path escapes destination directory: " + rawRel);
+        }
+
         if (targetPath.getParent() != null) {
             Files.createDirectories(targetPath.getParent());
         }

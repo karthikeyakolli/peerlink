@@ -360,6 +360,35 @@ class NodeIpcClient {
     return await _stub!.cancelTransfer(req, options: options);
   }
 
+  Future<PauseTransferResponse> pauseTransfer(String transferId, {String reason = 'User paused'}) async {
+    if (_stub == null || _sessionToken == null) {
+      throw StateError('Local Node IPC not connected or authenticated');
+    }
+    final options = CallOptions(
+      metadata: {'x-peerlink-auth-token': _sessionToken!},
+      timeout: const Duration(seconds: 10),
+    );
+    final req = PauseTransferRequest()
+      ..sessionToken = _sessionToken!
+      ..transferId = transferId
+      ..reason = reason;
+    return await _stub!.pauseTransfer(req, options: options);
+  }
+
+  Future<ResumeTransferResponse> resumeTransfer(String transferId) async {
+    if (_stub == null || _sessionToken == null) {
+      throw StateError('Local Node IPC not connected or authenticated');
+    }
+    final options = CallOptions(
+      metadata: {'x-peerlink-auth-token': _sessionToken!},
+      timeout: const Duration(seconds: 10),
+    );
+    final req = ResumeTransferRequest()
+      ..sessionToken = _sessionToken!
+      ..transferId = transferId;
+    return await _stub!.resumeTransfer(req, options: options);
+  }
+
   Future<GetTransferResponse> getTransfer(String transferId) async {
     if (_stub == null || _sessionToken == null) {
       throw StateError('Local Node IPC not connected or authenticated');

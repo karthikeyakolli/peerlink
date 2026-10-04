@@ -51,7 +51,7 @@ public final class LocalSqliteStorage implements OperationJournal, Closeable {
         this.connection = DriverManager.getConnection(url);
         initPragmas();
         migrations.applyMigrations(connection);
-        this.objectIndex = new ObjectIndexRepository(this.connection);
+        this.objectIndex = new ObjectIndexRepository(this.connection, this);
         log.info("LocalSqliteStorage ready at {} (schema v{})",
                 dbPath, DatabaseMigrationManager.CURRENT_SCHEMA_VERSION);
     }
