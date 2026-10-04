@@ -3,12 +3,12 @@
 ## Project Overview
 The PeerLink control plane has been deployed and migrated to the live online Supabase cloud infrastructure.
 
-- **Project ID**: `kfoeqywychjzudmrlxui`
+- **Project ID**: `<YOUR_PROJECT_ID>`
 - **Project Name**: `PeerLink`
 - **Region**: `ap-south-1` (Asia South)
 - **Status**: `ACTIVE_HEALTHY`
-- **API URL**: `https://kfoeqywychjzudmrlxui.supabase.co`
-- **Database Host**: `db.kfoeqywychjzudmrlxui.supabase.co`
+- **API URL**: `https://<YOUR_PROJECT_ID>.supabase.co`
+- **Database Host**: `db.<YOUR_PROJECT_ID>.supabase.co`
 - **PostgreSQL Version**: `17`
 
 ---
@@ -16,9 +16,9 @@ The PeerLink control plane has been deployed and migrated to the live online Sup
 ## Client API Credentials
 
 ```ini
-SUPABASE_URL=https://kfoeqywychjzudmrlxui.supabase.co
-SUPABASE_PUBLISHABLE_KEY=sb_publishable_NPeFPDaTxRtvSZ2QxX--kA_oRVICopY
-SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtmb2VxeXd5Y2hqenVkbXJseHVpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEwMzU4OTUsImV4cCI6MjEwNjYxMTg5NX0.FPBXlNO-nhY6AyS2D8on0wg1Wl8BMpLVzl53rLMFsI8
+SUPABASE_URL=https://<YOUR_PROJECT_ID>.supabase.co
+SUPABASE_PUBLISHABLE_KEY=sb_publishable_<YOUR_KEY>
+SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.<ANON_KEY_PAYLOAD>.<ANON_KEY_SIGNATURE>
 ```
 
 > [!IMPORTANT]
