@@ -1,0 +1,80 @@
+syntax = "proto3";
+package peerlink.v1;
+option java_package = "org.peerlink.protocol.v1";
+option java_multiple_files = true;
+
+// Sync mode determining directionality
+enum SyncModeProto {
+  SYNC_MODE_UNSPECIFIED = 0;
+  SYNC_MODE_BIDIRECTIONAL = 1;
+  SYNC_MODE_ONE_WAY_REPLICATION = 2;
+  SYNC_MODE_RECEIVE_ONLY_IMPORT = 3;
+  SYNC_MODE_EXACT_MIRROR = 4;
+}
+
+enum SyncConflictType {
+  SYNC_CONFLICT_UNSPECIFIED = 0;
+  SYNC_CONFLICT_CONCURRENT_CONTENT_EDIT = 1;
+  SYNC_CONFLICT_DELETE_VS_MODIFY = 2;
+  SYNC_CONFLICT_CONCURRENT_RENAME = 3;
+  SYNC_CONFLICT_CONCURRENT_MOVE = 4;
+  SYNC_CONFLICT_BOTH_CREATED_SAME_PATH = 5;
+  SYNC_CONFLICT_TOMBSTONE_VS_NEW_OBJECT = 6;
+}
+
+enum SyncConflictResolution {
+  SYNC_RESOLUTION_DEFERRED = 0;
+  SYNC_RESOLUTION_KEEP_LOCAL = 1;
+  SYNC_RESOLUTION_KEEP_REMOTE = 2;
+  SYNC_RESOLUTION_KEEP_BOTH = 3;
+  SYNC_RESOLUTION_MERGE = 4;
+}
+
+message SyncObjectDescriptor {
+  string object_id = 1;
+  string relative_path = 2;
+  string content_hash = 3;
+  int64 size_bytes = 4;
+  int64 last_modified_hint_ms = 5;
+  bool is_directory = 6;
+  map<string, int64> causal_clock = 7;
+  int64 content_version_seq = 8;
+  int64 metadata_version_seq = 9;
+  bool deleted = 10;
+}
+
+message SyncTombstone {
+  string object_id = 1;
+  string deleted_at_relative_path = 2;
+  string deleting_peer_id = 3;
+  int64 deleted_at_utc_ms = 4;
+  map<string, int64> deletion_causal_clock = 5;
+}
+
+message SyncManifestMessage {
+  string peer_id = 1;
+  string session_id = 2;
+  repeated SyncObjectDescriptor objects = 3;
+  repeated SyncTombstone tombstones = 4;
+  map<string, int64> manifest_causal_clock = 5;
+}
+
+message SyncConflictNotice {
+  string session_id = 1;
+  string object_id = 2;
+  SyncConflictType conflict_type = 3;
+  SyncObjectDescriptor local_version = 4;
+  SyncObjectDescriptor remote_version = 5;
+}
+
+message SyncConflictResolutionDecision {
+  string session_id = 1;
+  string object_id = 2;
+  SyncConflictResolution resolution = 3;
+}
+
+message SyncMassChangeHold {
+  string session_id = 1;
+  repeated string reasons = 2;
+  int64 held_at_utc_ms = 3;
+}

@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package peerlink.v1;
+
+import "peerlink/v1/common.proto";
+import "peerlink/v1/error.proto";
+import "peerlink/v1/object_reference.proto";
+
+option java_package = "org.peerlink.protocol.v1";
+option java_multiple_files = true;
+
+enum OperationState {
+  OPERATION_STATE_UNSPECIFIED = 0;
+  OPERATION_STATE_CREATED = 1;
+  OPERATION_STATE_VALIDATED = 2;
+  OPERATION_STATE_AUTHORIZED = 3;
+  OPERATION_STATE_EXECUTING = 4;
+  OPERATION_STATE_WAITING = 5;
+  OPERATION_STATE_COMMITTED = 6;
+  OPERATION_STATE_FAILED = 7;
+  OPERATION_STATE_CANCELLED = 8;
+  OPERATION_STATE_OUTCOME_UNKNOWN = 9;
+  OPERATION_STATE_RECOVERY_REQUIRED = 10;
+}
+
+enum OperationIntent {
+  OPERATION_INTENT_UNSPECIFIED = 0;
+  OPERATION_INTENT_SEND = 1;
+  OPERATION_INTENT_ACCESS = 2;
+  OPERATION_INTENT_SYNC = 3;
+  OPERATION_INTENT_BACKUP = 4;
+  OPERATION_INTENT_CONNECT = 5;
+}
+
+// Durable, idempotent operation contract.
+message OperationRecord {
+  OperationId operation_id = 1; // Durable and unique operation identity
+  OperationIntent intent = 2;
+  PeerId actor_peer_id = 3;
+  repeated ObjectReference target_objects = 4;
+  OperationState state = 5;
+  string idempotency_key = 6;
+  CausalClock causal_clock = 7;
+  int64 created_at_utc_ms = 8;
+  int64 updated_at_utc_ms = 9;
+  ErrorDetail error = 10;
+  map<string, string> parameters = 11;
+}

@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package peerlink.v1;
+
+import "peerlink/v1/common.proto";
+import "peerlink/v1/error.proto";
+
+option java_package = "org.peerlink.protocol.v1";
+option java_multiple_files = true;
+
+enum FeatureCapability {
+  FEATURE_CAPABILITY_UNSPECIFIED = 0;
+  FEATURE_TRANSFER_RESUME = 1;
+  FEATURE_REMOTE_SEARCH = 2;
+  FEATURE_CLIPBOARD_IMAGE = 3;
+  FEATURE_BACKGROUND_SYNC = 4;
+  FEATURE_QUIC = 5;
+  FEATURE_TCP_TLS = 6;
+  FEATURE_TURN = 7;
+  FEATURE_MALWARE_SCAN = 8;
+  FEATURE_ARCHIVE_INSPECTION = 9;
+  FEATURE_FILE_PROVIDER = 10;
+}
+
+// Descriptive capability declaration.
+// Invariant: Capability is descriptive and may become stale; does not guarantee current environment permission.
+message CapabilityDescriptor {
+  string capability_name = 1;
+  ProtocolVersion version = 2;
+  int64 valid_until_utc_ms = 3;
+  map<string, string> parameters = 4;
+  bool is_enabled = 5;
+}
+
+// Capability negotiation handshake request
+message CapabilityNegotiationRequest {
+  ProtocolHeader header = 1;
+  PeerId sender_peer_id = 2;
+  ProtocolVersion client_protocol_version = 3;
+  ProtocolVersion min_compatible_version = 4;
+  repeated CapabilityDescriptor offered_capabilities = 5;
+  repeated string requested_features = 6;
+  map<string, string> feature_flags = 7;
+}
+
+// Capability negotiation handshake response with graceful unsupported feature reporting
+message CapabilityNegotiationResponse {
+  ProtocolHeader header = 1;
+  bool is_compatible = 2;
+  ProtocolVersion agreed_protocol_version = 3;
+  repeated CapabilityDescriptor accepted_capabilities = 4;
+  repeated string unsupported_features = 5;
+  ErrorDetail error = 6;
+}

@@ -1,0 +1,53 @@
+# Maven / Java
+target/
+*.class
+*.jar
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# Flutter / Dart
+apps/peerlink-app/.dart_tool/
+apps/peerlink-app/.flutter-plugins
+apps/peerlink-app/.flutter-plugins-dependencies
+apps/peerlink-app/.packages
+apps/peerlink-app/build/
+apps/peerlink-app/.pub/
+
+# Android
+.gradle/
+build/
+local.properties
+*.apk
+*.aab
+
+# SQLite / Local State
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+*.swp
+*~
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+
+# Logs & scratch
+*.log
+scratch/
+tmp/
+data/
+dist/
+*.token
+dependency-reduced-pom.xml
