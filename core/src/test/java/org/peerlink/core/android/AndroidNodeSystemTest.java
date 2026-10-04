@@ -511,6 +511,66 @@ public class AndroidNodeSystemTest {
         assertEquals(AndroidNodeState.ACTIVE, sm.getCurrentState());
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // DEFECT-BETA-01 REGRESSION: Android background keepalive race
+    // When app is swiped away while a transfer is TRANSFERRING, the facade's
+    // onTaskDismissed() must set tracker state to PAUSED (not FAILED).
+    // ─────────────────────────────────────────────────────────────────────────
+    @Test
+    public void testAndroidTaskDismissalPausesActiveTransfersNotFails() {
+        AndroidNodeContext ctx = AndroidNodeContext.builder()
+                .appInForeground(true)
+                .activeForegroundService(true)
+                .networkType(AndroidNodeContext.NetworkType.WIFI)
+                .batteryLevelPercent(80)
+                .batteryCharging(false)
+                .storagePermissionGranted(true)
+                .build();
+
+        AndroidNodeStateMachine sm = new AndroidNodeStateMachine(ctx);
+        AndroidClipboardAdapter clipboardAdapter = new AndroidClipboardAdapter(
+                keystoreManager.getPeerId().getValue(),
+                ClipboardSyncMode.TEXT_AND_URL,
+                clipboardBridge,
+                sm
+        );
+        AndroidNodeFacade facade = new AndroidNodeFacade(
+                sm, keystoreManager, storageAbstraction,
+                clipboardAdapter, discoveryEngine, notificationController
+        );
+
+        // Simulate an active transfer in TRANSFERRING state
+        final String transferId = "tx_beta01_regression";
+        AtomicReference<org.peerlink.protocol.v1.TransferProgress> lastProgress = new AtomicReference<>();
+        org.peerlink.core.transfer.TransferProgressTracker tracker =
+                new org.peerlink.core.transfer.TransferProgressTracker(
+                        transferId, 10_000_000L, 1,
+                        lastProgress::set
+                );
+
+        tracker.start();
+        tracker.addBytes(2_000_000L); // 20% through
+        facade.registerTransferTracker(tracker);
+
+        // Verify we are in TRANSFERRING state
+        assertEquals(org.peerlink.protocol.v1.TransferState.TRANSFER_STATE_CONNECTING, tracker.getState());
+        assertFalse(tracker.isPaused());
+
+        // Simulate task dismissal (app swiped away from Recents)
+        facade.onTaskDismissed();
+
+        // Post-teardown: tracker must be PAUSED, NOT FAILED
+        assertEquals(org.peerlink.protocol.v1.TransferState.TRANSFER_STATE_PAUSED, tracker.getState(),
+                "DEFECT-BETA-01 regression: transfer must be PAUSED on task dismissal, not FAILED");
+        assertTrue(tracker.isPaused(),
+                "Transfer must be marked paused so resume checkpoint is preserved");
+
+        // Verify that calling fail after already paused does NOT override to FAILED
+        tracker.fail("Service destroyed");
+        assertEquals(org.peerlink.protocol.v1.TransferState.TRANSFER_STATE_PAUSED, tracker.getState(),
+                "fail() must not override PAUSED into FAILED");
+    }
+
     // --- Mock Helpers ---
 
     private static class MockContentResolverBridge implements AndroidStorageAbstraction.ContentResolverBridge {

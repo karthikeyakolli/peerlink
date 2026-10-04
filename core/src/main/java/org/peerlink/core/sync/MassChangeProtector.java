@@ -47,9 +47,35 @@ public final class MassChangeProtector {
      * @return an assessment with triggered flag and list of reasons
      */
     public Assessment assess(List<DetectedChange> changes, int totalTracked) {
+        return assess(changes, totalTracked, null);
+    }
+
+    /**
+     * Evaluate a batch of detected changes for suspicious patterns.
+     * When manifest is provided, pure directory deletions are excluded from the file deletion threshold.
+     *
+     * @param changes      the full list of detected changes
+     * @param totalTracked total number of tracked objects before this batch
+     * @param manifest     optional manifest to resolve directory vs file objects
+     * @return an assessment with triggered flag and list of reasons
+     */
+    public Assessment assess(List<DetectedChange> changes, int totalTracked, SyncManifest manifest) {
         List<String> reasons = new ArrayList<>();
 
-        long deletions = changes.stream().filter(c -> c.changeType() == ChangeType.DELETED).count();
+        long deletions;
+        if (manifest != null) {
+            deletions = changes.stream()
+                    .filter(c -> c.changeType() == ChangeType.DELETED)
+                    .filter(c -> {
+                        if (c.objectId() == null) return true;
+                        return manifest.findById(c.objectId())
+                                .map(obj -> !obj.isDirectory())
+                                .orElse(true);
+                    })
+                    .count();
+        } else {
+            deletions = changes.stream().filter(c -> c.changeType() == ChangeType.DELETED).count();
+        }
         long totalChanges = changes.size();
 
         if (deletions >= deletionThreshold) {

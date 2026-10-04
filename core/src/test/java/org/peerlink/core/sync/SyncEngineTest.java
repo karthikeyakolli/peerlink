@@ -511,4 +511,30 @@ class SyncEngineTest {
         assertFalse(outcome.isPaused(),
                 "Legitimate remote catch-up must not trigger mass-change hold on local side");
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 22. DEFECT-BETA-02: Mass directory cleanup does not falsely trigger file deletion hold
+    // ─────────────────────────────────────────────────────────────────────────
+    @Test
+    void testMassDirectoryDeletionsDoNotTriggerFalseAlarm() {
+        MassChangeProtector protector = new MassChangeProtector(5, 200, 0.5);
+        SyncManifest manifest = new SyncManifest(PEER_A);
+
+        // Add 10 directory objects
+        List<DetectedChange> changes = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            ObjectId dirId = ObjectId.generate();
+            SyncObject dirObj = new SyncObject(dirId, "folder" + i, null, 0L,
+                    System.currentTimeMillis(), true,
+                    ContentVersion.initial(PEER_A), MetadataVersion.initial(PEER_A),
+                    CausalVersion.empty().increment(PEER_A));
+            manifest.trackObject(dirObj);
+            changes.add(new DetectedChange(dirId, "folder" + i,
+                    ChangeType.DELETED, null, 0, 0, false));
+        }
+
+        // Assess with manifest context — directory deletions should not trip the 5-deletion threshold
+        MassChangeProtector.Assessment assessment = protector.assess(changes, 10, manifest);
+        assertFalse(assessment.triggered(), "Directory-only deletions must not trip file mass deletion threshold");
+    }
 }

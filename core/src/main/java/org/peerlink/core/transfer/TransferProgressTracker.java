@@ -84,6 +84,10 @@ public final class TransferProgressTracker {
     }
 
     public void pause(String reason) {
+        TransferState current = state.get();
+        if (current == TransferState.TRANSFER_STATE_COMPLETED || current == TransferState.TRANSFER_STATE_CANCELLED || current == TransferState.TRANSFER_STATE_FAILED) {
+            return;
+        }
         if (paused.compareAndSet(false, true)) {
             this.pauseReason.set(reason);
             this.currentSpeedBps = 0;
@@ -93,6 +97,10 @@ public final class TransferProgressTracker {
     }
 
     public void resume() {
+        TransferState current = state.get();
+        if (current == TransferState.TRANSFER_STATE_COMPLETED || current == TransferState.TRANSFER_STATE_CANCELLED || current == TransferState.TRANSFER_STATE_FAILED) {
+            return;
+        }
         if (paused.compareAndSet(true, false)) {
             this.pauseReason.set("");
             this.lastProgressUpdateMs = System.currentTimeMillis();
@@ -126,6 +134,14 @@ public final class TransferProgressTracker {
     }
 
     public void fail(String errorMessage) {
+        TransferState current = state.get();
+        // Do not override terminal/checkpoint states: a PAUSED transfer should survive service teardown
+        // so the resume checkpoint is preserved (DEFECT-BETA-01 fix).
+        if (current == TransferState.TRANSFER_STATE_COMPLETED
+                || current == TransferState.TRANSFER_STATE_PAUSED
+                || current == TransferState.TRANSFER_STATE_CANCELLED) {
+            return;
+        }
         this.state.set(TransferState.TRANSFER_STATE_FAILED);
         this.errorDetail = ErrorDetail.newBuilder()
                 .setCode(org.peerlink.protocol.v1.ErrorCode.ERROR_CODE_INTERNAL_ERROR)

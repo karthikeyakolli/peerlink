@@ -66,7 +66,7 @@ public final class SyncEngine {
 
         // 2. Mass-change protection
         MassChangeProtector.Assessment assessment = massChangeProtector.assess(
-                localChanges, session.getLocalManifest().objectCount());
+                localChanges, session.getLocalManifest().objectCount(), session.getLocalManifest());
         if (assessment.triggered()) {
             session.pauseForMassChange(String.join("; ", assessment.reasons()));
             return SyncOutcome.paused(assessment.reasons());
@@ -121,7 +121,7 @@ public final class SyncEngine {
         List<DetectedChange> localChanges = changeDetector.detect(
                 session.getLocalManifest(), observedLocal, false);
         MassChangeProtector.Assessment assessment = massChangeProtector.assess(
-                localChanges, session.getLocalManifest().objectCount());
+                localChanges, session.getLocalManifest().objectCount(), session.getLocalManifest());
         List<ConflictRecord> conflicts = conflictDetector.detect(
                 session.getLocalManifest(), session.getRemoteManifest() != null
                         ? session.getRemoteManifest() : new SyncManifest("empty"));

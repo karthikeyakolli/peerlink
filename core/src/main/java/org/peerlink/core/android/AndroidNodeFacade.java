@@ -35,6 +35,7 @@ public class AndroidNodeFacade {
 
     private final ConcurrentMap<String, String> activePairingSessions = new ConcurrentHashMap<>();
     private final List<TransferEventListener> transferListeners = new ArrayList<>();
+    private final ConcurrentMap<String, org.peerlink.core.transfer.TransferProgressTracker> activeTrackers = new ConcurrentHashMap<>();
     private volatile boolean isStarted = false;
 
     public AndroidNodeFacade(AndroidNodeStateMachine stateMachine,
@@ -65,6 +66,7 @@ public class AndroidNodeFacade {
         if (!isStarted) return;
         isStarted = false;
         log.info("Stopping Android PeerLink Node");
+        pauseAllActiveTransfers("Node stopping");
         discoveryEngine.stopAll();
     }
 
@@ -165,7 +167,41 @@ public class AndroidNodeFacade {
         }
     }
 
+    public void registerTransferTracker(org.peerlink.core.transfer.TransferProgressTracker tracker) {
+        if (tracker != null) {
+            activeTrackers.put(tracker.getTransferId(), tracker);
+        }
+    }
+
+    public void unregisterTransferTracker(String transferId) {
+        if (transferId != null) {
+            activeTrackers.remove(transferId);
+        }
+    }
+
+    public List<org.peerlink.core.transfer.TransferProgressTracker> getActiveTransferTrackers() {
+        return new ArrayList<>(activeTrackers.values());
+    }
+
+    public synchronized void onTaskDismissed() {
+        log.warn("Android task dismissed / service teardown: pausing {} active transfer(s)", activeTrackers.size());
+        pauseAllActiveTransfers("App dismissed from recents / task killed");
+    }
+
+    public synchronized void pauseAllActiveTransfers(String reason) {
+        for (org.peerlink.core.transfer.TransferProgressTracker tracker : activeTrackers.values()) {
+            if (!tracker.isCancelled() && tracker.getState() != org.peerlink.protocol.v1.TransferState.TRANSFER_STATE_COMPLETED
+                    && tracker.getState() != org.peerlink.protocol.v1.TransferState.TRANSFER_STATE_FAILED
+                    && tracker.getState() != org.peerlink.protocol.v1.TransferState.TRANSFER_STATE_PAUSED) {
+                log.info("Pausing active transfer {} due to: {}", tracker.getTransferId(), reason);
+                tracker.pause(reason);
+                notificationController.updateTransferProgress(tracker.getTransferId(), "Transfer Paused", 0, tracker.getTransferredBytes(), tracker.getTotalBytes());
+            }
+        }
+    }
+
     public void notifyTransferFinished(String transferId, String fileName, boolean success, String errorMessage) {
+        unregisterTransferTracker(transferId);
         notificationController.completeTransfer(transferId, fileName, success);
         for (TransferEventListener l : transferListeners) {
             l.onTransferCompleted(transferId, success, errorMessage);
