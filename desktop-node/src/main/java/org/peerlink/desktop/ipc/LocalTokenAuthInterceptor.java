@@ -15,13 +15,34 @@ public final class LocalTokenAuthInterceptor implements ServerInterceptor {
     public static final Metadata.Key<String> AUTH_HEADER =
             Metadata.Key.of("x-peerlink-auth-token", Metadata.ASCII_STRING_MARSHALLER);
 
-    private final String expectedToken;
+    private final String expectedBootToken;
+    private final java.util.function.Predicate<String> sessionValidator;
 
-    public LocalTokenAuthInterceptor(String expectedToken) {
-        if (expectedToken == null || expectedToken.isBlank()) {
-            throw new IllegalArgumentException("expectedToken must not be blank");
+    public LocalTokenAuthInterceptor(String expectedBootToken) {
+        this(validateToken(expectedBootToken), null);
+    }
+
+    public LocalTokenAuthInterceptor(java.util.function.Predicate<String> sessionValidator) {
+        if (sessionValidator == null) {
+            throw new IllegalArgumentException("Session validator cannot be null");
         }
-        this.expectedToken = expectedToken;
+        this.expectedBootToken = null;
+        this.sessionValidator = sessionValidator;
+    }
+
+    public LocalTokenAuthInterceptor(String expectedBootToken, java.util.function.Predicate<String> sessionValidator) {
+        if ((expectedBootToken == null || expectedBootToken.isBlank()) && sessionValidator == null) {
+            throw new IllegalArgumentException("Either expectedBootToken or sessionValidator must be provided");
+        }
+        this.expectedBootToken = expectedBootToken;
+        this.sessionValidator = sessionValidator;
+    }
+
+    private static String validateToken(String token) {
+        if (token == null || token.isBlank()) {
+            throw new IllegalArgumentException("Expected boot token cannot be null or blank");
+        }
+        return token;
     }
 
     @Override
@@ -38,15 +59,30 @@ public final class LocalTokenAuthInterceptor implements ServerInterceptor {
         }
 
         String providedToken = headers.get(AUTH_HEADER);
-        boolean matches = providedToken != null &&
-                java.security.MessageDigest.isEqual(
-                        providedToken.getBytes(java.nio.charset.StandardCharsets.UTF_8),
-                        expectedToken.getBytes(java.nio.charset.StandardCharsets.UTF_8)
-                );
+        if (providedToken == null || providedToken.isBlank()) {
+            log.warn("Rejected unauthenticated local IPC call to {} (missing auth header)", methodName);
+            call.close(Status.UNAUTHENTICATED.withDescription("Missing local IPC auth header"), new Metadata());
+            return new ServerCall.Listener<>() {};
+        }
 
-        if (!matches) {
-            log.warn("Rejected unauthorized local IPC call to {} from local client", methodName);
-            call.close(Status.UNAUTHENTICATED.withDescription("Invalid or missing local IPC auth token"), new Metadata());
+        boolean valid = false;
+
+        // 1. Check active authenticated session validator
+        if (sessionValidator != null && sessionValidator.test(providedToken)) {
+            valid = true;
+        }
+
+        // 2. Fallback to constant-time boot token check if configured
+        if (!valid && expectedBootToken != null && !expectedBootToken.isBlank()) {
+            valid = java.security.MessageDigest.isEqual(
+                    providedToken.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    expectedBootToken.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+            );
+        }
+
+        if (!valid) {
+            log.warn("Rejected unauthorized or expired local IPC call to {}", methodName);
+            call.close(Status.UNAUTHENTICATED.withDescription("Invalid, unauthorized, or expired local IPC session token"), new Metadata());
             return new ServerCall.Listener<>() {};
         }
 

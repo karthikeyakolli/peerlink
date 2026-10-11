@@ -1,32 +1,45 @@
-name: PeerLink CI Baseline
+name: PeerLink Multi-Platform CI Matrix
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, master, develop, "release/*", "feature/*" ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, master, develop ]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  forbidden-dependencies:
-    name: Verify Architectural Boundaries & Forbidden Dependencies
+  # ── 1. Cross-Platform Parity & Invariant Contracts ──────────────────────────
+  parity-and-contracts:
+    name: Cross-Platform Parity & Invariants
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Make scripts executable
-        run: chmod +x scripts/*.sh
+        run: chmod +x tools/sync-platform-shared/*.sh
 
-      - name: Run forbidden dependency check
-        run: ./scripts/check-deps.sh
+      - name: Verify Invariant Parity Across All 4 Platforms
+        run: ./tools/sync-platform-shared/verify-shared.sh
 
-  java-core-and-desktop:
-    name: Java Modules Compile & Test
-    runs-on: ubuntu-latest
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: '29.x'
+
+      - name: Verify Protobuf Contract Syntax
+        run: |
+          protoc --proto_path=windows/protocol \
+                 windows/protocol/peerlink/v1/*.proto \
+                 --descriptor_set_out=/dev/null
+
+  # ── 2. Windows Standalone Project ───────────────────────────────────────────
+  windows-project:
+    name: Windows Platform (Local Node & Desktop UI)
+    runs-on: windows-2022
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -38,18 +51,47 @@ jobs:
           distribution: 'temurin'
           cache: 'maven'
 
-      - name: Verify Maven Enforcer and Compile Java Modules
-        run: mvn clean test -B
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
 
-  flutter-app:
-    name: Flutter Application Analyze & Test
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/peerlink-app
+      - name: Check Windows Prerequisites
+        run: powershell -ExecutionPolicy Bypass -File windows/scripts/check-prerequisites.ps1
+
+      - name: Build & Test Windows Local Node
+        run: mvn test -B -f windows/pom.xml
+
+      - name: Run Windows Flutter Tests
+        working-directory: windows/app/flutter
+        run: |
+          flutter pub get
+          flutter test
+
+      - name: Collect Windows Diagnostics
+        run: powershell -ExecutionPolicy Bypass -File windows/scripts/collect-diagnostics.ps1
+
+  # ── 3. Linux Standalone Project ─────────────────────────────────────────────
+  linux-project:
+    name: Linux Platform (Local Node & GTK3 UI)
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Install Linux Native Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config \
+              libgtk-3-dev libglib2.0-dev libsecret-1-dev libsystemd-dev dbus-x11
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -57,29 +99,109 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Install dependencies
-        run: flutter pub get
+      - name: Make scripts executable
+        run: chmod +x linux/scripts/*.sh
 
-      - name: Analyze code
-        run: flutter analyze --fatal-infos
+      - name: Check Linux Prerequisites
+        run: ./linux/scripts/check-prerequisites.sh
 
-      - name: Run widget tests
-        run: flutter test
+      - name: Build & Test Linux Local Node
+        run: mvn test -B -f linux/pom.xml
 
-  protobuf-validation:
-    name: Protobuf Contract Verification
+      - name: Run Linux Flutter Tests
+        working-directory: linux/app/flutter
+        run: |
+          flutter pub get
+          flutter test
+
+      - name: Build Flutter Linux Desktop Application
+        working-directory: linux/app/flutter
+        run: flutter build linux --release
+
+      - name: Package Linux Distribution Tarball
+        run: ./linux/scripts/package-linux.sh --version ${{ github.sha }}
+
+      - name: Collect Linux Diagnostics
+        run: ./linux/scripts/collect-diagnostics.sh
+
+  # ── 4. macOS Standalone Project ─────────────────────────────────────────────
+  macos-project:
+    name: macOS Platform (Local Node & Cocoa UI)
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Make scripts executable
+        run: chmod +x macos/scripts/*.sh
+
+      - name: Check macOS Prerequisites
+        run: ./macos/scripts/check-prerequisites.sh
+
+      - name: Verify Native Xcode Workspace
+        run: ./macos/scripts/open-xcode.sh
+
+      - name: Build & Test macOS Local Node
+        run: mvn test -B -f macos/pom.xml
+
+      - name: Run macOS Flutter Tests
+        working-directory: macos/app/flutter
+        run: |
+          flutter pub get
+          flutter test
+
+      - name: Build Flutter macOS Desktop Application
+        working-directory: macos/app/flutter
+        run: flutter build macos --release --no-codesign
+
+      - name: Package macOS Distribution Archive
+        run: ./macos/scripts/package-macos.sh --version ${{ github.sha }}
+
+      - name: Collect macOS Diagnostics
+        run: ./macos/scripts/collect-diagnostics.sh
+
+  # ── 5. Android Standalone Project ───────────────────────────────────────────
+  android-project:
+    name: Android Platform (Service Layer & Mobile UI)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Protoc
-        uses: arduino/setup-protoc@v3
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
         with:
-          version: '29.x'
+          java-version: '17'
+          distribution: 'temurin'
 
-      - name: Verify Proto file syntax
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Run Android Flutter Tests
+        working-directory: android/app/flutter
         run: |
-          protoc --proto_path=protocol/proto \
-                 protocol/proto/peerlink/v1/*.proto \
-                 --descriptor_set_out=/dev/null
+          flutter pub get
+          flutter test
+
+      - name: Build Android Debug APK
+        working-directory: android/app/flutter
+        run: flutter build apk --debug

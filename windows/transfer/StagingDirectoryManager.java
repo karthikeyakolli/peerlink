@@ -42,10 +42,15 @@ public final class StagingDirectoryManager {
     }
 
     /**
-     * Get the staging directory for a specific transfer session.
+     * Get the staging directory for a specific transfer session using an opaque, isolated internal name.
      */
     public Path getTransferStagingDir(String transferId) {
-        return stagingRoot.resolve(transferId);
+        String opaqueDir = org.peerlink.core.filesystem.PathSafetyValidator.deriveOpaqueStagingName(transferId);
+        Path dir = stagingRoot.resolve(opaqueDir).normalize();
+        if (!dir.startsWith(stagingRoot.toAbsolutePath().normalize())) {
+            throw new SecurityException("Staging directory escaped staging root: " + dir);
+        }
+        return dir;
     }
 
     /**
@@ -63,15 +68,21 @@ public final class StagingDirectoryManager {
      * Get the path to a staged partial file for a specific item index.
      */
     public Path getStagedPartPath(String transferId, int itemIndex) {
-        return getTransferStagingDir(transferId).resolve(itemIndex + ".part");
+        if (itemIndex < 0) {
+            throw new IllegalArgumentException("Item index cannot be negative: " + itemIndex);
+        }
+        Path dir = getTransferStagingDir(transferId);
+        Path part = dir.resolve(itemIndex + ".part").normalize();
+        if (!part.startsWith(dir)) {
+            throw new SecurityException("Staged part path escaped staging directory");
+        }
+        return part;
     }
 
     /**
      * Write a received chunk to the staged partial file at the given offset.
-     * Optionally validates chunk SHA-256 before writing to disk.
-     * Reuses open FileChannel for high-throughput streaming.
-     *
-     * @throws CorruptChunkException if chunkSha256 is present and does not match computed digest
+     * Validates optional chunk SHA-256 and guards against size overruns.
+     * Fully exhausts FileChannel writes in a loop to handle partial I/O correctly.
      */
     public synchronized void writeChunk(
             String transferId,
@@ -80,6 +91,29 @@ public final class StagingDirectoryManager {
             long offsetBytes,
             byte[] data,
             String expectedChunkSha256) throws IOException, CorruptChunkException {
+        writeChunk(transferId, itemIndex, chunkIndex, offsetBytes, data, expectedChunkSha256, -1);
+    }
+
+    public synchronized void writeChunk(
+            String transferId,
+            int itemIndex,
+            long chunkIndex,
+            long offsetBytes,
+            byte[] data,
+            String expectedChunkSha256,
+            long declaredFileSizeBytes) throws IOException, CorruptChunkException {
+
+        if (offsetBytes < 0) {
+            throw new IllegalArgumentException("Offset bytes cannot be negative: " + offsetBytes);
+        }
+        if (data == null) {
+            throw new IllegalArgumentException("Chunk data cannot be null");
+        }
+        if (declaredFileSizeBytes >= 0 && offsetBytes + data.length > declaredFileSizeBytes) {
+            throw new IllegalArgumentException(String.format(
+                    "Size overrun detected: offset %d + data length %d exceeds declared file size %d for item %d",
+                    offsetBytes, data.length, declaredFileSizeBytes, itemIndex));
+        }
 
         if (expectedChunkSha256 != null && !expectedChunkSha256.isBlank()) {
             String computedDigest = FileManifestBuilder.calculateSha256Hex(data);
@@ -91,6 +125,10 @@ public final class StagingDirectoryManager {
         }
 
         Path partPath = getStagedPartPath(transferId, itemIndex);
+        if (Files.isSymbolicLink(partPath)) {
+            throw new SecurityException("Staged part path is a forbidden symbolic link: " + partPath);
+        }
+
         FileChannel channel = openChannels.get(partPath);
         if (channel == null || !channel.isOpen()) {
             if (!Files.exists(partPath.getParent())) {
@@ -100,13 +138,36 @@ public final class StagingDirectoryManager {
             openChannels.put(partPath, channel);
         }
 
-        channel.write(java.nio.ByteBuffer.wrap(data), offsetBytes);
+        // Exhaust ByteBuffer in loop to ensure full write against partial FileChannel I/O returns
+        java.nio.ByteBuffer buffer = java.nio.ByteBuffer.wrap(data);
+        long curOffset = offsetBytes;
+        while (buffer.hasRemaining()) {
+            int written = channel.write(buffer, curOffset);
+            if (written < 0) {
+                throw new IOException("Unexpected negative return from FileChannel.write on " + partPath);
+            }
+            curOffset += written;
+        }
+
+        // Durability flush: persist chunk bytes to OS page cache / disk before acknowledging
+        channel.force(false);
+    }
+
+    public synchronized void truncateStagedFile(String transferId, int itemIndex, long validLength) throws IOException {
+        Path partPath = getStagedPartPath(transferId, itemIndex);
+        closeChannel(partPath);
+        if (Files.exists(partPath)) {
+            try (FileChannel fc = FileChannel.open(partPath, StandardOpenOption.WRITE)) {
+                fc.truncate(validLength);
+                fc.force(true);
+            }
+        }
     }
 
     public synchronized void writeChunk(String transferId, int itemIndex, long offsetBytes, byte[] data)
             throws IOException {
         try {
-            writeChunk(transferId, itemIndex, 0, offsetBytes, data, null);
+            writeChunk(transferId, itemIndex, 0, offsetBytes, data, null, -1);
         } catch (CorruptChunkException impossible) {
             throw new IOException(impossible);
         }
@@ -179,6 +240,10 @@ public final class StagingDirectoryManager {
 
         if (!Files.exists(partPath)) {
             throw new NoSuchFileException("Staged file not found for commit: " + partPath);
+        }
+
+        if (Files.isSymbolicLink(finalDestination)) {
+            throw new SecurityException("Target destination cannot be a symbolic link: " + finalDestination);
         }
 
         if (finalDestination.getParent() != null) {

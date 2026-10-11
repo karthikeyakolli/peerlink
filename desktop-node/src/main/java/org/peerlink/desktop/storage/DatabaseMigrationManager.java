@@ -34,7 +34,7 @@ public final class DatabaseMigrationManager {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrationManager.class);
 
     /** The target schema version this code requires. */
-    public static final int CURRENT_SCHEMA_VERSION = 3;
+    public static final int CURRENT_SCHEMA_VERSION = 4;
 
     /**
      * A single schema migration step.
@@ -152,6 +152,16 @@ public final class DatabaseMigrationManager {
 
             CREATE INDEX IF NOT EXISTS idx_transfer_queue_target
                 ON transfer_queue(target_peer_id);
+            """));
+
+        // Version 4 — transfer session staging and chunk integrity metadata
+        list.add(new Migration(4, "Transfer session staging and chunk integrity metadata", """
+            ALTER TABLE transfer_sessions ADD COLUMN staging_path TEXT;
+            ALTER TABLE transfer_sessions ADD COLUMN destination_path TEXT;
+            ALTER TABLE transfer_sessions ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE transfer_chunks ADD COLUMN offset_bytes INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE transfer_chunks ADD COLUMN chunk_size_bytes INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE transfer_chunks ADD COLUMN chunk_sha256 TEXT NOT NULL DEFAULT '';
             """));
 
         return list;

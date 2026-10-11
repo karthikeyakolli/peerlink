@@ -1,0 +1,8 @@
+# PeerLink Android Release Signing Configuration Template
+# Copy this file to key.properties and configure your release keystore parameters.
+# NEVER commit key.properties or .jks files to source control!
+
+storePassword=android_keystore_password
+keyPassword=peerlink_key_password
+keyAlias=peerlink_release_alias
+storeFile=../peerlink-release.jks

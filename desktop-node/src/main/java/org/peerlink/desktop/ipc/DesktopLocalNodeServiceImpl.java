@@ -6,9 +6,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
+import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -18,16 +22,45 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Service implementation for the authenticated Desktop Local Node gRPC IPC.
  * Supports:
- * - Handshake with token validation and strict API/client version compatibility check
+ * - Handshake with token validation, ephemeral session issuance, and version compatibility
+ * - Session token management (expiration, revocation, rotation)
  * - Node status queries
  * - Server-streaming real-time events (heartbeats, lifecycle events)
  * - Remote lifecycle controls (restart, stop)
+ * - Authoritative trust-enforced transfer initiation
  */
 public final class DesktopLocalNodeServiceImpl extends DesktopLocalNodeServiceGrpc.DesktopLocalNodeServiceImplBase implements Closeable {
     private static final Logger log = LoggerFactory.getLogger(DesktopLocalNodeServiceImpl.class);
 
     public static final String NODE_VERSION = "0.1.0";
     public static final String MIN_COMPATIBLE_CLIENT_VERSION = "0.1.0";
+    public static final long DEFAULT_SESSION_TTL_MS = 3600_000L; // 1 hour session lifetime
+
+    /**
+     * Active IPC session authenticated via boot secret exchange.
+     */
+    public static final class IpcSessionRecord {
+        private final String sessionToken;
+        private final int clientPid;
+        private final long createdAtMs;
+        private final long expiresAtMs;
+
+        public IpcSessionRecord(String sessionToken, int clientPid, long createdAtMs, long expiresAtMs) {
+            this.sessionToken = sessionToken;
+            this.clientPid = clientPid;
+            this.createdAtMs = createdAtMs;
+            this.expiresAtMs = expiresAtMs;
+        }
+
+        public String getSessionToken() { return sessionToken; }
+        public int getClientPid() { return clientPid; }
+        public long getCreatedAtMs() { return createdAtMs; }
+        public long getExpiresAtMs() { return expiresAtMs; }
+
+        public boolean isExpired(long nowMs) {
+            return nowMs > expiresAtMs;
+        }
+    }
 
     private final String expectedAuthToken;
     private final String localPeerId;
@@ -36,6 +69,12 @@ public final class DesktopLocalNodeServiceImpl extends DesktopLocalNodeServiceGr
     private final Runnable restartHandler;
     private final Runnable stopHandler;
     private final org.peerlink.core.transfer.PeerTransferEngine transferEngine;
+    private final org.peerlink.core.security.TrustStore trustStore;
+    private final org.peerlink.core.identity.PairingCoordinator pairingCoordinator;
+    private final org.peerlink.core.transport.PeerSessionManager sessionManager;
+    private final long sessionTtlMs;
+    private final SecureRandom secureRandom = new SecureRandom();
+    private final Map<String, IpcSessionRecord> activeSessions = new ConcurrentHashMap<>();
     private final List<TransferProgress> transferHistory = new CopyOnWriteArrayList<>();
 
     private final List<StreamObserver<NodeEvent>> eventSubscribers = new CopyOnWriteArrayList<>();
@@ -47,23 +86,63 @@ public final class DesktopLocalNodeServiceImpl extends DesktopLocalNodeServiceGr
     private final AtomicLong heartbeatSequence = new AtomicLong(0);
 
     public DesktopLocalNodeServiceImpl(String expectedAuthToken, String localPeerId, int listenPort) {
-        this(expectedAuthToken, localPeerId, listenPort, null, null, null);
+        this(expectedAuthToken, localPeerId, listenPort, null, null, null, null, null, null, DEFAULT_SESSION_TTL_MS);
     }
 
     public DesktopLocalNodeServiceImpl(String expectedAuthToken, String localPeerId, int listenPort,
                                        Runnable restartHandler, Runnable stopHandler) {
-        this(expectedAuthToken, localPeerId, listenPort, restartHandler, stopHandler, null);
+        this(expectedAuthToken, localPeerId, listenPort, restartHandler, stopHandler, null, null, null, null, DEFAULT_SESSION_TTL_MS);
     }
 
     public DesktopLocalNodeServiceImpl(String expectedAuthToken, String localPeerId, int listenPort,
                                        Runnable restartHandler, Runnable stopHandler,
                                        org.peerlink.core.transfer.PeerTransferEngine transferEngine) {
+        this(expectedAuthToken, localPeerId, listenPort, restartHandler, stopHandler, transferEngine, null, null, null, DEFAULT_SESSION_TTL_MS);
+    }
+
+    public DesktopLocalNodeServiceImpl(String expectedAuthToken, String localPeerId, int listenPort,
+                                       Runnable restartHandler, Runnable stopHandler,
+                                       org.peerlink.core.transfer.PeerTransferEngine transferEngine,
+                                       org.peerlink.core.security.TrustStore trustStore,
+                                       org.peerlink.core.identity.PairingCoordinator pairingCoordinator) {
+        this(expectedAuthToken, localPeerId, listenPort, restartHandler, stopHandler, transferEngine, trustStore, pairingCoordinator, null, DEFAULT_SESSION_TTL_MS);
+    }
+
+    public DesktopLocalNodeServiceImpl(String expectedAuthToken, String localPeerId, int listenPort,
+                                       Runnable restartHandler, Runnable stopHandler,
+                                       org.peerlink.core.transfer.PeerTransferEngine transferEngine,
+                                       org.peerlink.core.security.TrustStore trustStore,
+                                       org.peerlink.core.identity.PairingCoordinator pairingCoordinator,
+                                       org.peerlink.core.transport.PeerSessionManager sessionManager) {
+        this(expectedAuthToken, localPeerId, listenPort, restartHandler, stopHandler, transferEngine, trustStore, pairingCoordinator, sessionManager, DEFAULT_SESSION_TTL_MS);
+    }
+
+    public DesktopLocalNodeServiceImpl(String expectedAuthToken, String localPeerId, int listenPort,
+                                       Runnable restartHandler, Runnable stopHandler,
+                                       org.peerlink.core.transfer.PeerTransferEngine transferEngine,
+                                       org.peerlink.core.security.TrustStore trustStore,
+                                       org.peerlink.core.identity.PairingCoordinator pairingCoordinator,
+                                       long sessionTtlMs) {
+        this(expectedAuthToken, localPeerId, listenPort, restartHandler, stopHandler, transferEngine, trustStore, pairingCoordinator, null, sessionTtlMs);
+    }
+
+    public DesktopLocalNodeServiceImpl(String expectedAuthToken, String localPeerId, int listenPort,
+                                       Runnable restartHandler, Runnable stopHandler,
+                                       org.peerlink.core.transfer.PeerTransferEngine transferEngine,
+                                       org.peerlink.core.security.TrustStore trustStore,
+                                       org.peerlink.core.identity.PairingCoordinator pairingCoordinator,
+                                       org.peerlink.core.transport.PeerSessionManager sessionManager,
+                                       long sessionTtlMs) {
         this.expectedAuthToken = expectedAuthToken;
         this.localPeerId = localPeerId;
         this.listenPort = listenPort;
         this.restartHandler = restartHandler;
         this.stopHandler = stopHandler;
         this.transferEngine = transferEngine;
+        this.trustStore = trustStore;
+        this.pairingCoordinator = pairingCoordinator;
+        this.sessionManager = sessionManager;
+        this.sessionTtlMs = sessionTtlMs > 0 ? sessionTtlMs : DEFAULT_SESSION_TTL_MS;
 
         // Schedule periodic heartbeat streaming (every 1 second)
         eventScheduler.scheduleAtFixedRate(this::broadcastHeartbeat, 1, 1, TimeUnit.SECONDS);
@@ -95,11 +174,21 @@ public final class DesktopLocalNodeServiceImpl extends DesktopLocalNodeServiceGr
                         request.getAuthToken().getBytes(java.nio.charset.StandardCharsets.UTF_8)
                 );
         if (validToken) {
-            log.info("Client authenticated successfully (pid: {}, version: {})", request.getClientPid(), request.getClientVersion());
+            // Issue a fresh, time-bound session token to avoid bearer secret re-use
+            byte[] rand = new byte[32];
+            secureRandom.nextBytes(rand);
+            String sessionToken = "sess_" + Base64.getUrlEncoder().withoutPadding().encodeToString(rand);
+            long now = System.currentTimeMillis();
+            long expiresAt = now + sessionTtlMs;
+            IpcSessionRecord session = new IpcSessionRecord(sessionToken, request.getClientPid(), now, expiresAt);
+            activeSessions.put(sessionToken, session);
+
+            log.info("Client authenticated successfully (pid: {}, version: {}). Active sessions: {}",
+                    request.getClientPid(), request.getClientVersion(), activeSessions.size());
             AuthenticateIpcResponse response = AuthenticateIpcResponse.newBuilder()
                     .setAuthenticated(true)
                     .setIsCompatible(true)
-                    .setSessionToken(expectedAuthToken)
+                    .setSessionToken(sessionToken)
                     .setNodeVersion(NODE_VERSION)
                     .setMinCompatibleVersion(MIN_COMPATIBLE_CLIENT_VERSION)
                     .setLocalPeerId(PeerId.newBuilder().setValue(localPeerId).build())
@@ -118,6 +207,67 @@ public final class DesktopLocalNodeServiceImpl extends DesktopLocalNodeServiceGr
             responseObserver.onNext(response);
             responseObserver.onCompleted();
         }
+    }
+
+    public boolean isSessionValid(String token) {
+        if (token == null || token.isBlank()) {
+            return false;
+        }
+        IpcSessionRecord session = activeSessions.get(token);
+        if (session == null) {
+            return false;
+        }
+        if (session.isExpired(System.currentTimeMillis())) {
+            activeSessions.remove(token);
+            log.warn("Rejected expired local IPC session token");
+            return false;
+        }
+        return true;
+    }
+
+    public boolean revokeSession(String token) {
+        if (token == null) return false;
+        return activeSessions.remove(token) != null;
+    }
+
+    public void revokeAllSessions() {
+        activeSessions.clear();
+        log.info("All local IPC sessions have been revoked");
+    }
+
+    public int getActiveSessionCount() {
+        long now = System.currentTimeMillis();
+        activeSessions.entrySet().removeIf(e -> e.getValue().isExpired(now));
+        return activeSessions.size();
+    }
+
+    public String createCustomSession(int clientPid, long ttlMs) {
+        byte[] rand = new byte[32];
+        secureRandom.nextBytes(rand);
+        String sessionToken = "sess_" + Base64.getUrlEncoder().withoutPadding().encodeToString(rand);
+        long now = System.currentTimeMillis();
+        long expiresAt = now + ttlMs;
+        activeSessions.put(sessionToken, new IpcSessionRecord(sessionToken, clientPid, now, expiresAt));
+        return sessionToken;
+    }
+
+    public String rotateSession(String oldToken) {
+        if (!isSessionValid(oldToken)) {
+            return null;
+        }
+        IpcSessionRecord oldSession = activeSessions.remove(oldToken);
+        if (oldSession == null) {
+            return null;
+        }
+        return createCustomSession(oldSession.getClientPid(), sessionTtlMs);
+    }
+
+    public org.peerlink.core.security.TrustStore getTrustStore() {
+        return trustStore;
+    }
+
+    public org.peerlink.core.identity.PairingCoordinator getPairingCoordinator() {
+        return pairingCoordinator;
     }
 
     private boolean checkVersionCompatibility(String clientVersion) {
@@ -285,6 +435,28 @@ public final class DesktopLocalNodeServiceImpl extends DesktopLocalNodeServiceGr
         log.info("Received InitiateSend request for {} source path(s) to peer {}",
                 request.getSourcePathsCount(), request.getTargetPeerId().getValue());
 
+        String targetPeerId = request.getTargetPeerId().getValue();
+        if (trustStore != null) {
+            if (trustStore.isRevoked(targetPeerId)) {
+                log.warn("Blocked InitiateSend: target peer {} is revoked", targetPeerId);
+                responseObserver.onNext(InitiateSendResponse.newBuilder()
+                        .setAccepted(false)
+                        .setErrorMessage("Target peer " + targetPeerId + " is revoked")
+                        .build());
+                responseObserver.onCompleted();
+                return;
+            }
+            if (!trustStore.isTrusted(targetPeerId)) {
+                log.warn("Blocked InitiateSend: target peer {} is not trusted", targetPeerId);
+                responseObserver.onNext(InitiateSendResponse.newBuilder()
+                        .setAccepted(false)
+                        .setErrorMessage("Target peer " + targetPeerId + " is not trusted. Explicit cryptographic pairing required.")
+                        .build());
+                responseObserver.onCompleted();
+                return;
+            }
+        }
+
         if (transferEngine == null) {
             responseObserver.onNext(InitiateSendResponse.newBuilder()
                     .setAccepted(false)
@@ -299,34 +471,40 @@ public final class DesktopLocalNodeServiceImpl extends DesktopLocalNodeServiceGr
             sourcePaths.add(java.nio.file.Paths.get(p));
         }
 
-        java.nio.file.Path destRoot;
-        if (request.getDestinationFolder() != null && !request.getDestinationFolder().isBlank()) {
-            destRoot = java.nio.file.Paths.get(request.getDestinationFolder());
-        } else {
-            // Default received folder: Downloads/PeerLinkReceived
-            destRoot = java.nio.file.Paths.get(System.getProperty("user.home"), "Downloads", "PeerLinkReceived");
-        }
-
         try {
             org.peerlink.protocol.v1.TransferManifest manifest = transferEngine.prepareSend(
                     localPeerId,
-                    request.getTargetPeerId().getValue(),
+                    targetPeerId,
                     sourcePaths,
                     request.getDuplicatePolicy());
 
             String transferId = manifest.getTransferId();
             String opId = manifest.getOperationId().getValue();
 
-            // Run asynchronous transfer in background thread
+            // Run asynchronous transfer over active PeerSession in background thread
             new Thread(() -> {
                 try {
-                    transferEngine.executeTransfer(
-                            sourcePaths,
-                            destRoot,
-                            request.getDuplicatePolicy(),
-                            localPeerId,
-                            request.getTargetPeerId().getValue(),
-                            this::broadcastTransferProgress);
+                    Optional<org.peerlink.core.transport.PeerSession> sessionOpt =
+                            sessionManager != null ? sessionManager.getSessionByPeerId(targetPeerId) : Optional.empty();
+
+                    if (sessionOpt.isPresent()) {
+                        transferEngine.sendTransferOverSession(
+                                sessionOpt.get(),
+                                manifest,
+                                sourcePaths,
+                                this::broadcastTransferProgress);
+                    } else {
+                        log.warn("Transfer {} deferred: No active PeerSession with target peer {}", transferId, targetPeerId);
+                        broadcastTransferProgress(TransferProgress.newBuilder()
+                                .setTransferId(transferId)
+                                .setState(TransferState.TRANSFER_STATE_FAILED)
+                                .setBytesTransferred(0)
+                                .setTotalBytes(manifest.getTotalBytes())
+                                .setCurrentItemIndex(0)
+                                .setTotalItems(manifest.getItemsCount())
+                                .setPercentComplete(0.0f)
+                                .build());
+                    }
                 } catch (Exception e) {
                     log.error("Transfer {} failed during execution: {}", transferId, e.getMessage(), e);
                 }

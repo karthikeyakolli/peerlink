@@ -32,13 +32,14 @@ import java.util.*;
  * <p>Invariant: actual file bytes are <b>never</b> stored in SQLite. Only
  * metadata, operation journal, and index state live here.
  */
-public final class LocalSqliteStorage implements OperationJournal, Closeable {
+public final class LocalSqliteStorage implements OperationJournal, org.peerlink.core.transfer.TransferSessionJournal, org.peerlink.core.identity.IdentityMetadataStore, Closeable {
     private static final Logger log = LoggerFactory.getLogger(LocalSqliteStorage.class);
 
     private final Connection connection;
     private final Path dbPath;
     private final DatabaseMigrationManager migrations = new DatabaseMigrationManager();
     private final ObjectIndexRepository objectIndex;
+    private final org.peerlink.core.transfer.SqliteTransferSessionJournal transferJournal;
 
     // ──────────────────────────────────────────────────────────────────────────
     // Construction & initialization
@@ -52,6 +53,7 @@ public final class LocalSqliteStorage implements OperationJournal, Closeable {
         initPragmas();
         migrations.applyMigrations(connection);
         this.objectIndex = new ObjectIndexRepository(this.connection, this);
+        this.transferJournal = new org.peerlink.core.transfer.SqliteTransferSessionJournal(this.connection);
         log.info("LocalSqliteStorage ready at {} (schema v{})",
                 dbPath, DatabaseMigrationManager.CURRENT_SCHEMA_VERSION);
     }
@@ -440,4 +442,115 @@ public final class LocalSqliteStorage implements OperationJournal, Closeable {
     private static String terminalStateList() {
         return "('COMMITTED','FAILED','CANCELLED','OUTCOME_UNKNOWN','RECOVERY_REQUIRED')";
     }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // IdentityMetadataStore implementation
+    // ──────────────────────────────────────────────────────────────────────────
+
+    @Override
+    public synchronized Optional<Map<String, String>> loadIdentityMetadata() {
+        String sql = "SELECT key, value FROM device_identity";
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            Map<String, String> map = new HashMap<>();
+            while (rs.next()) {
+                map.put(rs.getString("key"), rs.getString("value"));
+            }
+            return map.isEmpty() ? Optional.empty() : Optional.of(map);
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to load identity metadata from SQLite", e);
+        }
+    }
+
+    @Override
+    public synchronized void saveIdentityMetadata(Map<String, String> metadata) {
+        String sql = "INSERT OR REPLACE INTO device_identity (key, value) VALUES (?, ?)";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            for (Map.Entry<String, String> entry : metadata.entrySet()) {
+                ps.setString(1, entry.getKey());
+                ps.setString(2, entry.getValue());
+                ps.addBatch();
+            }
+            ps.executeBatch();
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to save identity metadata to SQLite", e);
+        }
+    }
+
+    @Override
+    public synchronized boolean hasIdentityMetadata() {
+        String sql = "SELECT 1 FROM device_identity WHERE key = 'peer_id' LIMIT 1";
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            return rs.next();
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to check identity metadata presence", e);
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // TransferSessionJournal implementation (delegating to SqliteTransferSessionJournal)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    public org.peerlink.core.transfer.TransferSessionJournal getTransferSessionJournal() {
+        return this.transferJournal;
+    }
+
+    @Override
+    public synchronized void recordSession(org.peerlink.core.transfer.TransferSessionRecord session) {
+        transferJournal.recordSession(session);
+    }
+
+    @Override
+    public synchronized Optional<org.peerlink.core.transfer.TransferSessionRecord> getSession(String transferId) {
+        return transferJournal.getSession(transferId);
+    }
+
+    @Override
+    public synchronized Optional<org.peerlink.core.transfer.TransferSessionRecord> getSessionByOperationId(String operationId) {
+        return transferJournal.getSessionByOperationId(operationId);
+    }
+
+    @Override
+    public synchronized void updateSessionState(String transferId, org.peerlink.protocol.v1.TransferState state) {
+        transferJournal.updateSessionState(transferId, state);
+    }
+
+    @Override
+    public synchronized void updateChunkStatus(String transferId, int itemIndex, long chunkIndex, org.peerlink.protocol.v1.ChunkStatus status) {
+        transferJournal.updateChunkStatus(transferId, itemIndex, chunkIndex, status);
+    }
+
+    @Override
+    public synchronized void updateChunkMetadata(String transferId, int itemIndex, long chunkIndex,
+                                                 long offsetBytes, int sizeBytes, String sha256,
+                                                 org.peerlink.protocol.v1.ChunkStatus status) {
+        transferJournal.updateChunkMetadata(transferId, itemIndex, chunkIndex, offsetBytes, sizeBytes, sha256, status);
+    }
+
+    @Override
+    public synchronized Set<Long> getAckedChunks(String transferId, int itemIndex) {
+        return transferJournal.getAckedChunks(transferId, itemIndex);
+    }
+
+    @Override
+    public synchronized void recordReceipt(String transferId, org.peerlink.protocol.v1.TransferCompletedReceipt receipt) {
+        transferJournal.recordReceipt(transferId, receipt);
+    }
+
+    @Override
+    public synchronized List<org.peerlink.core.transfer.TransferSessionRecord> getActiveSessions() {
+        return transferJournal.getActiveSessions();
+    }
+
+    @Override
+    public synchronized List<org.peerlink.core.transfer.TransferSessionRecord> getIncompleteSessions() {
+        return transferJournal.getIncompleteSessions();
+    }
+
+    @Override
+    public synchronized void removeSession(String transferId) {
+        transferJournal.removeSession(transferId);
+    }
 }
+

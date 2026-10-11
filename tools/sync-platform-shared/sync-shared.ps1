@@ -72,23 +72,21 @@ foreach ($Platform in $Platforms) {
 
                 $CanonicalHash = (Get-FileHash $File.FullName -Algorithm SHA256).Hash.ToLower()
 
-                $Action = "COPY"
                 if (Test-Path $DestFile) {
                     $DestHash = (Get-FileHash $DestFile -Algorithm SHA256).Hash.ToLower()
                     if ($CanonicalHash -eq $DestHash) {
                         $Action = "UP-TO-DATE"
                         $TotalUpToDate++
                     } else {
-                        $Action = "UPDATE"
-                        $TotalCopied++
+                        # Divergence detected: Never silently overwrite platform modifications!
+                        $Action = "DIVERGENCE"
+                        $TotalConflicts++
+                        Write-Host "  [DIVERGENCE/CONFLICT] $Module/$RelativePath (Canonical: $CanonicalHash vs Platform: $DestHash) - Platform file preserved!" -ForegroundColor Red
                     }
                 } else {
                     $Action = "NEW"
                     $TotalCopied++
-                }
-
-                if ($Action -ne "UP-TO-DATE") {
-                    Write-Host "  [$Action] $Module/$RelativePath" -ForegroundColor $(if ($Action -eq "NEW") { "Green" } else { "Magenta" })
+                    Write-Host "  [NEW] $Module/$RelativePath" -ForegroundColor Green
                     if (-not $DryRun) {
                         if (-not (Test-Path $DestDir)) {
                             New-Item -ItemType Directory -Path $DestDir -Force | Out-Null
@@ -121,23 +119,21 @@ foreach ($Platform in $Platforms) {
 
             $CanonicalHash = (Get-FileHash $File.FullName -Algorithm SHA256).Hash.ToLower()
 
-            $Action = "COPY"
             if (Test-Path $DestFile) {
                 $DestHash = (Get-FileHash $DestFile -Algorithm SHA256).Hash.ToLower()
                 if ($CanonicalHash -eq $DestHash) {
                     $Action = "UP-TO-DATE"
                     $TotalUpToDate++
                 } else {
-                    $Action = "UPDATE"
-                    $TotalCopied++
+                    # Divergence detected: Never silently overwrite platform modifications!
+                    $Action = "DIVERGENCE"
+                    $TotalConflicts++
+                    Write-Host "  [DIVERGENCE/CONFLICT] app/flutter/$RelativePath (Canonical: $CanonicalHash vs Platform: $DestHash) - Platform file preserved!" -ForegroundColor Red
                 }
             } else {
                 $Action = "NEW"
                 $TotalCopied++
-            }
-
-            if ($Action -ne "UP-TO-DATE") {
-                Write-Host "  [$Action] app/flutter/$RelativePath" -ForegroundColor $(if ($Action -eq "NEW") { "Green" } else { "Magenta" })
+                Write-Host "  [NEW] app/flutter/$RelativePath" -ForegroundColor Green
                 if (-not $DryRun) {
                     if (-not (Test-Path $DestDir)) {
                         New-Item -ItemType Directory -Path $DestDir -Force | Out-Null

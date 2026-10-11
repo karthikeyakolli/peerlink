@@ -100,6 +100,10 @@ public final class FileManifestBuilder {
                 ? sourcePaths.get(0).getFileName().toString()
                 : sourcePaths.get(0).getFileName().toString() + " (+" + (items.size() - 1) + " items)";
 
+        // Validate that no relative paths collide or contain path traversals
+        org.peerlink.core.filesystem.PathSafetyValidator.validateNoCollisions(
+                items.stream().map(TransferItem::getRelativePath).toList());
+
         return TransferManifest.newBuilder()
                 .setTransferId(transferId)
                 .setOperationId(OperationId.newBuilder().setValue(operationId).build())
@@ -121,9 +125,10 @@ public final class FileManifestBuilder {
         long size = attrs != null ? attrs.size() : Files.size(file);
         long modifiedTime = attrs != null ? attrs.lastModifiedTime().toMillis() : Files.getLastModifiedTime(file).toMillis();
         String sha256 = calculateSha256Hex(file);
+        String validatedPath = org.peerlink.core.filesystem.PathSafetyValidator.validateRelativePath(relativePath);
 
         return TransferItem.newBuilder()
-                .setRelativePath(relativePath.replace('\\', '/'))
+                .setRelativePath(validatedPath)
                 .setFileSizeBytes(size)
                 .setSha256Hex(sha256)
                 .setIsDirectory(false)

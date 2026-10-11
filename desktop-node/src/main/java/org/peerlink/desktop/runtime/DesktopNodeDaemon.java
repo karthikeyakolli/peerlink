@@ -28,7 +28,7 @@ public final class DesktopNodeDaemon implements Closeable {
     private static final Logger log = LoggerFactory.getLogger(DesktopNodeDaemon.class);
 
     private final NodeConfiguration configuration;
-    private final String peerId;
+    private String peerId;
     private final NodeEventBus eventBus = new NodeEventBus();
 
     private Server grpcServer;
@@ -39,11 +39,21 @@ public final class DesktopNodeDaemon implements Closeable {
     private ReconciliationFramework reconciliationFramework;
     private StartupRecoveryManager.RecoveryReport lastRecoveryReport;
     private org.peerlink.core.transfer.PeerTransferEngine transferEngine;
+    private org.peerlink.core.identity.DeviceIdentityManager identityManager;
+    private org.peerlink.core.security.TrustStore trustStore;
+    private org.peerlink.core.identity.PairingCoordinator pairingCoordinator;
+    private org.peerlink.core.security.DesktopKeyStoreAdapter keyStore;
+    private org.peerlink.core.transport.StandardTcpTransportProvider tcpTransport;
+    private org.peerlink.core.transport.PeerSessionManager sessionManager;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     public DesktopNodeDaemon(NodeConfiguration configuration) {
+        this(configuration, null);
+    }
+
+    public DesktopNodeDaemon(NodeConfiguration configuration, String peerIdOverride) {
         this.configuration = configuration;
-        this.peerId = "peer_" + UUID.randomUUID().toString().substring(0, 8);
+        this.peerId = peerIdOverride;
     }
 
     public synchronized void start() throws IOException, SQLException {
@@ -52,7 +62,7 @@ public final class DesktopNodeDaemon implements Closeable {
             return;
         }
 
-        log.info("Starting Desktop Local Node daemon (Peer ID: {})...", peerId);
+        log.info("Starting Desktop Local Node daemon...");
         eventBus.publish(new NodeEvent.NodeLifecycleChanged(
                 eventBus.nextSequence(), Instant.now(), NodeEvent.NodeLifecycleState.STARTING, "Initializing node runtime"));
 
@@ -62,28 +72,93 @@ public final class DesktopNodeDaemon implements Closeable {
         reconciliationFramework = new ReconciliationFramework(sqliteStorage);
         recoveryManager = new StartupRecoveryManager(sqliteStorage, eventBus);
 
-        // 2. Run Startup Recovery
+        // 2. Initialize Cryptographic Device Identity & Stable Peer ID
+        if (this.peerId == null) {
+            try {
+                Path keystoreDir = configuration.getDataDirectory().resolve("keystore");
+                char[] passphrase = configuration.getKeystorePassphrase();
+                this.keyStore = new org.peerlink.core.security.EncryptedFileKeyStore(keystoreDir, passphrase);
+
+                String hostname = "Desktop";
+                try {
+                    hostname = java.net.InetAddress.getLocalHost().getHostName();
+                } catch (Exception ignored) {}
+                String deviceName = System.getProperty("user.name", "Desktop") + "-" + hostname;
+                String platform = System.getProperty("os.name", "Windows");
+
+                this.identityManager = org.peerlink.core.identity.DeviceIdentityManager.loadOrCreate(
+                        keyStore, sqliteStorage, deviceName, platform);
+                this.peerId = identityManager.getPeerIdentity().getPeerId().getValue();
+                log.info("Initialized device cryptographic identity. Stable Peer ID: {}, Fingerprint: {}",
+                        this.peerId, identityManager.getFingerprint());
+            } catch (Exception e) {
+                log.error("Failed to initialize cryptographic device identity: {}", e.getMessage(), e);
+                stop();
+                throw new RuntimeException("Node startup aborted: identity initialization failure", e);
+            }
+        }
+
+        // 3. Initialize Persistent TrustStore & Pairing Coordinator
+        Path trustStorePath = configuration.getDataDirectory().resolve("trust_store.pb");
+        this.trustStore = new org.peerlink.core.security.PersistentTrustStore(trustStorePath);
+        if (this.identityManager != null) {
+            this.pairingCoordinator = new org.peerlink.core.identity.PairingCoordinator(identityManager, trustStore);
+        }
+
+        // 4. Initialize Transfer Engine with durable SQLite transfer journal
+        Path stagingRoot = configuration.getDataDirectory().resolve("staging");
+        Path receivedDir = configuration.getDataDirectory().resolve("received");
+        transferEngine = new org.peerlink.core.transfer.PeerTransferEngine(sqliteStorage, sqliteStorage, stagingRoot);
+
+        // 5. Run Startup Recovery (Operations & Transfers)
         try {
-            lastRecoveryReport = recoveryManager.runRecovery("Node start");
+            lastRecoveryReport = recoveryManager.runRecovery("Node start", transferEngine, receivedDir);
         } catch (StartupRecoveryManager.StartupRecoveryException e) {
             log.error("Fatal startup recovery failure: {}", e.getMessage(), e);
             stop();
             throw new RuntimeException("Node startup aborted due to recovery failure", e);
         }
 
-        // 3. Initialize Transfer Engine
-        Path stagingRoot = configuration.getDataDirectory().resolve("staging");
-        transferEngine = new org.peerlink.core.transfer.PeerTransferEngine(sqliteStorage, stagingRoot);
+        // 6. Initialize Real P2P Network Transport & PeerSessionManager
+        try {
+            tcpTransport = new org.peerlink.core.transport.StandardTcpTransportProvider(NodeConfiguration.DEFAULT_HOST);
+            var negotiator = new org.peerlink.core.transport.TransportCapabilityNegotiator(java.util.List.of(tcpTransport));
+            var protocolVersion = org.peerlink.protocol.v1.ProtocolVersion.newBuilder().setMajor(1).setMinor(0).setPatch(0).build();
+            sessionManager = new org.peerlink.core.transport.PeerSessionManager(
+                    identityManager.getPeerIdentity(),
+                    identityManager.getDeviceIdentity(),
+                    identityManager.getSigner(),
+                    trustStore,
+                    protocolVersion,
+                    protocolVersion,
+                    negotiator
+            );
 
-        // 4. Start Authenticated Loopback gRPC IPC Server
-        LocalTokenAuthInterceptor authInterceptor = new LocalTokenAuthInterceptor(configuration.getIpcAuthToken());
+            var receiver = transferEngine.createSessionReceiver(receivedDir, trustStore);
+
+            tcpTransport.startListening(configuration.getP2pPort(), conn -> {
+                sessionManager.handleInboundConnection(conn);
+            });
+            log.info("P2P TCP transport listening on {}:{}", NodeConfiguration.DEFAULT_HOST, tcpTransport.getListeningPort());
+        } catch (Exception e) {
+            log.warn("P2P transport failed to start on configured port: {}", e.getMessage());
+        }
+
+        // 7. Start Authenticated Loopback gRPC IPC Server with Session Validator
+        LocalTokenAuthInterceptor authInterceptor = new LocalTokenAuthInterceptor(
+                configuration.getIpcAuthToken(),
+                token -> ipcService != null && ipcService.isSessionValid(token)
+        );
         ipcService = new DesktopLocalNodeServiceImpl(
                 configuration.getIpcAuthToken(),
                 peerId,
                 configuration.getIpcPort(),
                 this::restartAsync,
                 this::stop,
-                transferEngine
+                transferEngine,
+                trustStore,
+                pairingCoordinator,
+                sessionManager
         );
 
         InetSocketAddress bindAddress = new InetSocketAddress(NodeConfiguration.DEFAULT_HOST, configuration.getIpcPort());
@@ -96,7 +171,8 @@ public final class DesktopNodeDaemon implements Closeable {
         running.set(true);
         eventBus.publish(new NodeEvent.NodeLifecycleChanged(
                 eventBus.nextSequence(), Instant.now(), NodeEvent.NodeLifecycleState.RUNNING, "Node is fully operational"));
-        log.info("Desktop Local Node IPC server listening on {}:{}", NodeConfiguration.DEFAULT_HOST, configuration.getIpcPort());
+        log.info("Desktop Local Node IPC server listening on {}:{} (Peer ID: {})",
+                NodeConfiguration.DEFAULT_HOST, configuration.getIpcPort(), peerId);
     }
 
     public synchronized void stop() {
@@ -110,6 +186,16 @@ public final class DesktopNodeDaemon implements Closeable {
         if (ipcService != null) {
             ipcService.close();
             ipcService = null;
+        }
+        if (tcpTransport != null) {
+            tcpTransport.stopListening();
+            tcpTransport = null;
+        }
+        if (sessionManager != null) {
+            try {
+                sessionManager.close();
+            } catch (IOException ignored) {}
+            sessionManager = null;
         }
         if (grpcServer != null) {
             log.info("Shutting down gRPC IPC server...");
@@ -164,7 +250,24 @@ public final class DesktopNodeDaemon implements Closeable {
         }
     }
 
-    public String getPeerId() { return peerId; }
+    public String getPeerId() {
+        if (peerId != null) {
+            return peerId;
+        }
+        if (configuration != null && java.nio.file.Files.exists(configuration.getDatabasePath())) {
+            try (var conn = java.sql.DriverManager.getConnection("jdbc:sqlite:" + configuration.getDatabasePath().toAbsolutePath())) {
+                try (var stmt = conn.prepareStatement("SELECT value FROM device_identity WHERE key = 'peer_id'")) {
+                    var rs = stmt.executeQuery();
+                    if (rs.next()) {
+                        peerId = rs.getString(1);
+                        return peerId;
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        return peerId;
+    }
+
     public NodeConfiguration getConfiguration() { return configuration; }
     public boolean isRunning() { return running.get(); }
     public DesktopLocalNodeServiceImpl getIpcService() { return ipcService; }
@@ -175,6 +278,12 @@ public final class DesktopNodeDaemon implements Closeable {
     public StartupRecoveryManager.RecoveryReport getLastRecoveryReport() { return lastRecoveryReport; }
     public ObjectIndexRepository getObjectIndex() { return sqliteStorage != null ? sqliteStorage.getObjectIndex() : null; }
     public org.peerlink.core.transfer.PeerTransferEngine getTransferEngine() { return transferEngine; }
+    public org.peerlink.core.identity.DeviceIdentityManager getIdentityManager() { return identityManager; }
+    public org.peerlink.core.security.TrustStore getTrustStore() { return trustStore; }
+    public org.peerlink.core.identity.PairingCoordinator getPairingCoordinator() { return pairingCoordinator; }
+    public org.peerlink.core.security.DesktopKeyStoreAdapter getKeyStore() { return keyStore; }
+    public org.peerlink.core.transport.StandardTcpTransportProvider getTcpTransport() { return tcpTransport; }
+    public org.peerlink.core.transport.PeerSessionManager getSessionManager() { return sessionManager; }
 
     @Override
     public void close() {

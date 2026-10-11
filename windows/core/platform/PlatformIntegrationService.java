@@ -1,8 +1,5 @@
 package org.peerlink.core.platform;
 
-import org.peerlink.core.platform.android.AndroidPlatformAdapter;
-import org.peerlink.core.platform.linux.LinuxPlatformAdapter;
-import org.peerlink.core.platform.macos.MacPlatformAdapter;
 import org.peerlink.core.platform.windows.WindowsPlatformAdapter;
 
 import java.nio.file.Path;
@@ -27,19 +24,7 @@ public class PlatformIntegrationService {
     }
 
     public static NativePlatformAdapter resolveDefaultAdapter() {
-        PlatformType current = PlatformType.detectCurrent();
-        switch (current) {
-            case WINDOWS:
-                return new WindowsPlatformAdapter();
-            case MACOS:
-                return new MacPlatformAdapter();
-            case LINUX:
-                return new LinuxPlatformAdapter();
-            case ANDROID:
-                return new AndroidPlatformAdapter();
-            default:
-                return new FallbackPlatformAdapter();
-        }
+        return new WindowsPlatformAdapter();
     }
 
     public NativePlatformAdapter getAdapter() {

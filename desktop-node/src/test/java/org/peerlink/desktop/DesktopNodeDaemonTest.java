@@ -83,7 +83,8 @@ class DesktopNodeDaemonTest {
         AuthenticateIpcResponse response = stub.authenticate(request);
         assertTrue(response.getAuthenticated());
         assertTrue(response.getIsCompatible());
-        assertEquals(config.getIpcAuthToken(), response.getSessionToken());
+        assertNotNull(response.getSessionToken());
+        assertTrue(response.getSessionToken().startsWith("sess_"));
         assertEquals(DesktopLocalNodeServiceImpl.NODE_VERSION, response.getNodeVersion());
         assertFalse(response.getLocalPeerId().getValue().isEmpty());
     }

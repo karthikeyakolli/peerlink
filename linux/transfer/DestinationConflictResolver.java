@@ -1,5 +1,6 @@
 package org.peerlink.core.transfer;
 
+import org.peerlink.core.filesystem.PathSafetyValidator;
 import org.peerlink.protocol.v1.DuplicateDestinationPolicy;
 
 import java.nio.file.Files;
@@ -10,6 +11,7 @@ import java.nio.file.Path;
  *
  * <p>Invariants:
  * <ul>
+ *   <li>NEVER allow path traversal outside the destination root.</li>
  *   <li>NEVER silently rename due to OS or filename incompatibility.</li>
  *   <li>NEVER silently convert file types or extensions.</li>
  *   <li>If exact destination was requested with {@code FAIL_IF_EXISTS}, existing target throws {@link DestinationConflictException}.</li>
@@ -29,12 +31,8 @@ public final class DestinationConflictResolver {
     public Path resolveDestination(Path destinationRoot, String relativePath, DuplicateDestinationPolicy policy)
             throws DestinationConflictException {
 
-        Path target = destinationRoot.resolve(relativePath).normalize();
-
-        // Enforce boundary: target must be inside destinationRoot (prevent path traversal attacks)
-        if (!target.startsWith(destinationRoot.normalize())) {
-            throw new SecurityException("Path traversal attempt detected in relative path: " + relativePath);
-        }
+        // Validate and resolve target strictly inside destinationRoot
+        Path target = PathSafetyValidator.resolveSafeDestination(destinationRoot, relativePath);
 
         if (!Files.exists(target)) {
             return target;

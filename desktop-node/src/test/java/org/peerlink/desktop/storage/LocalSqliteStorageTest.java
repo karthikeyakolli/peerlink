@@ -200,4 +200,38 @@ class LocalSqliteStorageTest {
         assertEquals(Optional.of("DESKTOP"), storage.getMetadata("node_mode"));
         assertEquals(Optional.empty(), storage.getMetadata("non_existent_key"));
     }
+
+    @Test
+    void testDurableTransferSessionJournalDelegation() {
+        assertNotNull(storage.getTransferSessionJournal());
+
+        long now = System.currentTimeMillis();
+        org.peerlink.core.transfer.TransferSessionRecord session = new org.peerlink.core.transfer.TransferSessionRecord(
+                "xfer-401", "op-401", "peer-alice", "peer-bob",
+                org.peerlink.protocol.v1.TransferState.TRANSFER_STATE_TRANSFERRING,
+                10240, 2, now
+        );
+
+        storage.recordSession(session);
+
+        Optional<org.peerlink.core.transfer.TransferSessionRecord> fetched = storage.getSession("xfer-401");
+        assertTrue(fetched.isPresent());
+        assertEquals("op-401", fetched.get().getOperationId());
+        assertEquals(org.peerlink.protocol.v1.TransferState.TRANSFER_STATE_TRANSFERRING, fetched.get().getState());
+
+        // Update chunk statuses and metadata
+        storage.updateChunkMetadata("xfer-401", 0, 0, 0, 1024, "chunk-hash-0", org.peerlink.protocol.v1.ChunkStatus.CHUNK_STATUS_ACKED);
+        storage.updateChunkMetadata("xfer-401", 0, 1, 1024, 1024, "chunk-hash-1", org.peerlink.protocol.v1.ChunkStatus.CHUNK_STATUS_ACKED);
+
+        var acked = storage.getAckedChunks("xfer-401", 0);
+        assertEquals(2, acked.size());
+        assertTrue(acked.contains(0L));
+        assertTrue(acked.contains(1L));
+
+        // Verify incomplete sessions list
+        List<org.peerlink.core.transfer.TransferSessionRecord> incomplete = storage.getIncompleteSessions();
+        assertFalse(incomplete.isEmpty());
+        assertTrue(incomplete.stream().anyMatch(s -> s.getTransferId().equals("xfer-401")));
+    }
 }
+

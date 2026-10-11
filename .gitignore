@@ -1,5 +1,6 @@
 # Maven / Java
 target/
+**/target/
 *.class
 *.jar
 *.war
@@ -10,15 +11,17 @@ target/
 *.rar
 
 # Flutter / Dart
-apps/peerlink-app/.dart_tool/
-apps/peerlink-app/.flutter-plugins
-apps/peerlink-app/.flutter-plugins-dependencies
-apps/peerlink-app/.packages
-apps/peerlink-app/build/
-apps/peerlink-app/.pub/
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/build/
+**/.pub/
+**/ephemeral/
 
 # Android
 .gradle/
+**/.gradle/
 build/
 local.properties
 *.apk
@@ -32,8 +35,10 @@ local.properties
 
 # IDEs
 .idea/
+**/.idea/
 *.iml
 .vscode/
+**/.vscode/
 *.swp
 *~
 
@@ -48,6 +53,8 @@ ehthumbs.db
 scratch/
 tmp/
 data/
+**/data/
 dist/
+**/dist/
 *.token
 dependency-reduced-pom.xml

@@ -150,6 +150,20 @@ public final class StartupRecoveryManager {
     }
 
     /**
+     * Run full startup recovery, including transfer engine reconciliation.
+     */
+    public RecoveryReport runRecovery(String startupReason,
+                                     org.peerlink.core.transfer.PeerTransferEngine transferEngine,
+                                     java.nio.file.Path destinationDir) throws StartupRecoveryException {
+        RecoveryReport baseReport = runRecovery(startupReason);
+        if (transferEngine != null) {
+            var transferReport = transferEngine.reconcileAtStartup(destinationDir);
+            log.info("Transfer engine startup reconciliation complete: {}", transferReport.summary());
+        }
+        return baseReport;
+    }
+
+    /**
      * Immutable report produced by a recovery run.
      */
     public record RecoveryReport(

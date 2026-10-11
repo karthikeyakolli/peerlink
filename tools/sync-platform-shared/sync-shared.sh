@@ -38,6 +38,7 @@ echo "=========================================================="
 
 TOTAL_COPIED=0
 TOTAL_UP_TO_DATE=0
+TOTAL_CONFLICTS=0
 
 for PLATFORM in "${PLATFORMS[@]}"; do
     echo ""
@@ -54,10 +55,15 @@ for PLATFORM in "${PLATFORMS[@]}"; do
                 TARGET_FILE="$DEST_DIR/$REL_PATH"
                 TARGET_DIR="$(dirname "$TARGET_FILE")"
 
-                if [ -f "$TARGET_FILE" ] && cmp -s "$FILE" "$TARGET_FILE"; then
-                    TOTAL_UP_TO_DATE=$((TOTAL_UP_TO_DATE + 1))
+                if [ -f "$TARGET_FILE" ]; then
+                    if cmp -s "$FILE" "$TARGET_FILE"; then
+                        TOTAL_UP_TO_DATE=$((TOTAL_UP_TO_DATE + 1))
+                    else
+                        echo "  [DIVERGENCE/CONFLICT] $MODULE/$REL_PATH - Platform file preserved!"
+                        TOTAL_CONFLICTS=$((TOTAL_CONFLICTS + 1))
+                    fi
                 else
-                    echo "  [SYNC] $MODULE/$REL_PATH"
+                    echo "  [NEW] $MODULE/$REL_PATH"
                     if [ "$DRY_RUN" != "true" ]; then
                         mkdir -p "$TARGET_DIR"
                         cp -p "$FILE" "$TARGET_FILE"
@@ -77,10 +83,15 @@ for PLATFORM in "${PLATFORMS[@]}"; do
             TARGET_FILE="$DEST_FLUTTER/$REL_PATH"
             TARGET_DIR="$(dirname "$TARGET_FILE")"
 
-            if [ -f "$TARGET_FILE" ] && cmp -s "$FILE" "$TARGET_FILE"; then
-                TOTAL_UP_TO_DATE=$((TOTAL_UP_TO_DATE + 1))
+            if [ -f "$TARGET_FILE" ]; then
+                if cmp -s "$FILE" "$TARGET_FILE"; then
+                    TOTAL_UP_TO_DATE=$((TOTAL_UP_TO_DATE + 1))
+                else
+                    echo "  [DIVERGENCE/CONFLICT] app/flutter/$REL_PATH - Platform file preserved!"
+                    TOTAL_CONFLICTS=$((TOTAL_CONFLICTS + 1))
+                fi
             else
-                echo "  [SYNC] app/flutter/$REL_PATH"
+                echo "  [NEW] app/flutter/$REL_PATH"
                 if [ "$DRY_RUN" != "true" ]; then
                     mkdir -p "$TARGET_DIR"
                     cp -p "$FILE" "$TARGET_FILE"
@@ -94,6 +105,13 @@ done
 echo ""
 echo "=========================================================="
 echo " Synchronization Summary:"
-echo " Files Copied/Updated: $TOTAL_COPIED"
+echo " Files Copied (New):   $TOTAL_COPIED"
 echo " Files Up-To-Date:     $TOTAL_UP_TO_DATE"
+echo " Conflicts Divergent:  $TOTAL_CONFLICTS"
 echo "=========================================================="
+
+if [ "$TOTAL_CONFLICTS" -gt 0 ]; then
+    exit 1
+else
+    exit 0
+fi

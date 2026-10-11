@@ -324,7 +324,7 @@ class PeerTransferEngineTest {
                 "Unverified content must NEVER be written to destination");
 
         // Staging part must be deleted
-        assertFalse(Files.exists(stagingDir.resolve("xfer_corrupt_test").resolve("0.part")),
+        assertFalse(engine.getStagingManager().hasStagedPart("xfer_corrupt_test", 0),
                 "Corrupted staging file must be purged");
     }
 

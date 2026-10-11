@@ -38,6 +38,14 @@ public interface TransferSessionJournal {
     void updateChunkStatus(String transferId, int itemIndex, long chunkIndex, ChunkStatus status);
 
     /**
+     * Update status and durability metadata of an individual chunk.
+     */
+    default void updateChunkMetadata(String transferId, int itemIndex, long chunkIndex,
+                                     long offsetBytes, int sizeBytes, String sha256, ChunkStatus status) {
+        updateChunkStatus(transferId, itemIndex, chunkIndex, status);
+    }
+
+    /**
      * Get the set of ACKed chunk indices for a specific item index.
      */
     Set<Long> getAckedChunks(String transferId, int itemIndex);
