@@ -21,6 +21,10 @@ public record ShareDefinition(
         Set<AccessScope> allowedScopes,
         long createdAtUtcMs,
         long expiresAtUtcMs,
+        long gracePeriodMs,
+        boolean isOneTime,
+        boolean requireToken,
+        boolean guestAllowed,
         String authSecret
 ) {
     public ShareDefinition {
@@ -37,11 +41,34 @@ public record ShareDefinition(
         allowedScopes = allowedScopes == null ? Set.of() : Collections.unmodifiableSet(new HashSet<>(allowedScopes));
     }
 
+    public ShareDefinition(
+            String shareId,
+            String displayName,
+            Path rootDirectory,
+            Set<String> allowedPeerIds,
+            Set<AccessScope> allowedScopes,
+            long createdAtUtcMs,
+            long expiresAtUtcMs,
+            String authSecret
+    ) {
+        this(shareId, displayName, rootDirectory, allowedPeerIds, allowedScopes,
+                createdAtUtcMs, expiresAtUtcMs, 30_000L, false, false, false, authSecret);
+    }
+
     public boolean isExpired(long nowUtcMs) {
         return expiresAtUtcMs > 0 && nowUtcMs > expiresAtUtcMs;
     }
 
+    public boolean isActiveOperationAllowed(long nowUtcMs, long operationStartedAtUtcMs) {
+        if (!isExpired(nowUtcMs)) return true;
+        if (gracePeriodMs <= 0) return false;
+        return nowUtcMs <= (operationStartedAtUtcMs + gracePeriodMs);
+    }
+
     public boolean isPeerPermitted(String peerId) {
+        if (guestAllowed && (peerId == null || peerId.isBlank() || peerId.equalsIgnoreCase("GUEST"))) {
+            return true;
+        }
         if (allowedPeerIds.isEmpty()) {
             return false; // By default, explicit peer authorization is required
         }

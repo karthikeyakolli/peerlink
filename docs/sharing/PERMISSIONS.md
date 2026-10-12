@@ -1,4 +1,4 @@
-﻿# Sharing Permissions Reference
+# Sharing Permissions Reference
 
 ## Permission Levels
 
@@ -36,3 +36,25 @@ Requested permission
 - Guests cannot hold DOWNLOAD unless explicitly granted in the guest token.
 - Guests cannot escalate to any trusted-peer permission by claiming a peer ID.
 - Each guest token is scoped independently, with no inheritance from peer-specific tokens.
+
+---
+
+## Safe Preview Engine & Executable Ban
+
+Files matching any executable or script patterns are strictly forbidden from preview generation:
+- Extensions: `.exe`, `.dll`, `.so`, `.dylib`, `.bat`, `.cmd`, `.sh`, `.ps1`, `.app`, `.jar`, `.msi`, `.bin`, `.scr`, `.com`, `.vbs`, `.elf`
+- Preview requests for these types throw `UnsafePreviewException` immediately.
+- Previews for safe types (text, markdown, json, images) are capped to 64 KB maximum to prevent buffer overflow.
+
+---
+
+## Untrusted Remote Path Validation
+
+Remote paths provided across the wire are treated as completely untrusted input:
+- **Parent Traversal**: Sequences containing `..` or leading `/` or `\` are rejected.
+- **Drive Letter Injection**: Windows drive patterns (e.g. `C:\`, `D:`) are rejected.
+- **UNC Paths**: Network shares (e.g. `\\host\share`) are rejected.
+- **Alternate Data Streams**: NTFS ADS streams (e.g. `file.txt:$DATA`) are rejected.
+- **Null-Byte Poisoning**: Paths with `\0` are rejected.
+- Paths must strictly resolve within the canonical `shareRoot` folder.
+

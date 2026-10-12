@@ -1,4 +1,4 @@
-﻿# One-Time Share Design
+# One-Time Share Design
 
 ## Motivation
 
@@ -34,3 +34,20 @@ CONSUMED
 - It must remain stable for all chunks and retries of the same logical transfer.
 - It is bound in the one-time ShareCapability token at issuance time.
 - On completion, the owner's OneTimeConsumptionTracker records it permanently.
+
+---
+
+## On-Demand Retrieval Consumption Trigger
+
+- Upon successful read of the complete file payload via `RemoteAccessCoordinator` or wire transfer, the Local Node invokes `ShareManager.markOneTimeConsumed(shareId, operationId)`.
+- If an operation was interrupted halfway, the client retrying with the identical `operationId` is permitted to resume.
+- Any subsequent attempt by another client or with a new `operationId` is rejected with `REJECTED_ONE_TIME_CONSUMED`.
+
+---
+
+## Grace Period Interaction
+
+- One-time shares support an optional `gracePeriodMs` (default 30,000 ms).
+- Grace period only covers operations that initiated **prior** to the expiration/revocation timestamp (`operationStartUtcMs <= expiresAtUtcMs`).
+- Unconsumed one-time shares that pass their expiration timestamp without an in-flight operation are rejected immediately.
+

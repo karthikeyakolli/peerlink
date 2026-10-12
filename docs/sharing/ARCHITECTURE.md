@@ -1,4 +1,4 @@
-﻿# Sharing Architecture
+# Sharing Architecture
 
 ## What a Share Is
 
@@ -85,3 +85,22 @@ If the owner's device is offline:
 - The share is functionally unavailable.
 - There is no cloud relay for file content.
 - Active already-authorized operations may continue within grace if the connection persists.
+
+---
+
+## Local Node Enforcement & Zero Implicit Access
+
+1. **No Implicit Filesystem Access**:
+   - A previously paired or trusted peer does **not** gain automatic access to all local files.
+   - Access to any file or folder requires an active `ShareDefinition` explicitly registering that peer ID or an authenticated capability token.
+   - Requests without an active share or valid capability are rejected immediately with `PEER_NOT_ALLOWED` or `TOKEN_INVALID`.
+
+2. **Bounded File Retrieval**:
+   - On-demand file reads are strictly bounded by `BoundedFileReader` (default 4 MB, hard ceiling 16 MB) to prevent remote denial-of-service or memory exhaustion.
+   - Read buffers compute SHA-256 digests in real time and verify integrity before returning data.
+
+3. **Destination Isolation & Safe Non-Execution**:
+   - Content downloaded from remote shares is managed via `SafeDestinationHandler`.
+   - Incoming files are written to isolated staging `.part` temporary files, verified against expected SHA-256 digests, atomically moved into position, and have execution permissions explicitly stripped (`setExecutable(false)`).
+   - Remote files are **never** auto-executed upon retrieval.
+

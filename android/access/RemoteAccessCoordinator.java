@@ -83,12 +83,16 @@ public final class RemoteAccessCoordinator {
                 shareId,
                 peerId,
                 requiredScope,
-                request.getAuthorizationToken()
+                request.getAuthorizationToken(),
+                reqId,
+                request.getClientTimestampUtcMs()
         );
 
         if (!valResult.isAuthorized()) {
             AccessAuditRecord.AuditOutcome outcome = switch (valResult.rejectReason()) {
                 case SHARE_EXPIRED, TOKEN_EXPIRED -> AccessAuditRecord.AuditOutcome.REJECTED_EXPIRED;
+                case SHARE_REVOKED, TOKEN_REVOKED -> AccessAuditRecord.AuditOutcome.REJECTED_REVOKED;
+                case ONE_TIME_CONSUMED -> AccessAuditRecord.AuditOutcome.REJECTED_ONE_TIME_CONSUMED;
                 default -> AccessAuditRecord.AuditOutcome.REJECTED_UNAUTHORIZED;
             };
             auditJournal.log(new AccessAuditRecord(
@@ -208,15 +212,34 @@ public final class RemoteAccessCoordinator {
                 }
 
                 case ACCESS_REQUEST_TYPE_DOWNLOAD -> {
-                    // Verifies target existence and boundary safety, returning reference for transfer engine
+                    Path targetFile = pathValidator.resolveAndValidate(share.rootDirectory(), relPath);
                     RemoteObjectReference targetRef = browser.getMetadata(share.rootDirectory(), relPath);
                     responseBuilder.addItems(targetRef)
                             .setTotalMatching(1);
 
+                    long transferredBytes = 0;
+                    if (java.nio.file.Files.isRegularFile(targetFile)) {
+                        int maxBytes = request.getPreviewMaxBytes() > 0 ?
+                                request.getPreviewMaxBytes() :
+                                BoundedFileReader.DEFAULT_MAX_RETRIEVAL_BYTES;
+
+                        long fileSize = targetRef.getByteSize();
+                        if (fileSize <= BoundedFileReader.ABSOLUTE_MAX_RETRIEVAL_BYTES) {
+                            BoundedFileReader.ReadResult readResult = BoundedFileReader.readBounded(targetFile, maxBytes);
+                            responseBuilder.setPreviewData(ByteString.copyFrom(readResult.data()));
+                            transferredBytes = readResult.data().length;
+
+                            if (share.isOneTime() && readResult.isComplete()) {
+                                shareManager.markOneTimeConsumed(shareId, reqId);
+                            }
+                        }
+                    }
+
                     auditJournal.log(new AccessAuditRecord(
                             startTime, reqId, peerId, reqType, shareId, relPath,
                             null, AccessAuditRecord.AuditOutcome.AUTHORIZED,
-                            1, targetRef.getByteSize(), "Download authorized"
+                            1, transferredBytes > 0 ? transferredBytes : targetRef.getByteSize(),
+                            transferredBytes > 0 ? "On-demand bounded retrieval authorized" : "Download reference authorized"
                     ));
                 }
 

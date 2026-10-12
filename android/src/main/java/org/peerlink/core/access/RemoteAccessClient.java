@@ -184,6 +184,32 @@ public final class RemoteAccessClient {
     }
 
     /**
+     * Requests on-demand retrieval of a remote file within an authorized share.
+     */
+    public CompletableFuture<AccessResponse> retrieveFileAsync(
+            String shareId,
+            String relativePath,
+            int maxBytes,
+            String authorizationToken,
+            long timeoutMs
+    ) {
+        AccessRequest request = AccessRequest.newBuilder()
+                .setRequestId(generateRequestId())
+                .setRequesterPeerId(PeerId.newBuilder().setValue(localPeerId).build())
+                .setTargetPeerId(PeerId.newBuilder().setValue(targetPeerId).build())
+                .setRequestType(AccessRequestType.ACCESS_REQUEST_TYPE_DOWNLOAD)
+                .setShareId(shareId)
+                .setRelativePath(relativePath == null ? "" : relativePath)
+                .setPreviewMaxBytes(maxBytes)
+                .setAuthorizationToken(authorizationToken == null ? "" : authorizationToken)
+                .setTimeoutMs(timeoutMs)
+                .setClientTimestampUtcMs(System.currentTimeMillis())
+                .build();
+
+        return sendRequestAsync(request, timeoutMs);
+    }
+
+    /**
      * Cancels an ongoing access request.
      */
     public CompletableFuture<AccessCancelResponse> cancelAsync(String targetRequestId, String reason) {
