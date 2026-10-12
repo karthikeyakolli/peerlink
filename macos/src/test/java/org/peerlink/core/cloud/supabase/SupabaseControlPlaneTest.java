@@ -557,4 +557,89 @@ public class SupabaseControlPlaneTest {
         coordinator.stop();
         assertFalse(coordinator.isRunning());
     }
+
+    // =========================================================================
+    // Phase 12 Invariants: File Payload Prohibition, Rate Limiting, Signing
+    // =========================================================================
+    @Test
+    @DisplayName("Phase 12: SupabaseRestClient strictly prohibits user file content and transfer chunks")
+    void testSupabaseFilePayloadProhibition() {
+        SupabaseConfig config = SupabaseConfig.development(serverUrl, validAnonKey);
+        SupabaseRestClient client = new SupabaseRestClient(config);
+
+        String[] forbiddenTables = new String[]{"files", "transfer_chunks", "file_storage", "user_content", "blob_data"};
+        for (String table : forbiddenTables) {
+            SecurityException ex = assertThrows(SecurityException.class, () -> client.select(table, null, "token"));
+            assertTrue(ex.getMessage().contains("ARCHITECTURAL VIOLATION"), "Must mention architectural violation");
+        }
+    }
+
+    @Test
+    @DisplayName("Phase 12: SupabaseRestClient rejects payloads exceeding 64KB threshold")
+    void testSupabaseOversizedPayloadProtection() {
+        SupabaseConfig config = SupabaseConfig.development(serverUrl, validAnonKey);
+        SupabaseRestClient client = new SupabaseRestClient(config);
+
+        Map<String, Object> hugePayload = new HashMap<>();
+        StringBuilder sb = new StringBuilder(70000);
+        for (int i = 0; i < 70000; i++) sb.append('X');
+        hugePayload.put("raw_data", sb.toString());
+
+        SecurityException ex = assertThrows(SecurityException.class, () -> client.insert("device_presence", hugePayload, "token"));
+        assertTrue(ex.getMessage().contains("64 KB maximum threshold"));
+    }
+
+    @Test
+    @DisplayName("Phase 12: SignalingRateLimiter enforces token-bucket limits on signaling traffic")
+    void testSignalingRateLimiter() {
+        SignalingRateLimiter limiter = new SignalingRateLimiter(3, 1, 3, 1);
+        String peerId = "peer-rate-test";
+
+        assertTrue(limiter.tryAcquire(peerId));
+        assertTrue(limiter.tryAcquire(peerId));
+        assertTrue(limiter.tryAcquire(peerId));
+        assertFalse(limiter.tryAcquire(peerId));
+
+        assertThrows(SignalingRateLimitException.class, () -> limiter.acquireOrThrow(peerId));
+    }
+
+    @Test
+    @DisplayName("Phase 12: Cryptographic device identity is separated from Supabase account and verified")
+    void testSignalingCryptographicIdentitySeparation() throws Exception {
+        SignalingMessage msg = new SignalingMessage(
+                UUID.randomUUID().toString(),
+                "peer-alice-ed25519",
+                "peer-bob-ed25519",
+                SignalingMessage.Type.OFFER,
+                Collections.singletonMap("sdp", "mock-sdp"),
+                Instant.now().toString(),
+                Instant.now().plusSeconds(300).toString(),
+                false
+        );
+
+        assertFalse(msg.isCryptographicallySigned());
+
+        String pubKey = "mock-ed25519-public-key";
+        SignalingMessage signed = msg.withSignature(data -> {
+            try {
+                java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+                return md.digest(data);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }, pubKey);
+
+        assertTrue(signed.isCryptographicallySigned());
+        assertEquals(pubKey, signed.getSenderPublicKey());
+
+        boolean valid = signed.verifySignature((data, sig) -> {
+            try {
+                java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+                return Arrays.equals(md.digest(data), sig);
+            } catch (Exception e) {
+                return false;
+            }
+        });
+        assertTrue(valid);
+    }
 }

@@ -43,7 +43,10 @@ public class SupabaseRestClient {
         return circuitBreaker;
     }
 
+    public static final int MAX_CONTROL_PLANE_PAYLOAD_BYTES = 65536; // 64 KB
+
     public List<Map<String, Object>> select(String table, String queryParams, String authToken) throws IOException {
+        validateTableAllowed(table);
         String url = buildUrl(table, queryParams);
         HttpRequest.Builder builder = createRequestBuilder(url, authToken)
                 .GET();
@@ -53,6 +56,8 @@ public class SupabaseRestClient {
     }
 
     public List<Map<String, Object>> insert(String table, Object body, String authToken) throws IOException {
+        validateTableAllowed(table);
+        validatePayloadAllowed(body);
         String url = buildUrl(table, null);
         String json = SimpleJson.stringify(body);
 
@@ -65,6 +70,8 @@ public class SupabaseRestClient {
     }
 
     public List<Map<String, Object>> upsert(String table, Object body, String authToken, String onConflict) throws IOException {
+        validateTableAllowed(table);
+        validatePayloadAllowed(body);
         String query = onConflict != null ? "on_conflict=" + onConflict : null;
         String url = buildUrl(table, query);
         String json = SimpleJson.stringify(body);
@@ -78,6 +85,8 @@ public class SupabaseRestClient {
     }
 
     public List<Map<String, Object>> update(String table, String queryParams, Object body, String authToken) throws IOException {
+        validateTableAllowed(table);
+        validatePayloadAllowed(body);
         String url = buildUrl(table, queryParams);
         String json = SimpleJson.stringify(body);
 
@@ -90,11 +99,33 @@ public class SupabaseRestClient {
     }
 
     public void delete(String table, String queryParams, String authToken) throws IOException {
+        validateTableAllowed(table);
         String url = buildUrl(table, queryParams);
         HttpRequest.Builder builder = createRequestBuilder(url, authToken)
                 .DELETE();
 
         execute(builder.build());
+    }
+
+    private void validateTableAllowed(String table) {
+        if (table == null) return;
+        String lower = table.toLowerCase();
+        if ((lower.contains("file") && !lower.contains("profile")) ||
+            lower.contains("chunk") ||
+            lower.contains("blob") ||
+            lower.contains("transfer_data") ||
+            lower.contains("transfer_item") ||
+            lower.contains("user_content")) {
+            throw new SecurityException("ARCHITECTURAL VIOLATION: Normal user file content or transfer chunks must NEVER be stored or queried in Supabase! (Table: " + table + ")");
+        }
+    }
+
+    private void validatePayloadAllowed(Object body) {
+        if (body == null) return;
+        String json = SimpleJson.stringify(body);
+        if (json.length() > MAX_CONTROL_PLANE_PAYLOAD_BYTES) {
+            throw new SecurityException("ARCHITECTURAL VIOLATION: Control-plane metadata payload exceeds 64 KB maximum threshold (" + json.length() + " bytes). Raw file data prohibited in Supabase!");
+        }
     }
 
     private String buildUrl(String table, String queryParams) {

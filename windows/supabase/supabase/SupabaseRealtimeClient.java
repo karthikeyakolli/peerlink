@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -43,6 +44,7 @@ public class SupabaseRealtimeClient {
             }
     ));
 
+    private final AtomicInteger reconnectAttempts = new AtomicInteger(0);
     private WebSocket webSocket;
     private ScheduledExecutorService scheduler;
     private ScheduledFuture<?> heartbeatTask;
@@ -130,6 +132,7 @@ public class SupabaseRealtimeClient {
                     .buildAsync(URI.create(wsUri), new WebSocketListenerImpl());
 
             this.webSocket = future.get(config.getConnectTimeoutMs(), TimeUnit.MILLISECONDS);
+            reconnectAttempts.set(0);
 
             // Re-subscribe to all pending topics
             for (String topic : subscribedTopics) {
@@ -151,12 +154,14 @@ public class SupabaseRealtimeClient {
     }
 
     private void scheduleReconnect() {
-        if (!isRunning.get()) return;
+        if (!isRunning.get() || scheduler == null || scheduler.isShutdown()) return;
+        int attempt = reconnectAttempts.incrementAndGet();
+        long delaySeconds = Math.min(30, (1L << Math.min(attempt, 4))) + ThreadLocalRandom.current().nextInt(2);
         scheduler.schedule(() -> {
             if (isRunning.get()) {
                 connect();
             }
-        }, 5, TimeUnit.SECONDS);
+        }, delaySeconds, TimeUnit.SECONDS);
     }
 
     private void sendHeartbeat() {

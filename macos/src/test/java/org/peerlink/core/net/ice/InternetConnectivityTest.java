@@ -402,4 +402,105 @@ public class InternetConnectivityTest {
         assertEquals(original.getRelAddr(), parsed.getRelAddr());
         assertEquals(original.getRelPort(), parsed.getRelPort());
     }
+
+    // =========================================================================
+    // Test 16: TURN RFC 5766 ChannelData Framing and Decapsulation
+    // =========================================================================
+    @Test
+    @DisplayName("Test 16: TURN RFC 5766 ChannelData encapsulation with 4-byte padding")
+    void testTurnChannelDataFraming() {
+        TurnClient turnClient = new TurnClient("turn.peerlink.org", 3478, "user", "pass");
+        byte[] payload = "Hello PeerLink Over TURN Relay".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] encapsulated = turnClient.encapsulateChannelData(TurnClient.DEFAULT_CHANNEL_NUMBER, payload);
+
+        // 4 bytes header + payload length padded to multiple of 4
+        int expectedPadding = (4 - (payload.length % 4)) % 4;
+        assertEquals(4 + payload.length + expectedPadding, encapsulated.length);
+
+        ByteBuffer buf = ByteBuffer.wrap(encapsulated);
+        assertEquals((short) TurnClient.DEFAULT_CHANNEL_NUMBER, buf.getShort());
+        assertEquals((short) payload.length, buf.getShort());
+
+        byte[] extracted = new byte[payload.length];
+        buf.get(extracted);
+        assertArrayEquals(payload, extracted);
+    }
+
+    // =========================================================================
+    // Test 17: TURN Allocation Lifetime and Expiry Checking
+    // =========================================================================
+    @Test
+    @DisplayName("Test 17: TURN allocation detects expiration and refresh need")
+    void testTurnAllocationExpiration() {
+        TurnClient turnClient = new TurnClient("turn.peerlink.org", 3478, "user", "pass");
+        assertFalse(turnClient.isAllocationExpired());
+
+        TurnClient.TurnAllocation alloc = new TurnClient.TurnAllocation(
+                new InetSocketAddress("198.51.100.1", 49152),
+                1 // 1 second lifetime
+        );
+
+        // Immediately after creation, not expired
+        assertFalse(alloc.isExpired());
+
+        // Fake expired allocation
+        TurnClient.TurnAllocation expiredAlloc = new TurnClient.TurnAllocation(
+                new InetSocketAddress("198.51.100.1", 49152),
+                -10
+        );
+        assertTrue(expiredAlloc.isExpired());
+        assertTrue(expiredAlloc.needsRefresh(60));
+    }
+
+    // =========================================================================
+    // Test 18: TurnRelayedTransportConnection Peer Authentication Gate
+    // =========================================================================
+    @Test
+    @DisplayName("Test 18: TurnRelayedTransportConnection enforces peer authentication gate")
+    void testTurnRelayedTransportAuthenticationGate() throws Exception {
+        ConnectionId connId = ConnectionId.newBuilder().setValue("turn-test-conn").build();
+        InetSocketAddress relayAddr = new InetSocketAddress("198.51.100.1", 3478);
+        InetSocketAddress localAddr = new InetSocketAddress("192.168.1.100", 54321);
+        InetSocketAddress remotePeerRelay = new InetSocketAddress("198.51.100.2", 40000);
+
+        try (TurnRelayedTransportConnection conn = new TurnRelayedTransportConnection(
+                connId, localAddr, remotePeerRelay, relayAddr, TransportProtocol.UDP)) {
+
+            assertFalse(conn.isPeerAuthenticated());
+            assertFalse(conn.isDirect());
+            assertEquals(ConnectionDiagnostics.Outcome.RELAY_SUCCEEDED, conn.getDiagnosticsOutcome());
+
+            // Sending application transfer before authentication throws SecurityException
+            assertThrows(SecurityException.class, conn::checkApplicationTransferAuthorization);
+
+            // Mark authenticated
+            conn.markPeerAuthenticated("device-remote-peer-456");
+            assertTrue(conn.isPeerAuthenticated());
+            assertEquals("device-remote-peer-456", conn.getAuthenticatedPeerId());
+            assertDoesNotThrow(conn::checkApplicationTransferAuthorization);
+        }
+    }
+
+    // =========================================================================
+    // Test 19: InternetConnectivityCoordinator Relay Connection Factory
+    // =========================================================================
+    @Test
+    @DisplayName("Test 19: InternetConnectivityCoordinator creates TurnRelayedTransportConnection with correct diagnostics")
+    void testCoordinatorRelayedConnectionFactory() throws Exception {
+        InternetConnectivityCoordinator coordinator = new InternetConnectivityCoordinator(
+                "stun.peerlink.org", 3478, "turn.peerlink.org", 3478, "user", "pass");
+
+        TurnRelayedTransportConnection conn = coordinator.createRelayedTransportConnection(
+                "session-conn-001",
+                new InetSocketAddress("192.168.1.100", 54321),
+                new InetSocketAddress("198.51.100.2", 40000)
+        );
+
+        assertNotNull(conn);
+        assertEquals("session-conn-001", conn.getConnectionId().getValue());
+        assertFalse(conn.isDirect());
+        assertEquals(ConnectionDiagnostics.Outcome.RELAY_SUCCEEDED, conn.getDiagnosticsOutcome());
+        conn.close();
+    }
 }
+

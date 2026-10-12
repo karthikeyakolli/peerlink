@@ -5,7 +5,9 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * Main coordinator for PeerLink's Supabase Control Plane integration.
@@ -42,6 +44,10 @@ public class SupabaseControlPlaneCoordinator {
     private Consumer<Boolean> outageListener;
     private Consumer<DevicePresenceEntry> presenceListener;
 
+    private final SignalingRateLimiter rateLimiter = new SignalingRateLimiter();
+    private Function<byte[], byte[]> cryptographicSigner;
+    private BiFunction<byte[], byte[], Boolean> cryptographicVerifier;
+
     public SupabaseControlPlaneCoordinator(SupabaseConfig config,
                                            SupabaseAuthClient authClient,
                                            SupabaseDeviceRegistryClient registryClient) {
@@ -59,6 +65,18 @@ public class SupabaseControlPlaneCoordinator {
                 }
             });
         }
+    }
+
+    public SignalingRateLimiter getRateLimiter() {
+        return rateLimiter;
+    }
+
+    public void setCryptographicSigner(Function<byte[], byte[]> signer) {
+        this.cryptographicSigner = signer;
+    }
+
+    public void setCryptographicVerifier(BiFunction<byte[], byte[], Boolean> verifier) {
+        this.cryptographicVerifier = verifier;
     }
 
     public synchronized void start(SupabaseAuthSession session, DeviceRegistryEntry device, List<String> candidateEndpoints) throws IOException {
@@ -154,6 +172,7 @@ public class SupabaseControlPlaneCoordinator {
     }
 
     public SignalingMessage sendSignaling(String recipientPeerId, SignalingMessage.Type type, Map<String, Object> payload) throws IOException {
+        rateLimiter.acquireOrThrow(recipientPeerId);
         ensureActiveSession();
         SignalingMessage msg = new SignalingMessage(
                 UUID.randomUUID().toString(),
@@ -165,6 +184,10 @@ public class SupabaseControlPlaneCoordinator {
                 Instant.now().plusSeconds(300).toString(),
                 false
         );
+
+        if (cryptographicSigner != null && localDevice.getPublicKey() != null) {
+            msg = msg.withSignature(cryptographicSigner, localDevice.getPublicKey());
+        }
 
         try {
             return registryClient.sendSignalingMessage(msg, currentSession.getAccessToken());
@@ -185,6 +208,28 @@ public class SupabaseControlPlaneCoordinator {
             );
 
             for (SignalingMessage msg : pending) {
+                // 1. Check expiration
+                if (msg.isExpired()) {
+                    registryClient.markSignalingMessageConsumed(msg.getMessageId(), currentSession.getAccessToken());
+                    continue;
+                }
+
+                // 2. Check recipient authorization
+                if (!localDevice.getPeerId().equals(msg.getRecipientPeerId())) {
+                    registryClient.markSignalingMessageConsumed(msg.getMessageId(), currentSession.getAccessToken());
+                    continue;
+                }
+
+                // 3. Cryptographic signature verification if configured
+                if (cryptographicVerifier != null && msg.isCryptographicallySigned()) {
+                    boolean valid = msg.verifySignature(cryptographicVerifier);
+                    if (!valid) {
+                        // Drop tampered / forged message
+                        registryClient.markSignalingMessageConsumed(msg.getMessageId(), currentSession.getAccessToken());
+                        continue;
+                    }
+                }
+
                 if (signalingListener != null) {
                     signalingListener.accept(msg);
                 }

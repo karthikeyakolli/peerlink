@@ -88,7 +88,10 @@ public class SupabaseDeviceRegistryClient {
         List<Map<String, Object>> rows = restClient.select("active_device_presence", query, authToken);
         List<DevicePresenceEntry> list = new ArrayList<>();
         for (Map<String, Object> row : rows) {
-            list.add(DevicePresenceEntry.fromMap(row));
+            DevicePresenceEntry entry = DevicePresenceEntry.fromMap(row);
+            if (!entry.isStale() && !"OFFLINE".equalsIgnoreCase(entry.getPresenceStatus())) {
+                list.add(entry);
+            }
         }
         return list;
     }

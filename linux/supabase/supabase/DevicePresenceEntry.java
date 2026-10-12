@@ -39,6 +39,10 @@ public final class DevicePresenceEntry {
         }
     }
 
+    public String getEffectiveStatus() {
+        return isStale() ? "OFFLINE" : presenceStatus;
+    }
+
     public Map<String, Object> toMap() {
         Map<String, Object> map = new HashMap<>();
         map.put("device_id", deviceId);

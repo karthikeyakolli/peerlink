@@ -41,6 +41,20 @@ public class TurnClient {
     public static final short ATTR_XOR_RELAYED_ADDRESS = 0x0016;
     public static final short ATTR_REQUESTED_TRANSPORT = 0x0019;
 
+    public static final short DEFAULT_CHANNEL_NUMBER = 0x4000;
+
+    /**
+     * Encapsulates raw payload with RFC 5766 ChannelData header:
+     * 2-byte channel number (0x4000..0x7FFF), 2-byte length (big-endian), payload.
+     */
+    public static byte[] encapsulateChannelData(short channelNumber, byte[] payload) {
+        ByteBuffer buf = ByteBuffer.allocate(4 + payload.length);
+        buf.putShort(channelNumber);
+        buf.putShort((short) (payload.length & 0xFFFF));
+        buf.put(payload);
+        return buf.array();
+    }
+
     private final SecureRandom random = new SecureRandom();
 
     /**
@@ -217,12 +231,27 @@ public class TurnClient {
         }
     }
 
+    public static final short REFRESH_REQUEST = 0x0004;
+    public static final short REFRESH_RESPONSE = 0x0104;
+
+    public static boolean isAllocationExpired(long allocationTimeMs, int lifetimeSeconds) {
+        long lifetimeMs = lifetimeSeconds * 1000L;
+        return (System.currentTimeMillis() - allocationTimeMs) >= lifetimeMs;
+    }
+
+    public static boolean needsRefresh(long allocationTimeMs, int lifetimeSeconds, int refreshBufferSeconds) {
+        long bufferMs = refreshBufferSeconds * 1000L;
+        long lifetimeMs = lifetimeSeconds * 1000L;
+        return (System.currentTimeMillis() - allocationTimeMs) >= (lifetimeMs - bufferMs);
+    }
+
     public static class TurnResponse {
         public short msgType;
         public InetSocketAddress relayedAddress;
         public String realm;
         public String nonce;
         public int errorCode;
+        public int lifetime = 600; // default 10 minutes
     }
 
     public static TurnResponse parseTurnResponse(byte[] data, int length) {
@@ -249,6 +278,8 @@ public class TurnClient {
 
             if (attrType == ATTR_XOR_RELAYED_ADDRESS) {
                 resp.relayedAddress = parseXorAddress(buf, attrLen, cookie);
+            } else if (attrType == ATTR_LIFETIME && attrLen >= 4) {
+                resp.lifetime = buf.getInt();
             } else if (attrType == ATTR_REALM) {
                 byte[] rb = new byte[attrLen];
                 buf.get(rb);

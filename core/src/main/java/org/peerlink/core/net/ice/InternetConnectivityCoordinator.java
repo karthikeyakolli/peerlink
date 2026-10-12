@@ -88,11 +88,28 @@ public class InternetConnectivityCoordinator {
         }
     }
 
+    private volatile String targetPeerId;
+
+    public void setTargetPeerId(String peerId) {
+        this.targetPeerId = peerId;
+    }
+
+    public String getTargetPeerId() {
+        return targetPeerId;
+    }
+
     public void handleIncomingSignalingCandidate(String senderPeerId, Map<String, Object> candidateMap) {
         try {
             IceCandidate candidate = IceCandidate.fromMap(candidateMap);
             iceAgent.addRemoteCandidate(candidate);
         } catch (Exception ignored) {}
+    }
+
+    public void handleIncomingSignalingMessage(SignalingMessage msg) {
+        if (msg == null) return;
+        if (msg.getMessageType() == SignalingMessage.Type.ICE_CANDIDATE) {
+            handleIncomingSignalingCandidate(msg.getSenderPeerId(), msg.getPayload());
+        }
     }
 
     public ConnectionDiagnostics establishBestPath() {
@@ -106,12 +123,39 @@ public class InternetConnectivityCoordinator {
         establishBestPath();
     }
 
+    public TurnRelayedTransportConnection createRelayedTransportConnection(CandidatePair pair,
+                                                                            java.nio.channels.SocketChannel socketChannel,
+                                                                            java.util.function.Consumer<byte[]> dataSender) {
+        Objects.requireNonNull(pair, "pair must not be null");
+        if (!pair.isRelayed()) {
+            throw new IllegalArgumentException("Cannot create relayed connection for non-relayed pair: " + pair);
+        }
+        IceCandidate relayCand = pair.getLocalCandidate().isRelayed() ? pair.getLocalCandidate() : pair.getRemoteCandidate();
+        InetSocketAddress relayAddr = new InetSocketAddress(relayCand.getIp(), relayCand.getPort());
+        InetSocketAddress localAddr = new InetSocketAddress(pair.getLocalCandidate().getIp(), pair.getLocalCandidate().getPort());
+        InetSocketAddress remoteAddr = new InetSocketAddress(pair.getRemoteCandidate().getIp(), pair.getRemoteCandidate().getPort());
+
+        org.peerlink.protocol.v1.ConnectionId connId = org.peerlink.protocol.v1.ConnectionId.newBuilder()
+                .setValue("conn_turn_" + UUID.randomUUID().toString().replace("-", ""))
+                .build();
+
+        return new TurnRelayedTransportConnection(
+                connId,
+                localAddr,
+                remoteAddr,
+                relayAddr,
+                relayCand.getProtocol(),
+                TurnRelayedTransportConnection.DEFAULT_CHANNEL_NUMBER,
+                socketChannel,
+                dataSender
+        );
+    }
+
     private void publishCandidateThroughSignaling(IceCandidate candidate) {
-        if (supabaseCoordinator != null && supabaseCoordinator.isRunning()) {
+        if (supabaseCoordinator != null && supabaseCoordinator.isRunning() && targetPeerId != null) {
             try {
-                // Signal candidate to peers
                 Map<String, Object> payload = candidate.toMap();
-                // Broadcast or target candidate
+                supabaseCoordinator.sendSignaling(targetPeerId, SignalingMessage.Type.ICE_CANDIDATE, payload);
             } catch (Exception ignored) {}
         }
     }
