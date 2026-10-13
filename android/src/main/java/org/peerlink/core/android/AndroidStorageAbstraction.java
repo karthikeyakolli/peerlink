@@ -3,9 +3,6 @@ package org.peerlink.core.android;
 import org.peerlink.core.filesystem.PeerFileHandle;
 import org.peerlink.core.filesystem.PeerFileProvider;
 import org.peerlink.core.model.ObjectIdentity;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.*;
 import java.nio.file.AccessDeniedException;
 import java.util.*;
@@ -17,7 +14,7 @@ import java.util.concurrent.ConcurrentMap;
  * implementing PeerLink's portable PeerFileProvider.
  */
 public class AndroidStorageAbstraction implements PeerFileProvider {
-    private static final Logger log = LoggerFactory.getLogger(AndroidStorageAbstraction.class);
+    private static final System.Logger log = System.getLogger(AndroidStorageAbstraction.class.getName());
 
     public interface ContentResolverBridge {
         InputStream openInputStream(String uri) throws IOException;
@@ -110,7 +107,7 @@ public class AndroidStorageAbstraction implements PeerFileProvider {
 
     @Override
     public void reconcile(String rootPath) throws IOException {
-        log.info("Reconciling Android SAF root: {}", rootPath);
+        log.log(System.Logger.Level.INFO, "Reconciling Android SAF root: {0}", rootPath);
         // Scans root tree Uri and updates index
         Optional<PeerFileHandle> rootOpt = resolveByPhysicalPath(rootPath);
         if (rootOpt.isPresent() && rootOpt.get().isDirectory()) {

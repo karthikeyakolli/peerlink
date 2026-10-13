@@ -1,14 +1,11 @@
 package org.peerlink.core.android;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 /**
  * Enforces Android WorkManager and Foreground Service scheduling constraints.
  * Ensures PeerLink respects OS battery conservation, Doze mode, and data usage limits.
  */
 public final class AndroidBackgroundPolicy {
-    private static final Logger log = LoggerFactory.getLogger(AndroidBackgroundPolicy.class);
+    private static final System.Logger log = System.getLogger(AndroidBackgroundPolicy.class.getName());
 
     // Minimum size or duration that mandates a Foreground Service with persistent notification
     public static final long FOREGROUND_SERVICE_SIZE_THRESHOLD_BYTES = 5 * 1024 * 1024L; // 5 MB
@@ -21,7 +18,7 @@ public final class AndroidBackgroundPolicy {
      */
     public static boolean canRunBackgroundSync(AndroidNodeContext ctx) {
         if (ctx.isDeviceIdleMode() || ctx.isPowerSaveMode()) {
-            log.debug("Background sync blocked: device in Doze or Power Save mode");
+            log.log(System.Logger.Level.DEBUG, "Background sync blocked: device in Doze or Power Save mode");
             return false;
         }
 
@@ -51,7 +48,7 @@ public final class AndroidBackgroundPolicy {
         if (ctx.getNetworkType() != AndroidNodeContext.NetworkType.WIFI &&
             ctx.getNetworkType() != AndroidNodeContext.NetworkType.ETHERNET &&
             ctx.getNetworkType() != AndroidNodeContext.NetworkType.CELLULAR_UNMETERED) {
-            log.debug("Background backup requires unmetered network");
+            log.log(System.Logger.Level.DEBUG, "Background backup requires unmetered network");
             return false;
         }
 

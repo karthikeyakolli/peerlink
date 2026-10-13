@@ -1,6 +1,5 @@
 package org.peerlink.core.platform.android;
 
-import org.peerlink.core.android.AndroidKeystoreManager;
 import org.peerlink.core.platform.CredentialStorage;
 import org.peerlink.core.platform.FirewallDiagnosticsResult;
 import org.peerlink.core.platform.NativePlatformAdapter;
@@ -26,11 +25,11 @@ public class AndroidPlatformAdapter implements NativePlatformAdapter {
     private final List<List<Path>> sharedPayloads = Collections.synchronizedList(new ArrayList<>());
 
     public AndroidPlatformAdapter() {
-        this(new AndroidKeystoreManager(new AndroidKeystoreManager.SoftwareKeystoreProvider()));
+        this(new AndroidKeystoreSecretStorage());
     }
 
-    public AndroidPlatformAdapter(AndroidKeystoreManager keystoreManager) {
-        this.credentialStorage = new AndroidKeystoreSecretStorage(keystoreManager);
+    public AndroidPlatformAdapter(CredentialStorage credentialStorage) {
+        this.credentialStorage = credentialStorage != null ? credentialStorage : new AndroidKeystoreSecretStorage();
         this.supportedFeatures = EnumSet.of(
                 PlatformFeature.SYSTEM_SHARE_SHEET,
                 PlatformFeature.SYSTEM_NOTIFICATIONS,
@@ -160,12 +159,9 @@ public class AndroidPlatformAdapter implements NativePlatformAdapter {
      * Bridges CredentialStorage to Android Keystore.
      */
     public static class AndroidKeystoreSecretStorage implements CredentialStorage {
-        private final AndroidKeystoreManager keystoreManager;
         private final Map<String, String> memoryStore = new ConcurrentHashMap<>();
 
-        public AndroidKeystoreSecretStorage(AndroidKeystoreManager keystoreManager) {
-            this.keystoreManager = keystoreManager;
-        }
+        public AndroidKeystoreSecretStorage() {}
 
         @Override
         public void storeSecret(String service, String account, String secret) {

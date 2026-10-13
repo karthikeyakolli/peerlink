@@ -32,6 +32,14 @@ public final class PlatformNotification {
     private final List<String> actions;
     private final String payloadPath;
 
+    public PlatformNotification(String id, String title, String body) {
+        this(id, title, body, Priority.NORMAL, Category.GENERAL, Collections.emptyList(), null);
+    }
+
+    public PlatformNotification(String id, String title, String body, Priority priority) {
+        this(id, title, body, priority, Category.GENERAL, Collections.emptyList(), null);
+    }
+
     public PlatformNotification(
             String id,
             String title,
