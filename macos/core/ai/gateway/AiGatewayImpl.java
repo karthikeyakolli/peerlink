@@ -22,6 +22,7 @@ public class AiGatewayImpl implements AiGateway {
     private final RateLimiter rateLimiter;
     private final TokenBudget tokenBudget;
     private final List<AiAuditRecord> auditTrail = new CopyOnWriteArrayList<>();
+    private volatile boolean sensitiveDisclosureAuthorized = false;
 
     public AiGatewayImpl(AiProviderRegistry providerRegistry) {
         this(providerRegistry, new DeterministicAiPolicyEngine(), new RateLimiter(60), new TokenBudget(1_000_000));
@@ -36,6 +37,16 @@ public class AiGatewayImpl implements AiGateway {
         this.policyEngine = Objects.requireNonNull(policyEngine, "policyEngine is required");
         this.rateLimiter = Objects.requireNonNull(rateLimiter, "rateLimiter is required");
         this.tokenBudget = Objects.requireNonNull(tokenBudget, "tokenBudget is required");
+    }
+
+    @Override
+    public boolean isSensitiveDisclosureAuthorized() {
+        return sensitiveDisclosureAuthorized;
+    }
+
+    @Override
+    public void setSensitiveDisclosureAuthorized(boolean authorized) {
+        this.sensitiveDisclosureAuthorized = authorized;
     }
 
     @Override
@@ -56,8 +67,8 @@ public class AiGatewayImpl implements AiGateway {
             throw new IOException("AI Gateway monthly token budget exhausted.");
         }
 
-        // 3. Context Sanitization & Secret Redaction
-        List<AiMessage> sanitizedMessages = SanitizedContextFilter.sanitize(request.getMessages());
+        // 3. Context Sanitization & Secret Redaction (respecting sensitive disclosure authorization)
+        List<AiMessage> sanitizedMessages = SanitizedContextFilter.sanitize(request.getMessages(), sensitiveDisclosureAuthorized);
         AiRequest sanitizedRequest = new AiRequest(
                 request.getRequestId(),
                 sanitizedMessages,
@@ -76,22 +87,37 @@ public class AiGatewayImpl implements AiGateway {
 
         AiProvider provider = providerOpt.get();
         long start = System.currentTimeMillis();
+        AiResponse response;
         try {
-            AiResponse response = provider.generateResponse(sanitizedRequest);
+            response = provider.generateResponse(sanitizedRequest);
+        } catch (java.io.InterruptedIOException e) {
             long latency = System.currentTimeMillis() - start;
-
-            tokenBudget.recordUsage(response.getTotalTokens());
             recordAudit(request.getRequestId(), null, AiProposalType.NATURAL_LANGUAGE_SEARCH,
-                    AiAuditRecord.Outcome.PROPOSED, "Generated successfully by " + provider.getProviderType(),
-                    response.getTotalTokens(), latency);
-
-            return response;
+                    AiAuditRecord.Outcome.PROVIDER_ERROR, "Model provider timeout: " + e.getMessage(), 0, latency);
+            throw e;
         } catch (IOException e) {
             long latency = System.currentTimeMillis() - start;
             recordAudit(request.getRequestId(), null, AiProposalType.NATURAL_LANGUAGE_SEARCH,
                     AiAuditRecord.Outcome.PROVIDER_ERROR, e.getMessage(), 0, latency);
             throw e;
         }
+
+        long latency = System.currentTimeMillis() - start;
+        // Enforce response safety limits & schema bounds
+        if (response == null || response.getContent() == null ||
+                (response.getContent().isBlank() && response.getToolCalls().isEmpty()) ||
+                response.getContent().length() > 65536 || response.getToolCalls().size() > 20) {
+            recordAudit(request.getRequestId(), null, AiProposalType.NATURAL_LANGUAGE_SEARCH,
+                    AiAuditRecord.Outcome.VALIDATION_FAILED, "Model output exceeds safety bounds or is malformed", 0, latency);
+            throw new IOException("Model output exceeds defined safety limits or is malformed");
+        }
+
+        tokenBudget.recordUsage(response.getTotalTokens());
+        recordAudit(request.getRequestId(), null, AiProposalType.NATURAL_LANGUAGE_SEARCH,
+                AiAuditRecord.Outcome.PROPOSED, "Generated successfully by " + provider.getProviderType(),
+                response.getTotalTokens(), latency);
+
+        return response;
     }
 
     @Override
@@ -218,6 +244,49 @@ public class AiGatewayImpl implements AiGateway {
     @Override
     public List<AiAuditRecord> getAuditTrail() {
         return Collections.unmodifiableList(auditTrail);
+    }
+
+    @Override
+    public AiProposal fallbackSearch(String query, List<ObjectIdentity> availableObjects, Map<ObjectIdentity, String> objectNames) {
+        Objects.requireNonNull(query, "query is required");
+        String lowerQuery = query.toLowerCase().trim();
+        List<ObjectIdentity> matchedObjects = new ArrayList<>();
+
+        if (availableObjects != null && objectNames != null) {
+            for (ObjectIdentity objId : availableObjects) {
+                String name = objectNames.get(objId);
+                if (name != null) {
+                    String lowerName = name.toLowerCase();
+                    if (lowerName.contains(lowerQuery) ||
+                        (lowerQuery.startsWith("*.") && lowerName.endsWith(lowerQuery.substring(1))) ||
+                        (lowerQuery.equals("pdf") && lowerName.endsWith(".pdf"))) {
+                        matchedObjects.add(objId);
+                    }
+                }
+            }
+        }
+
+        String propId = "prop_fallback_search_" + UUID.randomUUID();
+        recordAudit("req_" + UUID.randomUUID(), propId, AiProposalType.NATURAL_LANGUAGE_SEARCH,
+                AiAuditRecord.Outcome.PROPOSED, "Deterministic non-AI fallback search executed", 0, 0);
+
+        Map<String, Object> params = new HashMap<>();
+        params.put("query", query);
+        params.put("isDeterministicFallback", true);
+        params.put("matchCount", matchedObjects.size());
+
+        return new AiProposal(
+                propId,
+                AiProposalType.NATURAL_LANGUAGE_SEARCH,
+                query,
+                "Deterministic local keyword search without AI model",
+                null,
+                matchedObjects,
+                Collections.emptyMap(),
+                null,
+                params,
+                false
+        );
     }
 
     private void recordAudit(String reqId, String propId, AiProposalType type, AiAuditRecord.Outcome outcome, String reason, int tokens, long latencyMs) {

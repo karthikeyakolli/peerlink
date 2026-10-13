@@ -36,11 +36,17 @@ public class AiGatewayService {
     private final AiGateway gateway;
     private final ObjectStateResolver stateResolver;
     private final OperationDispatcher dispatcher;
+    private final Path workspaceRoot;
 
     public AiGatewayService(AiGateway gateway, ObjectStateResolver stateResolver, OperationDispatcher dispatcher) {
+        this(gateway, stateResolver, dispatcher, null);
+    }
+
+    public AiGatewayService(AiGateway gateway, ObjectStateResolver stateResolver, OperationDispatcher dispatcher, Path workspaceRoot) {
         this.gateway = Objects.requireNonNull(gateway, "gateway is required");
         this.stateResolver = Objects.requireNonNull(stateResolver, "stateResolver is required");
         this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher is required");
+        this.workspaceRoot = workspaceRoot;
     }
 
     public AiGateway getGateway() {
@@ -54,24 +60,37 @@ public class AiGatewayService {
     public boolean executeProposal(AiProposal proposal, boolean userConfirmed) throws IOException {
         Objects.requireNonNull(proposal, "proposal is required");
 
-        // 1. Deterministic Policy Evaluation
+        // 1. Proposal Freshness / Stale Check
+        if (proposal.isExpired()) {
+            throw new IllegalStateException("Proposal " + proposal.getProposalId() + " has expired and is stale (TTL exceeded).");
+        }
+
+        // 2. Deterministic Policy Evaluation
         PolicyValidationResult policyResult = gateway.validateProposal(proposal);
         if (!policyResult.isPermissibleWithUserConsent()) {
             throw new SecurityException("AI proposal rejected by deterministic policy: " + policyResult.getReason());
         }
 
-        // 2. User Confirmation Check
+        // 3. User Confirmation Check
         if (proposal.isRequiresUserConfirmation() && !userConfirmed) {
             // User rejected or has not yet approved
             return false;
         }
 
-        // 3. Current-State Revalidation
-        // Check that target objects still exist on disk and hashes have not mutated
+        // 4. Current-State Revalidation & Resource Bounds
+        // Check that target objects still exist on disk, are within authorized workspace, and hashes have not mutated
         for (ObjectIdentity objId : proposal.getTargetObjectIds()) {
             Optional<Path> pathOpt = stateResolver.resolvePath(objId);
             if (pathOpt.isEmpty() || !Files.exists(pathOpt.get())) {
                 throw new IOException("Current-state revalidation failed: Object " + objId + " no longer exists or was moved.");
+            }
+
+            Path resolved = pathOpt.get().toAbsolutePath().normalize();
+            if (workspaceRoot != null) {
+                Path rootNorm = workspaceRoot.toAbsolutePath().normalize();
+                if (!resolved.startsWith(rootNorm)) {
+                    throw new SecurityException("Unauthorized file reference outside workspace: " + resolved);
+                }
             }
 
             // Verify content hash continuity if expected hash was declared

@@ -60,6 +60,21 @@ public interface AiGateway {
     String explainSyncStatus(String folderName, String syncStatus, String conflictDetails);
 
     /**
+     * Returns whether user has authorized sensitive metadata disclosure to external models.
+     */
+    boolean isSensitiveDisclosureAuthorized();
+
+    /**
+     * Updates user authorization for sensitive metadata disclosure.
+     */
+    void setSensitiveDisclosureAuthorized(boolean authorized);
+
+    /**
+     * Deterministic non-AI fallback search over local objects without invoking any model.
+     */
+    AiProposal fallbackSearch(String query, List<ObjectIdentity> availableObjects, java.util.Map<ObjectIdentity, String> objectNames);
+
+    /**
      * Returns immutable audit trail of all AI gateway operations.
      */
     List<AiAuditRecord> getAuditTrail();

@@ -69,6 +69,9 @@ public class OpenAiCompatibleAiProvider implements AiProvider {
 
         // Parse standard chat completion
         String content = parseContent(responseBody);
+        if (content == null || content.isEmpty()) {
+            throw new IOException("Malformed response from " + config.getType() + ": missing content field");
+        }
         return new AiResponse(
                 "resp_" + UUID.randomUUID(),
                 config.getModelName(),

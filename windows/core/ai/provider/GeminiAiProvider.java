@@ -68,6 +68,9 @@ public class GeminiAiProvider implements AiProvider {
         long latencyMs = System.currentTimeMillis() - start;
 
         String content = parseGeminiText(responseBody);
+        if (content == null || content.isEmpty()) {
+            throw new IOException("Malformed Gemini response: missing text part");
+        }
         return new AiResponse(
                 "gemini_" + UUID.randomUUID(),
                 config.getModelName(),

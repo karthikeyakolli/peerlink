@@ -14,6 +14,8 @@ import java.util.*;
 public class SimulatedAiProvider implements AiProvider {
     private final String modelName;
     private volatile boolean available = true;
+    private volatile boolean simulateTimeout = false;
+    private volatile boolean simulateMalformedOutput = false;
 
     public SimulatedAiProvider() {
         this("simulated-peerlink-ai");
@@ -42,10 +44,25 @@ public class SimulatedAiProvider implements AiProvider {
         this.available = available;
     }
 
+    public void setSimulateTimeout(boolean simulateTimeout) {
+        this.simulateTimeout = simulateTimeout;
+    }
+
+    public void setSimulateMalformedOutput(boolean simulateMalformedOutput) {
+        this.simulateMalformedOutput = simulateMalformedOutput;
+    }
+
     @Override
     public AiResponse generateResponse(AiRequest request) throws IOException {
         if (!available) {
             throw new IOException("Simulated AI provider is currently offline or unreachable");
+        }
+        if (simulateTimeout) {
+            throw new java.net.SocketTimeoutException("Simulated AI provider request timed out (read deadline exceeded)");
+        }
+        if (simulateMalformedOutput) {
+            // Return malformed response with blank content and no tools to trigger gateway bounds/schema validation rejection
+            return new AiResponse("resp_malformed", modelName, "", Collections.emptyList(), 0, 0, 10);
         }
 
         String userPrompt = "";

@@ -10,10 +10,15 @@ public final class PromptInjectionGuard {
     private static final Pattern INJECTION_PATTERNS = Pattern.compile(
             "(?i)(ignore\\s+(all\\s+)?previous\\s+instructions" +
             "|disregard\\s+prior\\s+rules" +
-            "|you\\s+are\\s+now\\s+(in\\s+developer\\s+mode|root|admin)" +
+            "|you\\s+are\\s+now\\s+(in\\s+developer\\s+mode|root|admin|unrestricted)" +
             "|override\\s+system\\s+prompt" +
             "|system\\s+override" +
-            "|execute\\s+(command|shell|terminal|bash)" +
+            "|execute\\s+(command|shell|terminal|bash|powershell|cmd|binary)" +
+            "|grant\\s+(trust|admin|root|access|permission)" +
+            "|authorize\\s+peer" +
+            "|bypass\\s+(safety|security|policy|guardrails|confirmation)" +
+            "|disable\\s+scanner" +
+            "|delete\\s+(all\\s+)?files" +
             "|rm\\s+-rf" +
             "|del\\s+/f\\s+/s" +
             "|format\\s+[a-z]:)"

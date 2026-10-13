@@ -15,6 +15,8 @@ import java.util.*;
  *   and current-state revalidation before reaching OperationManager.
  */
 public final class AiProposal {
+    public static final long DEFAULT_TTL_MS = 300_000L; // 5 minutes TTL
+
     private final String proposalId;
     private final AiProposalType type;
     private final String naturalLanguageQuery;
@@ -26,6 +28,7 @@ public final class AiProposal {
     private final Map<String, Object> parameters;
     private final boolean requiresUserConfirmation;
     private final long proposedAtUtcMs;
+    private final long ttlMs;
 
     public AiProposal(
             String proposalId,
@@ -38,6 +41,22 @@ public final class AiProposal {
             String targetPeerId,
             Map<String, Object> parameters,
             boolean requiresUserConfirmation) {
+        this(proposalId, type, naturalLanguageQuery, justification, mappedIntent,
+                targetObjectIds, expectedHashes, targetPeerId, parameters, requiresUserConfirmation, DEFAULT_TTL_MS);
+    }
+
+    public AiProposal(
+            String proposalId,
+            AiProposalType type,
+            String naturalLanguageQuery,
+            String justification,
+            OperationIntent mappedIntent,
+            List<ObjectIdentity> targetObjectIds,
+            Map<ObjectIdentity, ContentHash> expectedHashes,
+            String targetPeerId,
+            Map<String, Object> parameters,
+            boolean requiresUserConfirmation,
+            long ttlMs) {
         this.proposalId = Objects.requireNonNull(proposalId, "proposalId is required");
         this.type = Objects.requireNonNull(type, "type is required");
         this.naturalLanguageQuery = naturalLanguageQuery != null ? naturalLanguageQuery : "";
@@ -49,6 +68,7 @@ public final class AiProposal {
         this.parameters = parameters != null ? Collections.unmodifiableMap(parameters) : Collections.emptyMap();
         this.requiresUserConfirmation = requiresUserConfirmation;
         this.proposedAtUtcMs = System.currentTimeMillis();
+        this.ttlMs = ttlMs > 0 ? ttlMs : DEFAULT_TTL_MS;
     }
 
     public String getProposalId() {
@@ -93,6 +113,18 @@ public final class AiProposal {
 
     public long getProposedAtUtcMs() {
         return proposedAtUtcMs;
+    }
+
+    public long getTtlMs() {
+        return ttlMs;
+    }
+
+    public boolean isExpired() {
+        return isExpired(System.currentTimeMillis());
+    }
+
+    public boolean isExpired(long currentUtcMs) {
+        return (currentUtcMs - proposedAtUtcMs) > ttlMs;
     }
 
     @Override
