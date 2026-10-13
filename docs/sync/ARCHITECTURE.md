@@ -35,3 +35,23 @@ INITIALIZING -> SCANNING -> RECONCILING -> CONFLICT_RESOLUTION -> APPLYING -> CO
                                                PAUSED (mass-change)
                                                     |
                                              RECONCILING (on resume)
+
+---
+
+## Tombstone Resurrection Prevention
+
+- When a remote object is presented during sync, the local manifest checks for an existing `Tombstone` for that `objectId`.
+- If a tombstone exists and its `deletionCausalVersion` dominates or equals the remote object's version, the remote object is recognized as **stale** and rejected from resurrection.
+- The tombstone is propagated back to delete the stale remote copy.
+- If the remote object's version strictly dominates the tombstone, the object was legitimately recreated or restored on the remote node and is accepted as a new content version.
+- If the tombstone and remote object are concurrent, a `DELETE_VS_MODIFY` conflict is surfaced to prevent silent data loss.
+
+---
+
+## Filesystem Scanner & Watcher Reconciliation
+
+- Filesystem watcher events are treated as **hints**, never authoritative truth.
+- `FilesystemScanner` executes startup and periodic scans walking the sync directory tree.
+- Missed notifications (due to dropped OS buffers or offline file edits) are detected during the SCANNING phase.
+- Detected changes (`CREATED`, `CONTENT_MODIFIED`, `METADATA_CHANGED`, `DELETED`) are reconciled into the manifest before remote reconciliation.
+- Rename and move operations correlate disappeared entries with newly appeared entries matching the content hash, preserving the stable `ObjectId` and its causal lineage.

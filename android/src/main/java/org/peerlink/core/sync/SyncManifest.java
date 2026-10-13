@@ -57,10 +57,35 @@ public final class SyncManifest {
         long now = System.currentTimeMillis();
         Tombstone t = new Tombstone(obj.getObjectId(), obj.getRelativePath(),
                 obj.getCausalVersion(), deletingPeerId, now);
-        tombstones.put(obj.getObjectId(), t);
-        pathIndex.remove(obj.getRelativePath());
-        objects.remove(obj.getObjectId());
-        manifestCausalVersion = manifestCausalVersion.merge(obj.getCausalVersion()).increment(deletingPeerId);
+        recordTombstone(t);
+        manifestCausalVersion = manifestCausalVersion.increment(deletingPeerId);
+    }
+
+    public void recordTombstone(Tombstone tombstone) {
+        tombstones.put(tombstone.getObjectId(), tombstone);
+        SyncObject existing = objects.remove(tombstone.getObjectId());
+        if (existing != null) {
+            pathIndex.remove(existing.getRelativePath());
+        }
+        manifestCausalVersion = manifestCausalVersion.merge(tombstone.getDeletionCausalVersion());
+    }
+
+    public void applyOrTrackObject(SyncObject obj) {
+        SyncObject existing = objects.get(obj.getObjectId());
+        if (existing != null && !existing.getRelativePath().equals(obj.getRelativePath())) {
+            pathIndex.remove(existing.getRelativePath());
+        }
+        objects.put(obj.getObjectId(), obj);
+        pathIndex.put(obj.getRelativePath(), obj.getObjectId());
+        tombstones.remove(obj.getObjectId());
+        manifestCausalVersion = manifestCausalVersion.merge(obj.getCausalVersion());
+    }
+
+    public void removeObject(ObjectId id) {
+        SyncObject removed = objects.remove(id);
+        if (removed != null) {
+            pathIndex.remove(removed.getRelativePath());
+        }
     }
 
     // ── Tombstone management ─────────────────────────────────────────────────

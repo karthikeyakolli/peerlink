@@ -50,13 +50,11 @@ public final class ChangeDetector {
         }
 
         // Check each known object for changes
+        List<SyncObject> missingObjects = new ArrayList<>();
         for (SyncObject obj : manifest.allObjects()) {
             FsEntry entry = observedByPath.get(obj.getRelativePath());
             if (entry == null) {
-                // Possibly renamed/moved or deleted
-                // Check if path disappeared entirely
-                changes.add(new DetectedChange(obj.getObjectId(), obj.getRelativePath(),
-                        ChangeType.DELETED, null, 0, 0, fromWatcher));
+                missingObjects.add(obj);
             } else {
                 observedByPath.remove(obj.getRelativePath()); // mark as processed
                 if (!obj.isDirectory() && entry.contentHash() != null
@@ -70,10 +68,32 @@ public final class ChangeDetector {
                     }
                     changes.add(new DetectedChange(obj.getObjectId(), obj.getRelativePath(),
                             ct, entry.contentHash(), entry.sizeBytes(), entry.lastModifiedMs(), fromWatcher));
-                } else if (!entry.relativePath().equals(obj.getRelativePath())) {
-                    changes.add(new DetectedChange(obj.getObjectId(), entry.relativePath(),
-                            ChangeType.METADATA_CHANGED, null, entry.sizeBytes(), entry.lastModifiedMs(), fromWatcher));
                 }
+            }
+        }
+
+        // Check missing objects: correlate with remaining observed entries for rename/move
+        for (SyncObject obj : missingObjects) {
+            String hash = obj.getContentHash();
+            FsEntry renamedMatch = null;
+            if (hash != null) {
+                for (FsEntry e : observedByPath.values()) {
+                    if (hash.equals(e.contentHash())) {
+                        renamedMatch = e;
+                        break;
+                    }
+                }
+            }
+
+            if (renamedMatch != null) {
+                // Object was renamed or moved: keep stable objectId!
+                observedByPath.remove(renamedMatch.relativePath());
+                changes.add(new DetectedChange(obj.getObjectId(), renamedMatch.relativePath(),
+                        ChangeType.METADATA_CHANGED, hash, renamedMatch.sizeBytes(), renamedMatch.lastModifiedMs(), fromWatcher));
+            } else {
+                // Truly deleted
+                changes.add(new DetectedChange(obj.getObjectId(), obj.getRelativePath(),
+                        ChangeType.DELETED, null, 0, 0, fromWatcher));
             }
         }
 

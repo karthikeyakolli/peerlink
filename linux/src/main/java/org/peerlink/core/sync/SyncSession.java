@@ -76,6 +76,16 @@ public final class SyncSession {
         transitionTo(Phase.RECONCILING);
     }
 
+    public void approveMassChange() {
+        resumeFromMassChangeHold();
+    }
+
+    public void rejectMassChange(String reason) {
+        this.massChangeHold = false;
+        this.massChangeReason = null;
+        fail(reason != null ? reason : "Mass changes rejected by safety policy");
+    }
+
     private void transitionTo(Phase next) { this.phase = next; }
 
     // ── Conflict management ──────────────────────────────────────────────────

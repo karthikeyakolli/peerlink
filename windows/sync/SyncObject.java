@@ -82,6 +82,19 @@ public final class SyncObject {
         this.causalVersion = causalVersion.increment(localPeerId);
     }
 
+    // ── Conflict resolution clock merge ─────────────────────────────────────
+    public synchronized void resolveWithMergedClock(CausalVersion otherClock, String localPeerId) {
+        this.causalVersion = this.causalVersion.merge(otherClock).increment(localPeerId);
+        this.contentVersion = this.contentVersion.next();
+    }
+
+    public synchronized SyncObject copy() {
+        SyncObject c = new SyncObject(objectId, relativePath, contentHash, sizeBytes,
+                lastModifiedHintMs, isDirectory, contentVersion, metadataVersion, causalVersion);
+        c.deleted = this.deleted;
+        return c;
+    }
+
     // ── Accessors ────────────────────────────────────────────────────────────
     public ObjectId getObjectId() { return objectId; }
     public String getRelativePath() { return relativePath; }

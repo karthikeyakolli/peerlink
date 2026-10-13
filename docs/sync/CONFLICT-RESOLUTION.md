@@ -18,8 +18,20 @@ Timestamps are never used as tiebreakers.
 
 | Option | Behaviour |
 |---|---|
-| KEEP_LOCAL | Local version wins |
-| KEEP_REMOTE | Remote version wins |
-| KEEP_BOTH | Both preserved with disambiguation suffix |
-| MERGE | Content merge (text formats, where supported) |
-| DEFERRED | Sync paused for this object until user decides |
+| KEEP_LOCAL | Local version wins; causal clock merges with remote and increments to dominate remote |
+| KEEP_REMOTE | Remote version wins; local manifest adopts remote version |
+| KEEP_BOTH | Both preserved without data loss; remote copy assigned disambiguated path with new `ObjectId` |
+| MERGE | Content merge (text formats, where supported); merged clock advances |
+| DEFERRED | Sync paused for this object until user decides; neither file is overwritten |
+
+---
+
+## Disambiguation Naming Scheme (KEEP_BOTH)
+
+When `KEEP_BOTH` is selected or automatically configured:
+- Local object remains at its original path (e.g., `documents/report.pdf`).
+- Remote version is created with a new `ObjectId` at a disambiguated path:
+  `documents/report (conflicted copy <remotePeerId>).pdf`
+- For extensionless files:
+  `notes (conflicted copy <remotePeerId>)`
+- Both files are tracked in the manifest and participate in subsequent sync rounds as independent objects.
