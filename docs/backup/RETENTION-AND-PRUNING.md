@@ -7,12 +7,12 @@ Retention policies in PeerLink govern the lifecycle of backup snapshots. The pol
 - `maxAgeMs`: Retain snapshots newer than a specified duration.
 - GFS rules: Retain daily, weekly, and monthly baselines.
 
-## Protected Versions: The Immunity Rule
+## Protected Versions & Active Operation Locks: The Immunity Rule
 
 > **CRITICAL INVARIANT:**  
-> Any snapshot marked as protected, or any snapshot containing items explicitly protected (e.g., legal hold, designated milestone), is **STRICTLY IMMUNE** to retention pruning.
+> Any snapshot marked as protected, any snapshot containing items explicitly protected (e.g., legal hold, designated milestone), or any snapshot locked by an active recovery task or restore operation (`activeRecoveryLocks`), is **STRICTLY IMMUNE** to retention pruning.
 
-Even when `maxSnapshots` is exceeded or age thresholds expire, protected snapshots remain pinned and are never deleted during retention evaluation.
+Even when `maxSnapshots` is exceeded or age thresholds expire, protected and active-locked snapshots remain pinned and are never deleted during retention evaluation. When a restore or recovery task executes, `BackupEngine` automatically acquires a recovery lock on the target snapshot to guarantee in-flight operations cannot suffer concurrent deletion or GC corruption.
 
 ## Version Garbage Collection (`VersionGarbageCollector`)
 

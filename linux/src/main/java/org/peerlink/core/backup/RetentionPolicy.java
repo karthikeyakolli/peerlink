@@ -37,6 +37,13 @@ public final class RetentionPolicy {
     public RetentionPrunePlan evaluate(List<BackupManifest> manifests,
                                        Set<String> protectedSnapshotIds,
                                        long currentTimeUtcMs) {
+        return evaluate(manifests, protectedSnapshotIds, Collections.emptySet(), currentTimeUtcMs);
+    }
+
+    public RetentionPrunePlan evaluate(List<BackupManifest> manifests,
+                                       Set<String> protectedSnapshotIds,
+                                       Set<String> activeLockedSnapshotIds,
+                                       long currentTimeUtcMs) {
         Objects.requireNonNull(manifests, "manifests cannot be null");
         Objects.requireNonNull(protectedSnapshotIds, "protectedSnapshotIds cannot be null");
 
@@ -49,7 +56,9 @@ public final class RetentionPolicy {
 
         int retainedCount = 0;
         for (BackupManifest manifest : sorted) {
-            boolean isProtected = protectedSnapshotIds.contains(manifest.getBackupId()) || manifest.hasProtectedItems();
+            boolean isProtected = protectedSnapshotIds.contains(manifest.getBackupId())
+                    || (activeLockedSnapshotIds != null && activeLockedSnapshotIds.contains(manifest.getBackupId()))
+                    || manifest.hasProtectedItems();
 
             if (isProtected) {
                 toKeep.add(manifest);

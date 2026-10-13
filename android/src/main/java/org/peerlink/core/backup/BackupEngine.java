@@ -19,16 +19,24 @@ import java.util.stream.Stream;
  * - Restore creates a NEW current version. Never rewrite history.
  * - Blind backup: target stores only ciphertext; does not possess decryption keys.
  * - Transport encryption and storage encryption are conceptually separate.
+ * - Active operation / recovery locks protect snapshots from retention pruning during in-flight operations.
  */
 public final class BackupEngine {
 
     private final BackupTarget target;
     private final Set<String> protectedSnapshots = ConcurrentHashMap.newKeySet();
+    private final Set<String> activeRecoveryLocks = ConcurrentHashMap.newKeySet();
     private final Map<String, ObjectIdentity> pathToIdentity = new ConcurrentHashMap<>();
     private final Map<ObjectIdentity, Long> objectVersionSequences = new ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicLong lastSnapshotTimestamp = new java.util.concurrent.atomic.AtomicLong();
 
     public BackupEngine(BackupTarget target) {
         this.target = Objects.requireNonNull(target, "target cannot be null");
+    }
+
+    private long nextMonotonicTimestamp() {
+        long now = System.currentTimeMillis();
+        return lastSnapshotTimestamp.updateAndGet(prev -> Math.max(now, prev + 1));
     }
 
     public BackupTarget getTarget() {
@@ -47,6 +55,25 @@ public final class BackupEngine {
         return protectedSnapshots.contains(backupId);
     }
 
+    public void acquireRecoveryLock(String backupId) {
+        Objects.requireNonNull(backupId, "backupId cannot be null");
+        activeRecoveryLocks.add(backupId);
+    }
+
+    public void releaseRecoveryLock(String backupId) {
+        if (backupId != null) {
+            activeRecoveryLocks.remove(backupId);
+        }
+    }
+
+    public boolean isRecoveryLocked(String backupId) {
+        return backupId != null && activeRecoveryLocks.contains(backupId);
+    }
+
+    public Set<String> getActiveRecoveryLocks() {
+        return Set.copyOf(activeRecoveryLocks);
+    }
+
     public BackupManifest performBackup(BackupJobConfig config, BackupType type) throws IOException {
         Objects.requireNonNull(config, "config cannot be null");
 
@@ -59,7 +86,7 @@ public final class BackupEngine {
         BackupManifest baseline = existing.isEmpty() ? null : existing.get(existing.size() - 1);
 
         String backupId = "bkp_" + UUID.randomUUID().toString().replace("-", "");
-        long timestamp = System.currentTimeMillis();
+        long timestamp = nextMonotonicTimestamp();
         String parentId = (type != BackupType.FULL && baseline != null) ? baseline.getBackupId() : null;
 
         Map<ObjectIdentity, HistoricalVersion> items = new HashMap<>();
@@ -78,6 +105,10 @@ public final class BackupEngine {
         Set<String> scannedRelPaths = new HashSet<>();
 
         for (Path file : files) {
+            if (!Files.isReadable(file)) {
+                throw new AccessDeniedException("Source file permission denied: " + file);
+            }
+
             String relPath = sourceDir.relativize(file).toString().replace('\\', '/');
             scannedRelPaths.add(relPath);
 
@@ -136,7 +167,7 @@ public final class BackupEngine {
         if (baseline != null && type != BackupType.FULL) {
             for (HistoricalVersion prev : baseline.getItems().values()) {
                 if (!prev.isDeleted() && !scannedRelPaths.contains(prev.getRelativePath())) {
-                    // File was deleted
+                    // File was deleted in source
                     long delSeq = objectVersionSequences.getOrDefault(prev.getObjectId(), prev.getVersionSequence()) + 1;
                     objectVersionSequences.put(prev.getObjectId(), delSeq);
 
@@ -162,7 +193,7 @@ public final class BackupEngine {
 
         Path sourceDir = config.getSourceDirectory();
         String backupId = "bkp_" + UUID.randomUUID().toString().replace("-", "");
-        long timestamp = System.currentTimeMillis();
+        long timestamp = nextMonotonicTimestamp();
 
         Map<ObjectIdentity, HistoricalVersion> items = new HashMap<>();
 
@@ -187,6 +218,9 @@ public final class BackupEngine {
             }
 
             if (!Files.exists(file) || !Files.isRegularFile(file)) continue;
+            if (!Files.isReadable(file)) {
+                throw new AccessDeniedException("Source file permission denied: " + file);
+            }
 
             byte[] content = Files.readAllBytes(file);
             ContentHash contentHash = ContentHash.computeSha256(content);
@@ -238,7 +272,7 @@ public final class BackupEngine {
 
     public VersionGarbageCollector.GcResult runRetention(String jobId, RetentionPolicy policy) throws IOException {
         List<BackupManifest> manifests = target.listManifests(jobId);
-        RetentionPrunePlan plan = policy.evaluate(manifests, protectedSnapshots, System.currentTimeMillis());
+        RetentionPrunePlan plan = policy.evaluate(manifests, protectedSnapshots, activeRecoveryLocks, System.currentTimeMillis());
         return VersionGarbageCollector.collect(target, jobId, plan);
     }
 
@@ -259,7 +293,86 @@ public final class BackupEngine {
     }
 
     public RestoreExecutionResult executeRestore(RestorePlan plan, byte[] blindDecryptionKey, long currentSeq) throws IOException {
-        return RestoreExecutor.execute(plan, target, blindDecryptionKey, currentSeq);
+        acquireRecoveryLock(plan.backupId());
+        try {
+            return RestoreExecutor.execute(plan, target, blindDecryptionKey, currentSeq);
+        } finally {
+            releaseRecoveryLock(plan.backupId());
+        }
+    }
+
+    // ── Version Discovery APIs ───────────────────────────────────────────────
+
+    public List<HistoricalVersionInfo> discoverVersions(String jobId, String relativePath) {
+        Objects.requireNonNull(jobId, "jobId cannot be null");
+        Objects.requireNonNull(relativePath, "relativePath cannot be null");
+        List<BackupManifest> manifests = target.listManifests(jobId);
+        List<HistoricalVersionInfo> history = new ArrayList<>();
+
+        for (BackupManifest manifest : manifests) {
+            manifest.getItemByPath(relativePath).ifPresent(v -> {
+                boolean isProtected = v.isProtected() || isSnapshotProtected(manifest.getBackupId());
+                history.add(new HistoricalVersionInfo(
+                        manifest.getBackupId(), manifest.getJobId(), manifest.getSnapshotTimestampUtcMs(),
+                        v.getObjectId(), v.getRelativePath(), v.getContentHash(), v.getSizeBytes(),
+                        v.getVersionSequence(), v.isDeleted(), v.getStorageHash(), v.isEncrypted(), isProtected
+                ));
+            });
+        }
+
+        history.sort(Comparator.comparingLong(HistoricalVersionInfo::versionSequence));
+        return Collections.unmodifiableList(history);
+    }
+
+    public List<HistoricalVersionInfo> discoverVersionsByObjectId(String jobId, ObjectIdentity objectId) {
+        Objects.requireNonNull(jobId, "jobId cannot be null");
+        Objects.requireNonNull(objectId, "objectId cannot be null");
+        List<BackupManifest> manifests = target.listManifests(jobId);
+        List<HistoricalVersionInfo> history = new ArrayList<>();
+
+        for (BackupManifest manifest : manifests) {
+            manifest.getItem(objectId).ifPresent(v -> {
+                boolean isProtected = v.isProtected() || isSnapshotProtected(manifest.getBackupId());
+                history.add(new HistoricalVersionInfo(
+                        manifest.getBackupId(), manifest.getJobId(), manifest.getSnapshotTimestampUtcMs(),
+                        v.getObjectId(), v.getRelativePath(), v.getContentHash(), v.getSizeBytes(),
+                        v.getVersionSequence(), v.isDeleted(), v.getStorageHash(), v.isEncrypted(), isProtected
+                ));
+            });
+        }
+
+        history.sort(Comparator.comparingLong(HistoricalVersionInfo::versionSequence));
+        return Collections.unmodifiableList(history);
+    }
+
+    public Map<String, List<HistoricalVersionInfo>> discoverAllFileHistories(String jobId) {
+        Objects.requireNonNull(jobId, "jobId cannot be null");
+        List<BackupManifest> manifests = target.listManifests(jobId);
+        Map<String, List<HistoricalVersionInfo>> map = new LinkedHashMap<>();
+
+        for (BackupManifest manifest : manifests) {
+            for (HistoricalVersion v : manifest.getItems().values()) {
+                boolean isProtected = v.isProtected() || isSnapshotProtected(manifest.getBackupId());
+                map.computeIfAbsent(v.getRelativePath(), k -> new ArrayList<>())
+                   .add(new HistoricalVersionInfo(
+                           manifest.getBackupId(), manifest.getJobId(), manifest.getSnapshotTimestampUtcMs(),
+                           v.getObjectId(), v.getRelativePath(), v.getContentHash(), v.getSizeBytes(),
+                           v.getVersionSequence(), v.isDeleted(), v.getStorageHash(), v.isEncrypted(), isProtected
+                   ));
+            }
+        }
+
+        map.values().forEach(list -> list.sort(Comparator.comparingLong(HistoricalVersionInfo::versionSequence)));
+        return Collections.unmodifiableMap(map);
+    }
+
+    public List<String> listSnapshotsContaining(String jobId, String relativePath) {
+        Objects.requireNonNull(jobId, "jobId cannot be null");
+        Objects.requireNonNull(relativePath, "relativePath cannot be null");
+        return target.listManifests(jobId).stream()
+                .filter(m -> m.getItemByPath(relativePath).filter(v -> !v.isDeleted()).isPresent())
+                .map(BackupManifest::getBackupId)
+                .toList();
     }
 
     private boolean shouldInclude(String relPath, BackupJobConfig config) {

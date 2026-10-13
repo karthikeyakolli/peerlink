@@ -24,6 +24,10 @@ public final class BackupVerifier {
         long verifiedFiles = 0;
         long verifiedBytes = 0;
 
+        if (!manifest.verifyIntegrity()) {
+            corruptedItems.add("Manifest digest mismatch for backupId " + manifest.getBackupId() + ": integrity check failed");
+        }
+
         for (HistoricalVersion item : manifest.getItems().values()) {
             if (item.isDeleted()) continue;
 

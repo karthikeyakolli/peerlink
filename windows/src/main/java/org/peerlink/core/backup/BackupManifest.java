@@ -108,4 +108,9 @@ public final class BackupManifest implements Serializable {
     public boolean hasProtectedItems() {
         return items.values().stream().anyMatch(HistoricalVersion::isProtected);
     }
+
+    public boolean verifyIntegrity() {
+        String expected = computeDigest(backupId, jobId, snapshotTimestampUtcMs, items);
+        return expected.equalsIgnoreCase(manifestDigest);
+    }
 }
