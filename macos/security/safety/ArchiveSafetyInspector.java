@@ -52,6 +52,18 @@ public final class ArchiveSafetyInspector {
             return new ArchiveSafetyVerdict(false, true, false, 0, 0, 0, findings);
         }
 
+        if (zipBytes == null || zipBytes.length < 22) {
+            findings.add("Malformed or corrupted archive: file truncated or too small to be valid ZIP format (" + (zipBytes == null ? 0 : zipBytes.length) + " bytes)");
+            return new ArchiveSafetyVerdict(false, false, false, 0, 0, 0, findings);
+        }
+
+        if (zipBytes[0] != 0x50 || zipBytes[1] != 0x4B) {
+            findings.add("Malformed or corrupted archive: missing PK magic signature");
+            return new ArchiveSafetyVerdict(false, false, false, 0, 0, 0, findings);
+        }
+
+        boolean isEmptyArchiveSignature = (zipBytes[0] == 0x50 && zipBytes[1] == 0x4B && zipBytes[2] == 0x05 && zipBytes[3] == 0x06);
+
         try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(zipBytes))) {
             ZipEntry entry;
             byte[] buffer = new byte[8192];
@@ -60,10 +72,11 @@ public final class ArchiveSafetyInspector {
                 entryCount++;
                 String name = entry.getName();
 
-                // Path traversal check
-                if (name.contains("..") || name.startsWith("/") || name.startsWith("\\")) {
+                // Path traversal and illegal characters check
+                if (name.contains("..") || name.startsWith("/") || name.startsWith("\\") || name.contains("\0")
+                        || (name.length() >= 2 && Character.isLetter(name.charAt(0)) && name.charAt(1) == ':')) {
                     hasTraversal = true;
-                    findings.add("Path traversal sequence in entry name: " + name);
+                    findings.add("Path traversal or illegal sequence in entry name: " + name);
                 }
 
                 if (entryCount > MAX_TOTAL_ENTRIES) {
@@ -119,6 +132,10 @@ public final class ArchiveSafetyInspector {
         } catch (Exception e) {
             findings.add("Corrupted or malformed archive format: " + e.getMessage());
             return new ArchiveSafetyVerdict(false, false, false, entryCount, totalUncompressed, maxRatio, findings);
+        }
+
+        if (entryCount == 0 && !isEmptyArchiveSignature) {
+            findings.add("Malformed or corrupted archive: starts with local file header but contains 0 readable entries");
         }
 
         boolean isSafe = !isBomb && !hasTraversal && findings.isEmpty();

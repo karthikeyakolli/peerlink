@@ -6,7 +6,7 @@ import java.util.regex.Pattern;
 /**
  * Compatibility Analyzer.
  *
- * Checks compatibility across 6 categories:
+ * Checks file compatibility across 6 categories:
  * - transfer
  * - storage
  * - open
@@ -87,7 +87,38 @@ public final class CompatibilityAnalyzer {
             TargetOperatingSystem targetOs,
             List<CompatibilityIssue> issues
     ) {
+        if (relativePath == null || relativePath.isBlank()) {
+            issues.add(new CompatibilityIssue(
+                    CompatibilityCategory.STORAGE,
+                    CompatibilityResult.INCOMPATIBLE,
+                    "EMPTY_RELATIVE_PATH",
+                    "Relative path cannot be null or empty.",
+                    "Path must be specified."
+            ));
+            return;
+        }
+
+        if (relativePath.contains("..")) {
+            issues.add(new CompatibilityIssue(
+                    CompatibilityCategory.STORAGE,
+                    CompatibilityResult.INCOMPATIBLE,
+                    "PATH_TRAVERSAL",
+                    "Relative path contains prohibited parent directory traversal sequence.",
+                    "Path traversal prohibited."
+            ));
+        }
+
         String filename = PathUtils.getFilename(relativePath);
+
+        if (filename.contains("\0")) {
+            issues.add(new CompatibilityIssue(
+                    CompatibilityCategory.STORAGE,
+                    CompatibilityResult.INCOMPATIBLE,
+                    "NULL_BYTE_IN_FILENAME",
+                    "Filename contains null byte injection sequence.",
+                    "Illegal character sequence."
+            ));
+        }
 
         if (targetOs == TargetOperatingSystem.WINDOWS) {
             // Reserved names check (CON, PRN, AUX, etc.)
@@ -177,6 +208,28 @@ public final class CompatibilityAnalyzer {
                     "User must decide whether to recreate link or restore target file payload."
             ));
         }
+
+        // Extended attributes / xattrs
+        if (metadataAttributes.containsKey("extended_attributes") || metadataAttributes.containsKey("xattrs")) {
+            issues.add(new CompatibilityIssue(
+                    CompatibilityCategory.METADATA,
+                    CompatibilityResult.PARTIALLY_COMPATIBLE,
+                    "EXTENDED_ATTRIBUTES_LIMITATION",
+                    "File contains POSIX/Darwin extended attributes that may not be supported natively on all volumes.",
+                    "Metadata preserved in PeerLink index; will not be silently dropped."
+            ));
+        }
+
+        // Sensitive EXIF GPS tags
+        if (Boolean.parseBoolean(metadataAttributes.get("has_gps")) || metadataAttributes.containsKey("exif_gps")) {
+            issues.add(new CompatibilityIssue(
+                    CompatibilityCategory.METADATA,
+                    CompatibilityResult.PARTIALLY_COMPATIBLE,
+                    "SENSITIVE_GPS_METADATA",
+                    "File contains embedded geolocation coordinates in EXIF tags.",
+                    "Privacy warning reported; metadata preserved without silent stripping."
+            ));
+        }
     }
 
     private static void checkExecutionCompatibility(
@@ -203,6 +256,26 @@ public final class CompatibilityAnalyzer {
                         "PeerLink will never silently execute received files."
                 ));
             }
+        } else if (lower.endsWith(".elf") || lower.endsWith(".so")) {
+            if (targetOs != TargetOperatingSystem.LINUX && targetOs != TargetOperatingSystem.ANDROID) {
+                issues.add(new CompatibilityIssue(
+                        CompatibilityCategory.EXECUTION,
+                        CompatibilityResult.INCOMPATIBLE,
+                        "LINUX_ELF_ON_NON_LINUX",
+                        "Linux ELF binary format is not natively runnable on " + targetOs,
+                        "File can be stored as data, but will never be silently executed."
+                ));
+            }
+        } else if (lower.endsWith(".dylib") || lower.endsWith(".app")) {
+            if (targetOs != TargetOperatingSystem.MACOS) {
+                issues.add(new CompatibilityIssue(
+                        CompatibilityCategory.EXECUTION,
+                        CompatibilityResult.INCOMPATIBLE,
+                        "MACHO_ON_NON_MACOS",
+                        "macOS Mach-O application bundle is not natively runnable on " + targetOs,
+                        "File can be stored as data, but will never be silently executed."
+                ));
+            }
         }
     }
 
@@ -214,6 +287,14 @@ public final class CompatibilityAnalyzer {
                     "ZERO_BYTE_FILE",
                     "Empty 0-byte file transfer",
                     "No payload chunks needed"
+            ));
+        } else if (sizeBytes < 0) {
+            issues.add(new CompatibilityIssue(
+                    CompatibilityCategory.TRANSFER,
+                    CompatibilityResult.INCOMPATIBLE,
+                    "INVALID_FILE_SIZE",
+                    "Negative file size is invalid: " + sizeBytes,
+                    "Transfer rejected."
             ));
         }
     }
