@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'local_node_card.dart';
 import '../../design_system/components/send_receive_hero.dart';
 import '../../design_system/components/media_category_bar.dart';
@@ -8,6 +8,7 @@ import '../../design_system/components/quick_text_share_modal.dart';
 import '../../design_system/components/desktop_dropzone.dart';
 import '../../design_system/components/glass_container.dart';
 import '../../design_system/components/instant_beam_deck.dart';
+import '../../design_system/components/web_beam_modal.dart';
 
 class HomeScreen extends StatelessWidget {
   final void Function(int targetTabIndex)? onNavigate;
@@ -238,7 +239,7 @@ class HomeScreen extends StatelessWidget {
               ),
               const SizedBox(height: 18),
 
-              // Quick Actions Shelf: Text Share, Wi-Fi Hotspot Direct, Radar Sonar
+              // Quick Actions Shelf: Text Share, Web Beam, Wi-Fi Hotspot Direct, Radar Sonar
               Row(
                 children: [
                   Expanded(
@@ -263,7 +264,25 @@ class HomeScreen extends StatelessWidget {
                       },
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _buildQuickToolCard(
+                      context,
+                      title: 'Web Beam',
+                      subtitle: '0-Install Share',
+                      icon: Icons.language_rounded,
+                      color: const Color(0xFF0284C7),
+                      onTap: () {
+                        WebBeamModal.show(
+                          context,
+                          fileName: 'Shared Document.pdf',
+                          fileSize: '4.2 MB',
+                          portalUrl: 'http://192.168.1.120:52002/?token=7f9a2b1c4e6d',
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: _buildQuickToolCard(
                       context,
@@ -282,7 +301,7 @@ class HomeScreen extends StatelessWidget {
                       },
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: _buildQuickToolCard(
                       context,
