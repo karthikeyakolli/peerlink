@@ -22,8 +22,8 @@ echo "Generating Protobuf bindings..."
 ./scripts/generate-proto.sh || echo "Warning: Proto generation failed or skipped."
 
 echo "Installing Flutter dependencies..."
-if [ -d "apps/peerlink-app" ]; then
-    (cd apps/peerlink-app && flutter pub get)
+if [ -d "linux/app/flutter" ]; then
+    (cd linux/app/flutter && flutter pub get)
 fi
 
 echo "Verifying architectural boundaries..."

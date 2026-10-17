@@ -6,7 +6,8 @@ class AndroidNodeStatusWidget extends StatefulWidget {
   const AndroidNodeStatusWidget({super.key});
 
   @override
-  State<AndroidNodeStatusWidget> createState() => _AndroidNodeStatusWidgetState();
+  State<AndroidNodeStatusWidget> createState() =>
+      _AndroidNodeStatusWidgetState();
 }
 
 class _AndroidNodeStatusWidgetState extends State<AndroidNodeStatusWidget> {
@@ -58,23 +59,29 @@ class _AndroidNodeStatusWidgetState extends State<AndroidNodeStatusWidget> {
 
     switch (_currentState) {
       case AndroidNodeStateEnum.active:
-        stateDescription = 'The Android local node is running in the foreground with full network priority and real-time P2P transport.';
-        recommendation = 'All transfers and sync jobs operate at maximum throughput.';
+        stateDescription =
+            'The Android local node is running in the foreground with full network priority and real-time P2P transport.';
+        recommendation =
+            'All transfers and sync jobs operate at maximum throughput.';
         break;
       case AndroidNodeStateEnum.backgroundCapable:
-        stateDescription = 'Device is connected to Wi-Fi and power, or running an active foreground service notification.';
-        recommendation = 'Transfers can continue in the background with moderate resource allocation.';
+        stateDescription =
+            'Device is connected to Wi-Fi and power, or running an active foreground service notification.';
+        recommendation =
+            'Transfers can continue in the background with moderate resource allocation.';
         break;
       case AndroidNodeStateEnum.osRestricted:
-        stateDescription = 'Android Doze mode or aggressive battery optimization is active. Network discovery pings are throttled to 120-second intervals.';
-        recommendation = 'For uninterrupted large transfers, keep PeerLink open on your screen or plug the phone into power.';
+        stateDescription =
+            'Android Doze mode or aggressive battery optimization is active. Network discovery pings are throttled to 120-second intervals.';
+        recommendation =
+            'For uninterrupted large transfers, keep PeerLink open on your screen or plug the phone into power.';
         break;
       case AndroidNodeStateEnum.unavailable:
-        stateDescription = 'The Android node background service has terminated or was killed by the OS due to low system memory.';
+        stateDescription =
+            'The Android node background service has terminated or was killed by the OS due to low system memory.';
         recommendation = 'Reopen PeerLink to re-initialize the local daemon.';
         break;
       case AndroidNodeStateEnum.unknown:
-      default:
         stateDescription = 'Connecting to Android local node IPC service...';
         recommendation = 'Please wait while the daemon initializes.';
         break;
@@ -94,7 +101,8 @@ class _AndroidNodeStatusWidgetState extends State<AndroidNodeStatusWidget> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Current Node State: ${_currentState.name.toUpperCase()}', style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text('Current Node State: ${_currentState.name.toUpperCase()}',
+                style: const TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Text(stateDescription, style: const TextStyle(fontSize: 13)),
             const SizedBox(height: 12),
@@ -108,7 +116,11 @@ class _AndroidNodeStatusWidgetState extends State<AndroidNodeStatusWidget> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Recommendation:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.blue)),
+                  const Text('Recommendation:',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                          color: Colors.blue)),
                   const SizedBox(height: 2),
                   Text(recommendation, style: const TextStyle(fontSize: 12)),
                 ],

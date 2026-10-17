@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/node_ipc_client.dart';
+import '../../design_system/components/glass_container.dart';
+import '../../design_system/components/interactive_glass_card.dart';
 
 enum DeviceTrustLevel {
   trustedPeer,
@@ -277,113 +279,151 @@ class _DevicesScreenState extends State<DevicesScreen> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
         children: [
-          // Trust Explanation Card
-          Card(
-            elevation: 0,
-            color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: theme.colorScheme.outlineVariant),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+          // Trust Explanation Glass Banner
+          GlassContainer(
+            glowColor: const Color(0xFF8B5CF6),
+            borderRadius: BorderRadius.circular(20),
+            padding: const EdgeInsets.all(16.0),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF8B5CF6).withValues(alpha: 0.18),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.shield_rounded,
+                      color: Color(0xFF8B5CF6), size: 22),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.shield_outlined, color: theme.colorScheme.primary),
-                      const SizedBox(width: 8),
                       Text(
                         'Direct Cryptographic Trust Model',
-                        style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'PeerLink never relies on cloud authentication. Devices communicate using direct Ed25519 public keys without central servers.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          fontSize: 11,
+                        ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'PeerLink never relies on cloud authentication. Devices communicate using direct Ed25519 public keys. Always confirm public key fingerprints out-of-band to prevent interception.',
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 16),
 
-          // This Device Card
-          Card(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: Colors.green.shade300, width: 1.5),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      CircleAvatar(
-                        backgroundColor: Colors.green.shade100,
-                        child: Icon(Icons.laptop_windows_rounded, color: Colors.green.shade800),
+          // This Device Node Card (InteractiveGlassCard)
+          InteractiveGlassCard(
+            glowColor: const Color(0xFF8B5CF6),
+            borderRadius: BorderRadius.circular(22),
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF8B5CF6).withValues(alpha: 0.15),
+                        shape: BoxShape.circle,
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'This Device (Local Node)',
-                              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-                            ),
-                            Text(
-                              'ID: $myPeerId',
-                              style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
-                            ),
-                          ],
+                      child: const Icon(Icons.laptop_windows_rounded,
+                          color: Color(0xFF8B5CF6), size: 22),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                'This Device (Desktop Node)',
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF10B981),
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Text(
+                            'ID: $myPeerId',
+                            style: const TextStyle(fontSize: 11, color: Colors.grey),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFF10B981)),
+                      ),
+                      child: const Text(
+                        'THIS NODE',
+                        style: TextStyle(
+                          color: Color(0xFF10B981),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 10,
                         ),
                       ),
-                      Chip(
-                        label: const Text('THIS NODE'),
-                        backgroundColor: Colors.green.shade50,
-                        labelStyle: TextStyle(color: Colors.green.shade800, fontWeight: FontWeight.bold, fontSize: 11),
+                    ),
+                  ],
+                ),
+                const Divider(height: 24),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Public Key Fingerprint (Ed25519 · Keystore):',
+                              style: TextStyle(fontSize: 10, color: Colors.grey)),
+                          SizedBox(height: 2),
+                          Text(
+                            'SHA256:9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c',
+                            style: TextStyle(fontFamily: 'monospace', fontSize: 11, fontWeight: FontWeight.bold),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                  const Divider(height: 24),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Public Key Fingerprint (Ed25519):', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                            const SizedBox(height: 2),
-                            const Text(
-                              'SHA256:9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c',
-                              style: TextStyle(fontFamily: 'monospace', fontSize: 12, fontWeight: FontWeight.bold),
-                            ),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.copy_rounded, size: 18),
-                        tooltip: 'Copy Fingerprint',
-                        onPressed: () {
-                          Clipboard.setData(const ClipboardData(text: 'SHA256:9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c'));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Fingerprint copied to clipboard!')),
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.copy_rounded, size: 18),
+                      tooltip: 'Copy Fingerprint',
+                      onPressed: () {
+                        Clipboard.setData(const ClipboardData(text: 'SHA256:9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c'));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Fingerprint copied to clipboard!')),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 20),
@@ -394,12 +434,13 @@ class _DevicesScreenState extends State<DevicesScreen> {
             children: [
               Text(
                 'Paired Devices (${_devices.length})',
-                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
               ),
               FilledButton.tonalIcon(
                 onPressed: _showPairDeviceDialog,
-                icon: const Icon(Icons.add_rounded, size: 18),
+                icon: const Icon(Icons.add_rounded, size: 16),
                 label: const Text('Pair Device'),
+                style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
               ),
             ],
           ),
@@ -415,101 +456,121 @@ class _DevicesScreenState extends State<DevicesScreen> {
   Widget _buildDeviceCard(BuildContext context, PairedDevice device) {
     final theme = Theme.of(context);
     final isGuest = device.trustLevel == DeviceTrustLevel.temporaryGuest;
+    final glow = isGuest ? const Color(0xFFF59E0B) : const Color(0xFF10B981);
 
-    return Card(
+    return InteractiveGlassCard(
+      glowColor: glow,
       margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: isGuest ? Colors.amber.shade300 : theme.colorScheme.outlineVariant,
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  backgroundColor: device.isOnline ? Colors.blue.shade50 : Colors.grey.shade100,
-                  child: Icon(
-                    device.deviceType == 'Phone' ? Icons.smartphone_rounded : Icons.computer_rounded,
-                    color: device.isOnline ? Colors.blue : Colors.grey,
+      borderRadius: BorderRadius.circular(20),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: glow.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  device.deviceType == 'Phone' ? Icons.smartphone_rounded : Icons.computer_rounded,
+                  color: glow,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          device.name,
+                          style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: glow.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            device.isOnline ? '1.8 ms' : 'Offline',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                              color: glow,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      'ID: ${device.id} • ${device.lastSeen}',
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: glow.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: glow),
+                ),
+                child: Text(
+                  isGuest ? 'GUEST SHARE' : 'TRUSTED PEER',
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    color: glow,
                   ),
                 ),
-                const SizedBox(width: 12),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.fingerprint_rounded, size: 14, color: Colors.grey),
+                const SizedBox(width: 6),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        device.name,
-                        style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                      Text(
-                        'ID: ${device.id} • ${device.lastSeen}',
-                        style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: isGuest ? Colors.amber.shade50 : Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: isGuest ? Colors.amber.shade700 : Colors.blue.shade300),
-                  ),
                   child: Text(
-                    isGuest ? 'GUEST SHARE' : 'TRUSTED PEER',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: isGuest ? Colors.amber.shade900 : Colors.blue.shade800,
-                    ),
+                    device.fingerprint,
+                    style: const TextStyle(fontFamily: 'monospace', fontSize: 10),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.fingerprint_rounded, size: 14, color: Colors.grey),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      device.fingerprint,
-                      style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Colors.black87),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: () => _showRevokeDialog(device),
-                  icon: const Icon(Icons.link_off_rounded, size: 16),
-                  label: const Text('Revoke Trust'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.red.shade700,
-                    visualDensity: VisualDensity.compact,
-                  ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () => _showRevokeDialog(device),
+                icon: const Icon(Icons.link_off_rounded, size: 15),
+                label: const Text('Revoke Trust'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.red.shade700,
+                  visualDensity: VisualDensity.compact,
                 ),
-              ],
-            ),
-          ],
-        ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

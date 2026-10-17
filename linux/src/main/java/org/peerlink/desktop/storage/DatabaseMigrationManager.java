@@ -34,7 +34,7 @@ public final class DatabaseMigrationManager {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrationManager.class);
 
     /** The target schema version this code requires. */
-    public static final int CURRENT_SCHEMA_VERSION = 4;
+    public static final int CURRENT_SCHEMA_VERSION = 5;
 
     /**
      * A single schema migration step.
@@ -164,6 +164,161 @@ public final class DatabaseMigrationManager {
             ALTER TABLE transfer_chunks ADD COLUMN chunk_sha256 TEXT NOT NULL DEFAULT '';
             """));
 
+        // Version 5 — normalized relational models: operation targets & effects,
+        // trusted peers, object versions, shares, workspaces, backup versions, scan results, recovery journal
+        list.add(new Migration(5, "Normalized relational storage and durable recovery models", """
+            CREATE TABLE IF NOT EXISTS operation_targets (
+                operation_id   TEXT    NOT NULL,
+                object_id      TEXT    NOT NULL,
+                target_order   INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (operation_id, object_id),
+                FOREIGN KEY (operation_id) REFERENCES operations(operation_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_operation_targets_obj
+                ON operation_targets(object_id);
+
+            CREATE TABLE IF NOT EXISTS operation_effects (
+                effect_id      TEXT    PRIMARY KEY,
+                operation_id   TEXT    NOT NULL,
+                effect_type    TEXT    NOT NULL,
+                target_path    TEXT    NOT NULL,
+                content_hash   TEXT,
+                bytes_affected INTEGER NOT NULL DEFAULT 0,
+                verified_at    INTEGER NOT NULL,
+                details        TEXT    NOT NULL DEFAULT '',
+                FOREIGN KEY (operation_id) REFERENCES operations(operation_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_operation_effects_op
+                ON operation_effects(operation_id);
+
+            CREATE TABLE IF NOT EXISTS trusted_peers (
+                peer_id           TEXT    PRIMARY KEY,
+                device_id         TEXT,
+                display_name      TEXT,
+                public_key_hex    TEXT    NOT NULL,
+                trust_level       TEXT    NOT NULL,
+                paired_at         INTEGER NOT NULL,
+                is_revoked        INTEGER NOT NULL DEFAULT 0,
+                revocation_reason TEXT,
+                revoked_at        INTEGER
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_trusted_peers_level
+                ON trusted_peers(trust_level);
+
+            CREATE TABLE IF NOT EXISTS object_versions (
+                object_id           TEXT    NOT NULL,
+                version_seq         INTEGER NOT NULL,
+                content_hash        TEXT    NOT NULL,
+                vector_clock_json   TEXT    NOT NULL DEFAULT '{}',
+                is_tombstone        INTEGER NOT NULL DEFAULT 0,
+                modified_by_peer_id TEXT    NOT NULL,
+                created_at          INTEGER NOT NULL,
+                PRIMARY KEY (object_id, version_seq),
+                FOREIGN KEY (object_id) REFERENCES object_index(object_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_object_versions_hash
+                ON object_versions(content_hash);
+
+            CREATE TABLE IF NOT EXISTS shares (
+                share_id          TEXT    PRIMARY KEY,
+                owner_peer_id     TEXT    NOT NULL,
+                share_type        TEXT    NOT NULL,
+                display_label     TEXT    NOT NULL,
+                created_at        INTEGER NOT NULL,
+                expires_at        INTEGER NOT NULL DEFAULT 0,
+                grace_period_ms   INTEGER NOT NULL DEFAULT 0,
+                one_time          INTEGER NOT NULL DEFAULT 0,
+                is_consumed       INTEGER NOT NULL DEFAULT 0,
+                is_revoked        INTEGER NOT NULL DEFAULT 0,
+                guest_allowed     INTEGER NOT NULL DEFAULT 0,
+                auth_secret       TEXT    NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS share_allowed_peers (
+                share_id          TEXT    NOT NULL,
+                peer_id           TEXT    NOT NULL,
+                PRIMARY KEY (share_id, peer_id),
+                FOREIGN KEY (share_id) REFERENCES shares(share_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS workspaces (
+                workspace_id      TEXT    PRIMARY KEY,
+                name              TEXT    NOT NULL,
+                owner_peer_id     TEXT    NOT NULL,
+                root_directory    TEXT,
+                policy_epoch      INTEGER NOT NULL DEFAULT 1,
+                created_at        INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS workspace_members (
+                workspace_id      TEXT    NOT NULL,
+                peer_id           TEXT    NOT NULL,
+                role              TEXT    NOT NULL,
+                joined_at         INTEGER NOT NULL,
+                invited_by        TEXT    NOT NULL,
+                is_revoked        INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (workspace_id, peer_id),
+                FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS backup_snapshots (
+                snapshot_id        TEXT    PRIMARY KEY,
+                job_id             TEXT    NOT NULL,
+                backup_type        TEXT    NOT NULL,
+                target_peer_id     TEXT    NOT NULL,
+                manifest_hash      TEXT    NOT NULL,
+                parent_snapshot_id TEXT,
+                total_files        INTEGER NOT NULL DEFAULT 0,
+                total_bytes        INTEGER NOT NULL DEFAULT 0,
+                is_blind           INTEGER NOT NULL DEFAULT 0,
+                created_at         INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS backup_versions (
+                snapshot_id        TEXT    NOT NULL,
+                object_id          TEXT    NOT NULL,
+                version_seq        INTEGER NOT NULL,
+                relative_path      TEXT    NOT NULL,
+                content_hash       TEXT,
+                storage_hash       TEXT    NOT NULL,
+                size_bytes         INTEGER NOT NULL DEFAULT 0,
+                is_deleted         INTEGER NOT NULL DEFAULT 0,
+                is_protected       INTEGER NOT NULL DEFAULT 0,
+                is_encrypted       INTEGER NOT NULL DEFAULT 0,
+                captured_at        INTEGER NOT NULL,
+                PRIMARY KEY (snapshot_id, object_id, version_seq),
+                FOREIGN KEY (snapshot_id) REFERENCES backup_snapshots(snapshot_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS scan_results (
+                content_hash       TEXT    PRIMARY KEY,
+                verdict            TEXT    NOT NULL,
+                scanner_name       TEXT    NOT NULL,
+                threat_name        TEXT,
+                duration_ms        INTEGER NOT NULL DEFAULT 0,
+                scanned_at         INTEGER NOT NULL,
+                details            TEXT    NOT NULL DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS recovery_journal (
+                recovery_id        TEXT    PRIMARY KEY,
+                operation_id       TEXT    NOT NULL,
+                decision           TEXT    NOT NULL,
+                evidence_hash      TEXT,
+                filesystem_path    TEXT,
+                reconciled_at      INTEGER NOT NULL,
+                explanation        TEXT    NOT NULL,
+                FOREIGN KEY (operation_id) REFERENCES operations(operation_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_recovery_journal_op
+                ON recovery_journal(operation_id);
+            """));
+
         return list;
     }
 
@@ -231,6 +386,11 @@ public final class DatabaseMigrationManager {
                 }
             }
 
+            // Backfill normalized relationships if upgrading to v5
+            if (migration.version() == 5) {
+                backfillOperationTargets(connection);
+            }
+
             // Record the applied version
             try (PreparedStatement pstmt = connection.prepareStatement(
                     "INSERT OR REPLACE INTO schema_version (version, description, applied_at) VALUES (?, ?, ?)")) {
@@ -249,6 +409,39 @@ public final class DatabaseMigrationManager {
             throw new SQLException("Schema migration v" + migration.version() + " failed: " + e.getMessage(), e);
         } finally {
             connection.setAutoCommit(autoCommit);
+        }
+    }
+
+    /**
+     * Backfills normalized {@code operation_targets} from legacy comma-separated
+     * {@code operations.target_object_ids} rows during migration v5.
+     */
+    private void backfillOperationTargets(Connection connection) {
+        String selectSql = "SELECT operation_id, target_object_ids FROM operations WHERE target_object_ids IS NOT NULL AND target_object_ids != ''";
+        String insertSql = "INSERT OR IGNORE INTO operation_targets (operation_id, object_id, target_order) VALUES (?, ?, ?)";
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(selectSql);
+             PreparedStatement ps = connection.prepareStatement(insertSql)) {
+            while (rs.next()) {
+                String opId = rs.getString("operation_id");
+                String rawTargets = rs.getString("target_object_ids");
+                if (rawTargets != null && !rawTargets.isBlank()) {
+                    String[] parts = rawTargets.split(",");
+                    for (int i = 0; i < parts.length; i++) {
+                        String target = parts[i].trim();
+                        if (!target.isEmpty()) {
+                            ps.setString(1, opId);
+                            ps.setString(2, target);
+                            ps.setInt(3, i);
+                            ps.addBatch();
+                        }
+                    }
+                }
+            }
+            ps.executeBatch();
+            log.info("Migration v5: backfilled operation_targets from legacy comma-separated values");
+        } catch (SQLException e) {
+            log.warn("Migration v5: backfill of operation_targets skipped or completed with notice: {}", e.getMessage());
         }
     }
 

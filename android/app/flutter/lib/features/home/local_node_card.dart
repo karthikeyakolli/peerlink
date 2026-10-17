@@ -14,8 +14,10 @@ class LocalNodeCard extends StatefulWidget {
 class _LocalNodeCardState extends State<LocalNodeCard> {
   late final NodeIpcClient _ipcClient;
   bool _ownsClient = false;
-  final TextEditingController _tokenController = TextEditingController(text: 'dev-token-default');
-  final TextEditingController _portController = TextEditingController(text: '50051');
+  final TextEditingController _tokenController =
+      TextEditingController(text: 'dev-token-default');
+  final TextEditingController _portController =
+      TextEditingController(text: '50051');
 
   @override
   void initState() {
@@ -74,7 +76,8 @@ class _LocalNodeCardState extends State<LocalNodeCard> {
   }
 
   void _handleConnect({String? versionOverride}) {
-    final port = int.tryParse(_portController.text) ?? AppConstants.defaultIpcPort;
+    final port =
+        int.tryParse(_portController.text) ?? AppConstants.defaultIpcPort;
     final token = _tokenController.text.trim();
     _ipcClient.connectAndAuthenticate(
       host: AppConstants.defaultIpcHost,
@@ -99,7 +102,8 @@ class _LocalNodeCardState extends State<LocalNodeCard> {
           elevation: 2,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: statusColor.withValues(alpha: 0.3), width: 1.5),
+            side: BorderSide(
+                color: statusColor.withValues(alpha: 0.3), width: 1.5),
           ),
           child: Padding(
             padding: const EdgeInsets.all(20.0),
@@ -109,20 +113,28 @@ class _LocalNodeCardState extends State<LocalNodeCard> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Row(
-                      children: [
-                        Icon(Icons.developer_board_rounded, color: theme.colorScheme.primary, size: 24),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Desktop Local Node IPC',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Icon(Icons.developer_board_rounded,
+                              color: theme.colorScheme.primary, size: 24),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              'Desktop Local Node IPC',
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
+                    const SizedBox(width: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
                         color: statusColor.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(12),
@@ -201,7 +213,8 @@ class _LocalNodeCardState extends State<LocalNodeCard> {
                       child: _buildInfoItem(
                         context,
                         label: 'Streaming Heartbeats',
-                        value: '${state.activeHeartbeatCount} received (seq: ${state.lastHeartbeat?.sequenceNumber ?? 0})',
+                        value:
+                            '${state.activeHeartbeatCount} received (seq: ${state.lastHeartbeat?.sequenceNumber ?? 0})',
                         icon: Icons.monitor_heart_rounded,
                       ),
                     ),
@@ -271,9 +284,10 @@ class _LocalNodeCardState extends State<LocalNodeCard> {
                       label: const Text('Connect'),
                     ),
                     OutlinedButton.icon(
-                      onPressed: state.status == IpcConnectionStatus.disconnected
-                          ? null
-                          : () => _ipcClient.disconnect(),
+                      onPressed:
+                          state.status == IpcConnectionStatus.disconnected
+                              ? null
+                              : () => _ipcClient.disconnect(),
                       icon: const Icon(Icons.link_off_rounded, size: 18),
                       label: const Text('Disconnect'),
                     ),
@@ -292,7 +306,8 @@ class _LocalNodeCardState extends State<LocalNodeCard> {
                       label: const Text('Restart Node'),
                     ),
                     TextButton.icon(
-                      onPressed: () => _handleConnect(versionOverride: '2.0.0-incompatible'),
+                      onPressed: () =>
+                          _handleConnect(versionOverride: '2.0.0-incompatible'),
                       icon: const Icon(Icons.warning_amber_rounded, size: 18),
                       label: const Text('Test Incompatible Version'),
                     ),

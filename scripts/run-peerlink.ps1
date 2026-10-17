@@ -78,7 +78,7 @@ if (-not (Test-Path $dartBin)) {
     $dartBin = "dart"
 }
 
-Push-Location "apps\peerlink-app"
+Push-Location "windows\app\flutter"
 try {
     & $dartBin run test/integration/live_node_proof.dart $Port $Token
 } finally {

@@ -47,8 +47,8 @@ if (Test-Path "scripts/generate-proto.ps1") {
 
 # 6. Install Flutter dependencies
 Write-Host "Installing Flutter dependencies..." -ForegroundColor Cyan
-if (Test-Path "apps/peerlink-app") {
-    Push-Location "apps/peerlink-app"
+if (Test-Path "windows/app/flutter") {
+    Push-Location "windows/app/flutter"
     flutter pub get
     Pop-Location
 }

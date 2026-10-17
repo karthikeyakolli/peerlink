@@ -198,7 +198,7 @@ public final class PeerTransferEngine {
                     .setAccepted(false)
                     .setRejectionReason(validationError)
                     .setError(ErrorDetail.newBuilder()
-                            .setCode(ErrorCode.ERROR_CODE_INVALID_ARGUMENT)
+                            .setCode(ErrorCode.ERROR_CODE_INTERNAL_ERROR)
                             .setHumanSummary(validationError)
                             .build())
                     .build();
@@ -436,6 +436,46 @@ public final class PeerTransferEngine {
         // Duplicate and Conflicting chunk handling
         Set<Long> ackedChunks = sessionJournal.getAckedChunks(transferId, itemIndex);
         if (ackedChunks.contains(chunkIndex)) {
+            // Check if existing staged content at this offset matches the new chunk
+            try {
+                Path partPath = stagingManager.getStagedPartPath(transferId, itemIndex);
+                if (Files.exists(partPath)) {
+                    long fileSize = Files.size(partPath);
+                    if (offset + data.length != fileSize && fileSize > 0) {
+                        return TransferChunkAck.newBuilder()
+                                .setTransferId(transferId)
+                                .setItemIndex(itemIndex)
+                                .setChunkIndex(chunkIndex)
+                                .setSuccess(false)
+                                .setRetryRequested(false)
+                                .setErrorMessage("Conflicting duplicate chunk size at offset " + offset)
+                                .build();
+                    }
+                    if (offset + data.length <= fileSize) {
+                        byte[] existing = new byte[data.length];
+                        try (java.nio.channels.FileChannel fc = java.nio.channels.FileChannel.open(partPath, java.nio.file.StandardOpenOption.READ)) {
+                            fc.position(offset);
+                            java.nio.ByteBuffer buf = java.nio.ByteBuffer.wrap(existing);
+                            while (buf.hasRemaining()) {
+                                if (fc.read(buf) < 0) break;
+                            }
+                        }
+                        if (!java.util.Arrays.equals(existing, data)) {
+                            return TransferChunkAck.newBuilder()
+                                    .setTransferId(transferId)
+                                    .setItemIndex(itemIndex)
+                                    .setChunkIndex(chunkIndex)
+                                    .setSuccess(false)
+                                    .setRetryRequested(false)
+                                    .setErrorMessage("Conflicting duplicate chunk data at offset " + offset)
+                                    .build();
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Error verifying duplicate chunk data: {}", e.getMessage());
+            }
+
             // If hash is present, check for conflicting data
             if (chunk.getChunkSha256() != null && !chunk.getChunkSha256().isBlank()) {
                 String computed = FileManifestBuilder.calculateSha256Hex(data);
@@ -1269,7 +1309,7 @@ public final class PeerTransferEngine {
                         anyCommitted = true;
                         try {
                             String sha = FileManifestBuilder.calculateSha256Hex(destFile);
-                            if (!sha.equalsIgnoreCase(item.getSha256())) {
+                            if (!sha.equalsIgnoreCase(item.getSha256Hex())) {
                                 allCommitted = false;
                             }
                         } catch (Exception e) {

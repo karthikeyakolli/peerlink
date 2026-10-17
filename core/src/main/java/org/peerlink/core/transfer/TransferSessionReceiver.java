@@ -94,7 +94,19 @@ public class TransferSessionReceiver {
             return;
         }
 
-        TransferChunkAck ack = engine.handleIncomingChunk(chunk);
+        TransferChunkAck ack;
+        try {
+            ack = engine.handleIncomingChunk(chunk);
+        } catch (java.io.IOException e) {
+            log.error("IOException handling chunk for transfer [{}]: {}", chunk.getTransferId(), e.getMessage());
+            ack = TransferChunkAck.newBuilder()
+                    .setTransferId(chunk.getTransferId())
+                    .setItemIndex(chunk.getItemIndex())
+                    .setChunkIndex(chunk.getChunkIndex())
+                    .setSuccess(false)
+                    .setErrorMessage("I/O error processing chunk: " + e.getMessage())
+                    .build();
+        }
         sendChunkAck(session, ack);
     }
 

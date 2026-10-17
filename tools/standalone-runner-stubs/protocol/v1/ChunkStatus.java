@@ -1,0 +1,10 @@
+package org.peerlink.protocol.v1;
+
+public enum ChunkStatus {
+    CHUNK_STATUS_UNSPECIFIED,
+    CHUNK_STATUS_PENDING,
+    CHUNK_STATUS_TRANSFERRED,
+    CHUNK_STATUS_ACKNOWLEDGED,
+    CHUNK_STATUS_ACKED,
+    CHUNK_STATUS_FAILED
+}

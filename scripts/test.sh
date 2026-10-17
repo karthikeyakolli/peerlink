@@ -13,8 +13,8 @@ echo "2. Running Java Core & Desktop Node tests (JUnit 5)..."
 mvn clean test -B
 
 echo "3. Running Flutter tests..."
-if [ -d "apps/peerlink-app" ]; then
-    (cd apps/peerlink-app && flutter test)
+if [ -d "linux/app/flutter" ]; then
+    (cd linux/app/flutter && flutter test)
 fi
 
 echo "=== All PeerLink Tests Succeeded ==="

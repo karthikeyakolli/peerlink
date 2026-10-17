@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import org.peerlink.core.android.discovery.NsdDiscoveryAdapter
+import org.peerlink.core.android.discovery.DiscoveryAdapter.DiscoveryCallback
 import org.peerlink.protocol.v1.PeerId
 import java.net.InetAddress
 

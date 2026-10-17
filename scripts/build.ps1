@@ -20,8 +20,8 @@ mvn clean compile -B
 
 # 4. Flutter analysis
 Write-Host "4. Analyzing Flutter application..." -ForegroundColor Yellow
-if (Test-Path "apps/peerlink-app") {
-    Push-Location "apps/peerlink-app"
+if (Test-Path "windows/app/flutter") {
+    Push-Location "windows/app/flutter"
     flutter pub get
     flutter analyze --fatal-infos
     Pop-Location

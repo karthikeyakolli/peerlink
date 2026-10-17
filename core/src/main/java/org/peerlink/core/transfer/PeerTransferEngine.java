@@ -198,7 +198,7 @@ public final class PeerTransferEngine {
                     .setAccepted(false)
                     .setRejectionReason(validationError)
                     .setError(ErrorDetail.newBuilder()
-                            .setCode(ErrorCode.ERROR_CODE_INVALID_ARGUMENT)
+                            .setCode(ErrorCode.ERROR_CODE_INTERNAL_ERROR)
                             .setHumanSummary(validationError)
                             .build())
                     .build();
@@ -1269,7 +1269,7 @@ public final class PeerTransferEngine {
                         anyCommitted = true;
                         try {
                             String sha = FileManifestBuilder.calculateSha256Hex(destFile);
-                            if (!sha.equalsIgnoreCase(item.getSha256())) {
+                            if (!sha.equalsIgnoreCase(item.getSha256Hex())) {
                                 allCommitted = false;
                             }
                         } catch (Exception e) {

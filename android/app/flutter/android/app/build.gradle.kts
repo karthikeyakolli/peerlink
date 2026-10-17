@@ -52,6 +52,14 @@ android {
             signingConfig = signingConfigs.getByName("release")
         }
     }
+
+    sourceSets {
+        getByName("main") {
+            java {
+                srcDir("../../../../src/main/java")
+            }
+        }
+    }
 }
 
 kotlin {
@@ -69,7 +77,8 @@ dependencies {
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-    implementation("com.google.protobuf:protobuf-javalite:3.25.3")
+    implementation("com.google.protobuf:protobuf-java:4.29.3")
+    implementation("org.slf4j:slf4j-api:2.0.12")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
@@ -77,3 +86,15 @@ dependencies {
     testImplementation("org.mockito.kotlin:mockito-kotlin:5.3.1")
     testImplementation("androidx.test:core:1.6.1")
 }
+
+tasks.withType<JavaCompile>().configureEach {
+    include("io/flutter/**")
+    include("org/peerlink/core/android/**")
+    include("org/peerlink/protocol/v1/**")
+    include("org/peerlink/core/collaboration/clipboard/**")
+    include("org/peerlink/core/filesystem/**")
+    include("org/peerlink/core/model/**")
+    include("org/peerlink/core/transfer/TransferProgressTracker.java")
+    exclude("**/DesktopLocalNodeServiceGrpc.java")
+}
+

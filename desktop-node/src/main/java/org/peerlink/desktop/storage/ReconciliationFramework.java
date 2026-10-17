@@ -7,6 +7,11 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.io.IOException;
+import java.security.MessageDigest;
 
 /**
  * Reconciliation framework for the Desktop Local Node.
@@ -20,17 +25,14 @@ import java.util.List;
  *   <li>Periodically, to detect stale or orphaned journal entries.</li>
  * </ul>
  *
- * <p>Phase 05 scope: this framework establishes the structure and contract.
- * The actual peer-query and filesystem-check reconciliation logic is
- * implemented in Phase 06 (transfer reliability). All unknown operations
- * currently receive RECONCILIATION_PENDING classification pending that work.
- *
  * <p>Design rules:
  * <ul>
  *   <li>A destructive operation must NEVER be replayed if its outcome is
  *       uncertain without first querying the counterparty and/or filesystem.</li>
  *   <li>Reconciliation produces a decision per operation — it does not
  *       automatically apply that decision. The engine applies it under policy.</li>
+ *   <li>Database transactions CANNOT span filesystem operations. Multi-stage journal
+ *       reconciliation bridges the SQLite-filesystem consistency boundary.</li>
  * </ul>
  */
 public final class ReconciliationFramework {
@@ -58,7 +60,7 @@ public final class ReconciliationFramework {
 
         /**
          * The operation's outcome is conflicted — partial state found on one side
-         * but not the other. Requires explicit conflict resolution before retry.
+         * but not the other, or content hash mismatch. Requires explicit conflict resolution.
          */
         CONFLICT_DETECTED,
 
@@ -86,11 +88,7 @@ public final class ReconciliationFramework {
 
     /**
      * Evaluate all OUTCOME_UNKNOWN operations and produce reconciliation
-     * decisions. In Phase 05, all unknown operations are classified as
-     * RECONCILIATION_PENDING because peer-query and filesystem-check
-     * infrastructure is not yet available.
-     *
-     * <p>Phase 06 will replace this with actual peer-query logic.
+     * decisions.
      */
     public List<ReconciliationResult> reconcileUnknownOperations() {
         List<OperationRecord> unknown = storage.listUnknownOutcomeOperations();
@@ -109,22 +107,83 @@ public final class ReconciliationFramework {
     }
 
     /**
+     * Reconciles the boundary between SQLite and the filesystem for a specific operation.
+     * Never relies on SQLite transaction boundaries to assume filesystem atomicity.
+     *
+     * @param operationId The operation under evaluation.
+     * @param targetPath The destination filesystem path that should have been modified/created.
+     * @param expectedSha256 Expected SHA-256 hash of the committed file content.
+     * @return ReconciliationResult containing evidence-based decision and explanation.
+     */
+    public ReconciliationResult reconcileFilesystemBoundary(String operationId, Path targetPath, String expectedSha256) {
+        if (targetPath == null || !Files.exists(targetPath)) {
+            return new ReconciliationResult(
+                    operationId,
+                    ReconciliationDecision.CONFIRMED_NOT_COMMITTED,
+                    "Target filesystem path does not exist: " + targetPath + ". Mutation was never completed."
+            );
+        }
+
+        try {
+            byte[] fileBytes = Files.readAllBytes(targetPath);
+            String actualSha256 = sha256Hex(fileBytes);
+            if (expectedSha256 != null && !expectedSha256.isBlank()) {
+                if (actualSha256.equalsIgnoreCase(expectedSha256)) {
+                    return new ReconciliationResult(
+                            operationId,
+                            ReconciliationDecision.CONFIRMED_COMMITTED,
+                            "Filesystem target exists and matches expected content hash (" + actualSha256 + ")."
+                    );
+                } else {
+                    return new ReconciliationResult(
+                            operationId,
+                            ReconciliationDecision.CONFLICT_DETECTED,
+                            "Filesystem content mismatch: found hash " + actualSha256 + ", expected " + expectedSha256
+                    );
+                }
+            } else {
+                return new ReconciliationResult(
+                        operationId,
+                        ReconciliationDecision.CONFIRMED_COMMITTED,
+                        "Filesystem target exists and is readable (" + fileBytes.length + " bytes)."
+                );
+            }
+        } catch (IOException e) {
+            return new ReconciliationResult(
+                    operationId,
+                    ReconciliationDecision.CONFLICT_DETECTED,
+                    "I/O error reading filesystem target during reconciliation: " + e.getMessage()
+            );
+        }
+    }
+
+    /**
      * Apply a reconciliation decision to the journal. This is the only place
      * where OUTCOME_UNKNOWN → COMMITTED or OUTCOME_UNKNOWN → CANCELLED
      * transitions are permitted.
      */
     public void applyDecision(String operationId, ReconciliationDecision decision, String note) {
+        String recoveryId = "rec-" + System.currentTimeMillis() + "-" + UUID.randomUUID().toString().substring(0, 8);
         switch (decision) {
-            case CONFIRMED_COMMITTED ->
+            case CONFIRMED_COMMITTED -> {
                 storage.updateState(operationId, OperationState.COMMITTED);
+                storage.recordRecoveryEntry(recoveryId, operationId, decision.name(), null, null,
+                        System.currentTimeMillis(), note);
+            }
 
-            case CONFIRMED_NOT_COMMITTED ->
+            case CONFIRMED_NOT_COMMITTED -> {
                 storage.updateState(operationId, OperationState.CANCELLED);
+                storage.recordRecoveryEntry(recoveryId, operationId, decision.name(), null, null,
+                        System.currentTimeMillis(), note);
+            }
 
-            case ORPHANED ->
+            case ORPHANED, CONFLICT_DETECTED -> {
                 storage.updateState(operationId, OperationState.RECOVERY_REQUIRED);
+                storage.recordRecoveryEntry(recoveryId, operationId, decision.name(), null, null,
+                        System.currentTimeMillis(), note);
+            }
 
-            case CONFLICT_DETECTED, RECONCILIATION_PENDING -> {
+            case RECONCILIATION_PENDING -> {
                 // No state change — leave in OUTCOME_UNKNOWN, append a note
                 log.warn("Operation {} remains OUTCOME_UNKNOWN: {}", operationId, decision);
             }
@@ -133,16 +192,27 @@ public final class ReconciliationFramework {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Private — classification logic (Phase 05: all PENDING)
+    // Private helpers
     // ──────────────────────────────────────────────────────────────────────────
 
     private ReconciliationResult classifyUnknownOperation(OperationRecord op) {
-        // Phase 05: no peer connectivity or filesystem probe available.
-        // All unknown operations are pending until Phase 06 provides the infrastructure.
         return new ReconciliationResult(
                 op.getOperationId(),
                 ReconciliationDecision.RECONCILIATION_PENDING,
-                "Peer-query and filesystem-check not yet available (Phase 05 scope). " +
-                "Operation will be reconciled when peer reconnects in Phase 06.");
+                "Awaiting counterparty query or filesystem boundary probe for operation " + op.getOperationId());
+    }
+
+    private static String sha256Hex(byte[] data) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(data);
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            throw new RuntimeException("SHA-256 not available", e);
+        }
     }
 }

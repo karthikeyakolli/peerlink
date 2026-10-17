@@ -12,7 +12,7 @@ if (-not (Test-Path $flutterBin)) {
     }
 }
 
-$appDir = Join-Path $repoRoot "apps\peerlink-app"
+$appDir = Join-Path $repoRoot "windows\app\flutter"
 Push-Location $appDir
 
 # Check Visual Studio C++ Workload

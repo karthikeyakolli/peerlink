@@ -59,10 +59,10 @@ public class TransferSessionSender {
             throw new IllegalStateException("Cannot initiate send: PeerSession is not established (" + session.getState() + ")");
         }
 
-        if (!manifest.getRecipientPeerId().equals(remotePeerId)) {
+        if (!manifest.getReceiverPeerId().getValue().equals(remotePeerId)) {
             throw new IllegalArgumentException(String.format(
                     "Recipient Peer ID in manifest (%s) does not match authenticated remote peer (%s)",
-                    manifest.getRecipientPeerId(), remotePeerId));
+                    manifest.getReceiverPeerId().getValue(), remotePeerId));
         }
 
         TransferProgressTracker tracker = new TransferProgressTracker(
@@ -141,7 +141,6 @@ public class TransferSessionSender {
             log.info("All chunks sent for transfer [{}]. Signaling commit to peer [{}]", transferId, remotePeerId);
             TransferCommitSignal commit = TransferCommitSignal.newBuilder()
                     .setTransferId(transferId)
-                    .setTimestampUtcMs(System.currentTimeMillis())
                     .build();
 
             CompletableFuture<TransferCompletedReceipt> receiptFuture = coordinator.registerPendingReceipt(transferId);

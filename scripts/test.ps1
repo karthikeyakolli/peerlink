@@ -16,8 +16,8 @@ mvn clean test -B
 
 # 3. Flutter tests
 Write-Host "3. Running Flutter tests..." -ForegroundColor Yellow
-if (Test-Path "apps/peerlink-app") {
-    Push-Location "apps/peerlink-app"
+if (Test-Path "windows/app/flutter") {
+    Push-Location "windows/app/flutter"
     flutter test
     Pop-Location
 }

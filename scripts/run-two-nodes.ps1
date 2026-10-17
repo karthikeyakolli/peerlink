@@ -42,7 +42,7 @@ if (-not (Test-Path $dartBin)) {
     $dartBin = "dart"
 }
 
-Push-Location "apps\peerlink-app"
+Push-Location "windows\app\flutter"
 try {
     Write-Host "`n[1/2] Verifying Node A IPC..." -ForegroundColor Cyan
     & $dartBin run test/integration/live_node_proof.dart 50051 dev-token-default

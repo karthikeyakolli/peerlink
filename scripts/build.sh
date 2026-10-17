@@ -16,8 +16,8 @@ echo "3. Compiling Java Core & Desktop Node..."
 mvn clean compile -B
 
 echo "4. Analyzing Flutter application..."
-if [ -d "apps/peerlink-app" ]; then
-    (cd apps/peerlink-app && flutter pub get && flutter analyze --fatal-infos)
+if [ -d "linux/app/flutter" ]; then
+    (cd linux/app/flutter && flutter pub get && flutter analyze --fatal-infos)
 fi
 
 echo "=== PeerLink Monorepo Build Succeeded ==="

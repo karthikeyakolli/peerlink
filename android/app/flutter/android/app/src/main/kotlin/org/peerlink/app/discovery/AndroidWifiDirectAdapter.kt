@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.wifi.p2p.WifiP2pDevice
 import android.net.wifi.p2p.WifiP2pManager
 import org.peerlink.core.android.discovery.WifiDirectDiscoveryAdapter
+import org.peerlink.core.android.discovery.DiscoveryAdapter.DiscoveryCallback
 import org.peerlink.protocol.v1.PeerId
 
 /**

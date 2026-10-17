@@ -6,6 +6,7 @@ import org.peerlink.protocol.v1.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.nio.file.Path;
 
 /**
@@ -66,9 +67,9 @@ public class TransferSessionReceiver {
         }
 
         // 3. Sender Identity Binding Invariant
-        if (!offer.getManifest().getSenderPeerId().equals(remotePeerId)) {
+        if (!offer.getManifest().getSenderPeerId().getValue().equals(remotePeerId)) {
             log.warn("Rejected offer {}: Sender peer in manifest ({}) does not match authenticated session peer ({})",
-                    transferId, offer.getManifest().getSenderPeerId(), remotePeerId);
+                    transferId, offer.getManifest().getSenderPeerId().getValue(), remotePeerId);
             sendResponse(session, TransferResponse.newBuilder()
                     .setTransferId(transferId)
                     .setAccepted(false)
@@ -94,8 +95,19 @@ public class TransferSessionReceiver {
             return;
         }
 
-        TransferChunkAck ack = engine.handleIncomingChunk(chunk);
-        sendChunkAck(session, ack);
+        try {
+            TransferChunkAck ack = engine.handleIncomingChunk(chunk);
+            sendChunkAck(session, ack);
+        } catch (IOException e) {
+            log.error("Failed to handle incoming chunk for transfer {}: {}", chunk.getTransferId(), e.getMessage(), e);
+            sendChunkAck(session, TransferChunkAck.newBuilder()
+                    .setTransferId(chunk.getTransferId())
+                    .setItemIndex(chunk.getItemIndex())
+                    .setChunkIndex(chunk.getChunkIndex())
+                    .setSuccess(false)
+                    .setErrorMessage("IO error writing chunk: " + e.getMessage())
+                    .build());
+        }
     }
 
     public void handleCommit(PeerSession session, TransferCommitSignal commit) {

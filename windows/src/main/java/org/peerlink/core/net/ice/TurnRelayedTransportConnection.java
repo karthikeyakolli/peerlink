@@ -122,7 +122,7 @@ public class TurnRelayedTransportConnection implements TransportConnection {
     }
 
     public ConnectionDiagnostics.Outcome getDiagnosticsOutcome() {
-        return ConnectionDiagnostics.Outcome.RELAY_SUCCEEDED;
+        return ConnectionDiagnostics.Outcome.RELAY_USED;
     }
 
     /**

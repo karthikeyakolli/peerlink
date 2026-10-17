@@ -87,7 +87,7 @@ public final class DesktopNodeDaemon implements Closeable {
                 String platform = System.getProperty("os.name", "Windows");
 
                 this.identityManager = org.peerlink.core.identity.DeviceIdentityManager.loadOrCreate(
-                        keyStore, sqliteStorage, deviceName, platform);
+                        keyStore, sqliteStorage, deviceName, org.peerlink.protocol.v1.DeviceType.DEVICE_TYPE_DESKTOP_WINDOWS, platform, "0.1.0");
                 this.peerId = identityManager.getPeerIdentity().getPeerId().getValue();
                 log.info("Initialized device cryptographic identity. Stable Peer ID: {}, Fingerprint: {}",
                         this.peerId, identityManager.getFingerprint());
@@ -192,9 +192,7 @@ public final class DesktopNodeDaemon implements Closeable {
             tcpTransport = null;
         }
         if (sessionManager != null) {
-            try {
-                sessionManager.close();
-            } catch (IOException ignored) {}
+            sessionManager.close();
             sessionManager = null;
         }
         if (grpcServer != null) {

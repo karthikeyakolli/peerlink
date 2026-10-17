@@ -33,12 +33,32 @@ foreach ($pom in $poms) {
     }
 }
 
-# Check Core module source for OS-specific or forbidden imports
-$coreSources = Get-ChildItem -Path "core/src/main/java" -Filter "*.java" -Recurse -ErrorAction SilentlyContinue
-foreach ($src in $coreSources) {
-    $content = Get-Content $src.FullName -Raw
-    if ($content -match "import android\." -or $content -match "import com\.sun\." -or $content -match "import javafx\.") {
-        Write-Host "VIOLATION: Portable core imports OS-specific or banned package in $($src.FullName)" -ForegroundColor Red
+# Check platform source directories for OS-specific or forbidden imports
+$platforms = @("windows", "linux", "macos", "android", "core")
+foreach ($plat in $platforms) {
+    $srcPath = Join-Path $plat "src\main\java"
+    if (Test-Path $srcPath) {
+        $sources = Get-ChildItem -Path $srcPath -Filter "*.java" -Recurse -ErrorAction SilentlyContinue
+        foreach ($src in $sources) {
+            $content = Get-Content $src.FullName -Raw
+            if ($content -match "import android\." -or $content -match "import com\.sun\." -or $content -match "import javafx\.") {
+                Write-Host "VIOLATION: $plat source imports OS-specific or banned package in $($src.FullName)" -ForegroundColor Red
+                $violations++
+            }
+        }
+    }
+}
+
+# Verify no platform references another platform's source or retired apps directory
+$retiredAppSlash = "apps/" + "peerlink-app"
+$retiredAppBackslash = "apps\" + "peerlink-app"
+$buildFiles = Get-ChildItem -Path . -Include "pom.xml","pubspec.yaml","build.gradle.kts","build.gradle" -Recurse | Where-Object {
+    $_.FullName -notmatch "node_modules|\.git|target|\.dart_tool"
+}
+foreach ($bf in $buildFiles) {
+    $content = Get-Content $bf.FullName -Raw
+    if ($content -match [regex]::Escape($retiredAppSlash) -or $content -match [regex]::Escape($retiredAppBackslash)) {
+        Write-Host "VIOLATION: Build file references retired apps path in $($bf.FullName)" -ForegroundColor Red
         $violations++
     }
 }

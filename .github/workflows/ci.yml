@@ -20,10 +20,16 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Make scripts executable
-        run: chmod +x tools/sync-platform-shared/*.sh
+        run: |
+          chmod +x tools/platform-parity/*.sh
+          chmod +x tools/sync-platform-shared/*.sh
+          chmod +x scripts/*.sh
 
       - name: Verify Invariant Parity Across All 4 Platforms
-        run: ./tools/sync-platform-shared/verify-shared.sh
+        run: ./tools/platform-parity/verify-platform-parity.sh
+
+      - name: Verify Architecture and Dependency Boundaries
+        run: ./scripts/check-deps.sh
 
       - name: Install Protoc
         uses: arduino/setup-protoc@v3
@@ -32,8 +38,8 @@ jobs:
 
       - name: Verify Protobuf Contract Syntax
         run: |
-          protoc --proto_path=windows/protocol \
-                 windows/protocol/peerlink/v1/*.proto \
+          protoc --proto_path=windows/protocol/proto \
+                 windows/protocol/proto/peerlink/v1/*.proto \
                  --descriptor_set_out=/dev/null
 
   # ── 2. Windows Standalone Project ───────────────────────────────────────────
@@ -189,6 +195,10 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: |
+          yes | ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager --install "ndk;28.2.13676358"
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../design_system/components/glass_container.dart';
+import '../../design_system/components/interactive_glass_card.dart';
 
 enum SyncMode {
   twoWaySync,
@@ -150,7 +152,8 @@ class _SpacesScreenState extends State<SpacesScreen> {
                 ),
                 child: const Row(
                   children: [
-                    Icon(Icons.info_outline_rounded, color: Colors.blue, size: 18),
+                    Icon(Icons.info_outline_rounded,
+                        color: Colors.blue, size: 18),
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -162,11 +165,15 @@ class _SpacesScreenState extends State<SpacesScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              const Text('Planned Changes:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const Text('Planned Changes:',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
               const SizedBox(height: 8),
-              _buildChangeItem(Icons.add_circle_outline, Colors.green, 'Added remotely:', 'reports/q3_summary.pdf (+2.4 MB)'),
-              _buildChangeItem(Icons.edit_outlined, Colors.amber.shade800, 'Modified remotely:', 'specs/architecture.md'),
-              _buildChangeItem(Icons.delete_outline, Colors.red, 'Deleted remotely:', 'drafts/notes_old.txt'),
+              _buildChangeItem(Icons.add_circle_outline, Colors.green,
+                  'Added remotely:', 'reports/q3_summary.pdf (+2.4 MB)'),
+              _buildChangeItem(Icons.edit_outlined, Colors.amber.shade800,
+                  'Modified remotely:', 'specs/architecture.md'),
+              _buildChangeItem(Icons.delete_outline, Colors.red,
+                  'Deleted remotely:', 'drafts/notes_old.txt'),
               const Divider(height: 24),
               const Text(
                 'Direction: peer_laptop_pro ➔ Local Node (Two-Way Sync)',
@@ -184,7 +191,9 @@ class _SpacesScreenState extends State<SpacesScreen> {
             onPressed: () {
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Sync executed cleanly! All changes applied.')),
+                const SnackBar(
+                    content:
+                        Text('Sync executed cleanly! All changes applied.')),
               );
             },
             child: const Text('Apply Changes to Disk'),
@@ -223,29 +232,35 @@ class _SpacesScreenState extends State<SpacesScreen> {
               ),
               child: const Row(
                 children: [
-                  Icon(Icons.description_rounded, color: Colors.amber, size: 20),
+                  Icon(Icons.description_rounded,
+                      color: Colors.amber, size: 20),
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'specs/roadmap.json\nLocal: Modified 12m ago • Remote: Modified 14m ago',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      style:
+                          TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                     ),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 16),
-            const Text('Choose Resolution Policy:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            const Text('Choose Resolution Policy:',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
             const SizedBox(height: 8),
             ListTile(
               dense: true,
               leading: const Icon(Icons.copy_all_rounded, color: Colors.blue),
               title: const Text('Keep Both (Recommended)'),
-              subtitle: const Text('Preserves local file and saves remote version as roadmap.conflict.json'),
+              subtitle: const Text(
+                  'Preserves local file and saves remote version as roadmap.conflict.json'),
               onTap: () {
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Conflict resolved: Both versions preserved.')),
+                  const SnackBar(
+                      content:
+                          Text('Conflict resolved: Both versions preserved.')),
                 );
               },
             ),
@@ -253,23 +268,29 @@ class _SpacesScreenState extends State<SpacesScreen> {
               dense: true,
               leading: const Icon(Icons.computer_rounded, color: Colors.green),
               title: const Text('Keep Local Version'),
-              subtitle: const Text('Overwrites remote replica with this device\'s content'),
+              subtitle: const Text(
+                  'Overwrites remote replica with this device\'s content'),
               onTap: () {
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Conflict resolved: Local version kept.')),
+                  const SnackBar(
+                      content: Text('Conflict resolved: Local version kept.')),
                 );
               },
             ),
             ListTile(
               dense: true,
-              leading: const Icon(Icons.cloud_download_rounded, color: Colors.orange),
+              leading: const Icon(Icons.cloud_download_rounded,
+                  color: Colors.orange),
               title: const Text('Accept Remote Version'),
-              subtitle: const Text('Replaces local copy with remote peer\'s content'),
+              subtitle:
+                  const Text('Replaces local copy with remote peer\'s content'),
               onTap: () {
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Conflict resolved: Remote version accepted.')),
+                  const SnackBar(
+                      content:
+                          Text('Conflict resolved: Remote version accepted.')),
                 );
               },
             ),
@@ -333,7 +354,9 @@ class _SpacesScreenState extends State<SpacesScreen> {
             onPressed: () {
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Mass deletions rejected. Local files preserved.')),
+                const SnackBar(
+                    content: Text(
+                        'Mass deletions rejected. Local files preserved.')),
               );
             },
             style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
@@ -343,7 +366,8 @@ class _SpacesScreenState extends State<SpacesScreen> {
             onPressed: () {
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Mass changes authorized and executed.')),
+                const SnackBar(
+                    content: Text('Mass changes authorized and executed.')),
               );
             },
             child: const Text('Authorize & Apply'),
@@ -354,13 +378,15 @@ class _SpacesScreenState extends State<SpacesScreen> {
   }
 
   void _showRestoreDialog(BackupSnapshot snap) {
-    final destController = TextEditingController(text: 'C:\\Users\\User\\Restored_Backups\\${snap.id}');
+    final destController = TextEditingController(
+        text: 'C:\\Users\\User\\Restored_Backups\\${snap.id}');
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Row(
           children: [
-            Icon(Icons.settings_backup_restore_rounded, color: Colors.deepPurple),
+            Icon(Icons.settings_backup_restore_rounded,
+                color: Colors.deepPurple),
             SizedBox(width: 8),
             Text('Restore Snapshot'),
           ],
@@ -369,7 +395,9 @@ class _SpacesScreenState extends State<SpacesScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Restore "${snap.name}" (${snap.totalSize}, ${snap.fileCount} files)', style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text(
+                'Restore "${snap.name}" (${snap.totalSize}, ${snap.fileCount} files)',
+                style: const TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             const Text(
               'Important: Restoring creates a new historical copy in your chosen folder. It NEVER overwrites or deletes past backup snapshots.',
@@ -387,9 +415,12 @@ class _SpacesScreenState extends State<SpacesScreen> {
             const SizedBox(height: 12),
             Row(
               children: [
-                const Icon(Icons.verified_outlined, size: 16, color: Colors.green),
+                const Icon(Icons.verified_outlined,
+                    size: 16, color: Colors.green),
                 const SizedBox(width: 6),
-                Text('Manifest SHA-256: ${snap.rootHash.substring(0, 20)}...', style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
+                Text('Manifest SHA-256: ${snap.rootHash.substring(0, 20)}...',
+                    style:
+                        const TextStyle(fontSize: 11, fontFamily: 'monospace')),
               ],
             ),
           ],
@@ -404,7 +435,8 @@ class _SpacesScreenState extends State<SpacesScreen> {
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text('Restoring snapshot to "${destController.text}" with SHA-256 verification...'),
+                  content: Text(
+                      'Restoring snapshot to "${destController.text}" with SHA-256 verification...'),
                   backgroundColor: Colors.green.shade700,
                 ),
               );
@@ -416,16 +448,22 @@ class _SpacesScreenState extends State<SpacesScreen> {
     );
   }
 
-  Widget _buildChangeItem(IconData icon, Color color, String label, String text) {
+  Widget _buildChangeItem(
+      IconData icon, Color color, String label, String text) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3.0),
       child: Row(
         children: [
           Icon(icon, color: color, size: 16),
           const SizedBox(width: 6),
-          Text(label, style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.bold)),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 12, color: color, fontWeight: FontWeight.bold)),
           const SizedBox(width: 6),
-          Expanded(child: Text(text, style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis)),
+          Expanded(
+              child: Text(text,
+                  style: const TextStyle(fontSize: 12),
+                  overflow: TextOverflow.ellipsis)),
         ],
       ),
     );
@@ -443,7 +481,9 @@ class _SpacesScreenState extends State<SpacesScreen> {
           bottom: const TabBar(
             tabs: [
               Tab(icon: Icon(Icons.sync_rounded), text: 'SYNC SPACES'),
-              Tab(icon: Icon(Icons.history_rounded), text: 'BACKUPS & SNAPSHOTS'),
+              Tab(
+                  icon: Icon(Icons.history_rounded),
+                  text: 'BACKUPS & SNAPSHOTS'),
             ],
           ),
         ),
@@ -461,36 +501,40 @@ class _SpacesScreenState extends State<SpacesScreen> {
     return ListView(
       padding: const EdgeInsets.all(16.0),
       children: [
-        // Educational Sync Distinction Card
-        Card(
-          elevation: 0,
-          color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: theme.colorScheme.outlineVariant),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.info_outline_rounded, color: theme.colorScheme.primary),
-                    const SizedBox(width: 8),
-                    Text(
-                      'How PeerLink Sync Works',
-                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+        // Educational Sync Distinction Glass Container
+        GlassContainer(
+          glowColor: const Color(0xFFF59E0B),
+          padding: const EdgeInsets.all(16.0),
+          borderRadius: BorderRadius.circular(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF59E0B).withValues(alpha: 0.18),
+                      shape: BoxShape.circle,
                     ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Sync continuously reconciles file changes between paired devices. When a file is updated or deleted on one peer, the change is mirrored when devices connect. Destructive actions have built-in mass-change circuit breakers.',
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                ),
-              ],
-            ),
+                    child: const Icon(Icons.sync_rounded,
+                        color: Color(0xFFF59E0B), size: 20),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    'Continuous Sync Replicas',
+                    style: theme.textTheme.titleSmall
+                        ?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Sync continuously reconciles file changes between paired devices. When a file is updated or deleted on one peer, the change is mirrored when devices connect. Destructive actions have built-in mass-change circuit breakers.',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 16),
@@ -506,100 +550,107 @@ class _SpacesScreenState extends State<SpacesScreen> {
 
     switch (space.status) {
       case SyncStatus.inSync:
-        statusColor = Colors.green;
+        statusColor = const Color(0xFF10B981);
         statusLabel = 'IN SYNC';
         statusIcon = Icons.check_circle_rounded;
         break;
       case SyncStatus.syncing:
-        statusColor = Colors.blue;
+        statusColor = const Color(0xFF2563EB);
         statusLabel = 'SYNCING';
         statusIcon = Icons.sync_rounded;
         break;
       case SyncStatus.conflictDetected:
-        statusColor = Colors.amber.shade900;
+        statusColor = const Color(0xFFF59E0B);
         statusLabel = 'CONFLICT (${space.pendingConflicts})';
         statusIcon = Icons.warning_amber_rounded;
         break;
       case SyncStatus.massChangePaused:
-        statusColor = Colors.red;
+        statusColor = const Color(0xFFEF4444);
         statusLabel = 'MASS-CHANGE PAUSED';
         statusIcon = Icons.shield_rounded;
         break;
     }
 
-    return Card(
+    return InteractiveGlassCard(
+      glowColor: statusColor,
       margin: const EdgeInsets.only(bottom: 16),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: statusColor.withValues(alpha: 0.3)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Text(
-                    space.name,
-                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-                  ),
+      borderRadius: BorderRadius.circular(20),
+      padding: const EdgeInsets.all(18.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  space.name,
+                  style: theme.textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: statusColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: statusColor),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(statusIcon, size: 14, color: statusColor),
-                      const SizedBox(width: 4),
-                      Text(
-                        statusLabel,
-                        style: TextStyle(color: statusColor, fontSize: 11, fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: statusColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: statusColor),
                 ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text('Local Path: ${space.localPath}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-            Text('Target Peer: ${space.remotePeerId} • Mode: ${space.mode.name}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-            Text('Files: ${space.fileCount} • Last Reconciled: ${space.lastSyncTime}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-            const Divider(height: 24),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                if (space.status == SyncStatus.massChangePaused)
-                  FilledButton.icon(
-                    onPressed: () => _showMassChangeWarning(space),
-                    icon: const Icon(Icons.shield_rounded, size: 16),
-                    label: const Text('Review Mass Deletions'),
-                    style: FilledButton.styleFrom(backgroundColor: Colors.red),
-                  )
-                else if (space.status == SyncStatus.conflictDetected)
-                  FilledButton.icon(
-                    onPressed: () => _showConflictResolver(space),
-                    icon: const Icon(Icons.call_split_rounded, size: 16),
-                    label: const Text('Resolve Conflict'),
-                    style: FilledButton.styleFrom(backgroundColor: Colors.amber.shade900),
-                  )
-                else
-                  OutlinedButton.icon(
-                    onPressed: () => _showDryRunPreview(space),
-                    icon: const Icon(Icons.preview_rounded, size: 16),
-                    label: const Text('Preview Dry-Run'),
-                  ),
-              ],
-            ),
-          ],
-        ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(statusIcon, size: 14, color: statusColor),
+                    const SizedBox(width: 4),
+                    Text(
+                      statusLabel,
+                      style: TextStyle(
+                          color: statusColor,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text('Local Path: ${space.localPath}',
+              style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          Text(
+              'Target Peer: ${space.remotePeerId} • Mode: ${space.mode.name}',
+              style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          Text(
+              'Files: ${space.fileCount} • Last Reconciled: ${space.lastSyncTime}',
+              style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          const Divider(height: 24),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              if (space.status == SyncStatus.massChangePaused)
+                FilledButton.icon(
+                  onPressed: () => _showMassChangeWarning(space),
+                  icon: const Icon(Icons.shield_rounded, size: 16),
+                  label: const Text('Review Mass Deletions'),
+                  style: FilledButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
+                )
+              else if (space.status == SyncStatus.conflictDetected)
+                FilledButton.icon(
+                  onPressed: () => _showConflictResolver(space),
+                  icon: const Icon(Icons.call_split_rounded, size: 16),
+                  label: const Text('Resolve Conflict'),
+                  style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFF59E0B)),
+                )
+              else
+                OutlinedButton.icon(
+                  onPressed: () => _showDryRunPreview(space),
+                  icon: const Icon(Icons.preview_rounded, size: 16),
+                  label: const Text('Preview Dry-Run'),
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -609,40 +660,42 @@ class _SpacesScreenState extends State<SpacesScreen> {
       padding: const EdgeInsets.all(16.0),
       children: [
         // Backup Distinction Callout
-        Card(
-          elevation: 0,
-          color: Colors.deepPurple.shade50,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: Colors.deepPurple.shade200),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.history_edu_rounded, color: Colors.deepPurple),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Backup vs Sync: Key Distinction',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.deepPurple.shade900,
-                      ),
+        GlassContainer(
+          glowColor: const Color(0xFF7C3AED),
+          padding: const EdgeInsets.all(16.0),
+          borderRadius: BorderRadius.circular(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF7C3AED).withValues(alpha: 0.18),
+                      shape: BoxShape.circle,
                     ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '• Sync propagates live updates and deletions between active devices.\n'
-                  '• Backup creates immutable, point-in-time preservation snapshots with SHA-256 deduplication.\n'
-                  '• Restoring creates a new historical copy without overwriting past backups.',
-                  style: theme.textTheme.bodySmall?.copyWith(color: Colors.deepPurple.shade900),
-                ),
-              ],
-            ),
+                    child: const Icon(Icons.history_edu_rounded,
+                        color: Color(0xFF7C3AED), size: 20),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    'Immutable Merkle Preservation',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '• Sync propagates live updates and deletions between active devices.\n'
+                '• Backup creates immutable, point-in-time preservation snapshots with SHA-256 deduplication.\n'
+                '• Restoring creates a new historical copy without overwriting past backups.',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(height: 1.4),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 16),
@@ -651,16 +704,24 @@ class _SpacesScreenState extends State<SpacesScreen> {
           children: [
             Text(
               'Historical Snapshots (${_snapshots.length})',
-              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              style: theme.textTheme.titleSmall
+                  ?.copyWith(fontWeight: FontWeight.bold),
             ),
             FilledButton.tonalIcon(
               onPressed: () {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Full incremental backup initiated! Indexing files...')),
+                  const SnackBar(
+                      content: Text(
+                          'Full incremental backup initiated! Indexing files...')),
                 );
               },
-              icon: const Icon(Icons.add_rounded, size: 18),
+              icon: const Icon(Icons.add_rounded, size: 16),
               label: const Text('Take Snapshot Now'),
+              style: FilledButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                backgroundColor: const Color(0xFF7C3AED).withValues(alpha: 0.18),
+                foregroundColor: const Color(0xFF7C3AED),
+              ),
             ),
           ],
         ),
@@ -671,50 +732,53 @@ class _SpacesScreenState extends State<SpacesScreen> {
   }
 
   Widget _buildSnapshotCard(ThemeData theme, BackupSnapshot snap) {
-    return Card(
+    return InteractiveGlassCard(
+      glowColor: const Color(0xFF7C3AED),
       margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: theme.colorScheme.outlineVariant),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  snap.name,
-                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+      borderRadius: BorderRadius.circular(20),
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                snap.name,
+                style: theme.textTheme.titleSmall
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              Text(snap.timestamp,
+                  style: const TextStyle(fontSize: 11, color: Colors.grey)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Files: ${snap.fileCount} • Total Size: ${snap.totalSize}',
+            style: theme.textTheme.bodySmall,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Root Hash: ${snap.rootHash}',
+            style: const TextStyle(
+                fontFamily: 'monospace', fontSize: 10, color: Colors.grey),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              FilledButton.tonalIcon(
+                onPressed: () => _showRestoreDialog(snap),
+                icon: const Icon(Icons.settings_backup_restore_rounded,
+                    size: 16),
+                label: const Text('Restore Snapshot'),
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
                 ),
-                Text(snap.timestamp, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Files: ${snap.fileCount} • Total Size: ${snap.totalSize}',
-              style: theme.textTheme.bodySmall?.copyWith(color: Colors.black87),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Root Hash: ${snap.rootHash}',
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Colors.grey),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                FilledButton.tonalIcon(
-                  onPressed: () => _showRestoreDialog(snap),
-                  icon: const Icon(Icons.settings_backup_restore_rounded, size: 16),
-                  label: const Text('Restore Snapshot'),
-                ),
-              ],
-            ),
-          ],
-        ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

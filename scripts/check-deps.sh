@@ -15,14 +15,24 @@ for pom in $(find . -name "pom.xml"); do
     done
 done
 
-if [ -d "core/src/main/java" ]; then
-    for src in $(find core/src/main/java -name "*.java"); do
-        if grep -q -E "import (android\.|com\.sun\.|javafx\.)" "$src"; then
-            echo "VIOLATION: Portable core imports OS-specific or banned package in $src"
-            violations=$((violations + 1))
-        fi
-    done
-fi
+for plat in windows linux macos android core; do
+    if [ -d "$plat/src/main/java" ]; then
+        for src in $(find "$plat/src/main/java" -name "*.java"); do
+            if grep -q -E "import (android\.|com\.sun\.|javafx\.)" "$src"; then
+                echo "VIOLATION: $plat source imports OS-specific or banned package in $src"
+                violations=$((violations + 1))
+            fi
+        done
+    fi
+done
+
+retired_app="apps/""peerlink-app"
+for bf in $(find . -type f \( -name "pom.xml" -o -name "pubspec.yaml" -o -name "*.gradle*" \) ! -path "*/.git/*" ! -path "*/target/*" ! -path "*/.dart_tool/*"); do
+    if grep -q -E "$retired_app" "$bf"; then
+        echo "VIOLATION: Build file references retired apps path in $bf"
+        violations=$((violations + 1))
+    fi
+done
 
 if [ "$violations" -eq 0 ]; then
     echo "PASS: No forbidden dependencies or boundary violations detected."

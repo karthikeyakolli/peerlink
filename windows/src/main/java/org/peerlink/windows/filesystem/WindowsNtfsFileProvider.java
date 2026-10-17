@@ -1,6 +1,5 @@
 package org.peerlink.windows.filesystem;
 
-import org.peerlink.core.filesystem.DestinationSafety;
 import org.peerlink.core.filesystem.PathSafetyValidator;
 import org.peerlink.core.filesystem.PeerFileHandle;
 import org.peerlink.core.filesystem.PeerFileProvider;
@@ -42,10 +41,10 @@ public final class WindowsNtfsFileProvider implements PeerFileProvider {
 
     @Override
     public Optional<PeerFileHandle> resolve(ObjectIdentity objectId) throws IOException {
-        if (objectId == null || objectId.value() == null) {
+        if (objectId == null || objectId.getValue() == null) {
             return Optional.empty();
         }
-        return resolveByPhysicalPath(objectId.value());
+        return resolveByPhysicalPath(objectId.getValue());
     }
 
     @Override

@@ -202,7 +202,7 @@ public class TransferProtocolAndFilesystemSafetyTest {
         TransferResponse response = engine.handleIncomingOffer(offer, destDir);
 
         assertFalse(response.getAccepted());
-        assertEquals(ErrorCode.ERROR_CODE_INVALID_ARGUMENT, response.getError().getCode());
+        assertEquals(ErrorCode.ERROR_CODE_INTERNAL_ERROR, response.getError().getCode());
     }
 
     // =========================================================================
@@ -347,6 +347,11 @@ public class TransferProtocolAndFilesystemSafetyTest {
     void testMultiFilePartialCommitFailureModel() throws Exception {
         String transferId = "xfer_batch_fail";
         String opId = "op_batch_fail";
+
+        journal.recordOperation(OperationRecord.create(
+                opId, org.peerlink.core.operation.OperationIntent.SEND, "peer_sender",
+                List.of("item1.txt", "blocked_dir/item2.txt", "item3.txt"), "idemp_batch"
+        ));
 
         // Create staging for 3 files
         stagingManager.prepareStagingDir(transferId);

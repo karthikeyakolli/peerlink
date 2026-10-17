@@ -1,0 +1,129 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PeerLink Cross-Platform Peer Parity Manifest",
+  "version": "2.0.0",
+  "description": "Read-only manifest defining cross-platform invariant modules and paths across retained platforms (windows, linux, macos, android) without a canonical source tree.",
+  "platforms": [
+    "windows",
+    "linux",
+    "macos",
+    "android"
+  ],
+  "invariantModules": [
+    {
+      "module": "protocol",
+      "description": "Protobuf definitions and generated message contracts",
+      "enforceBitIdentical": true
+    },
+    {
+      "module": "operations",
+      "description": "Operation state machine, journal, and lifecycle contracts",
+      "enforceBitIdentical": true
+    },
+    {
+      "module": "transfer",
+      "description": "Transfer engine, chunked streaming, staging quarantine, and resume logic",
+      "enforceBitIdentical": true
+    },
+    {
+      "module": "sync",
+      "description": "Metadata sync, vector clocks, and conflict resolution engines",
+      "enforceBitIdentical": true
+    },
+    {
+      "module": "backup",
+      "description": "Snapshot management, incremental manifests, and restoration pipelines",
+      "enforceBitIdentical": true
+    },
+    {
+      "module": "access",
+      "description": "Access control lists, capabilities, and token verification",
+      "enforceBitIdentical": true
+    },
+    {
+      "module": "sharing",
+      "description": "P2P space sharing, invite tokens, and mutual authorization contracts",
+      "enforceBitIdentical": true
+    },
+    {
+      "module": "workspace",
+      "description": "Workspace isolation and namespace boundary enforcement",
+      "enforceBitIdentical": true
+    },
+    {
+      "module": "clipboard",
+      "description": "Encrypted P2P clipboard synchronization payloads and safety limits",
+      "enforceBitIdentical": true
+    },
+    {
+      "module": "compatibility",
+      "description": "Cross-platform filesystem path sanitizers and capability matrix",
+      "enforceBitIdentical": true
+    },
+    {
+      "module": "security",
+      "description": "Cryptographic signers, verifiers, tamper detection, and hash verifiers",
+      "enforceBitIdentical": true
+    },
+    {
+      "module": "recovery",
+      "description": "Crash recovery, journal roll-forward, and WAL state machines",
+      "enforceBitIdentical": true
+    },
+    {
+      "module": "diagnostics",
+      "description": "Diagnostic probes, health checks, and event recorders",
+      "enforceBitIdentical": true
+    }
+  ],
+  "invariantFlutterPaths": [
+    "lib/core/app_constants.dart",
+    "lib/core/node_ipc_client.dart",
+    "lib/core/protocol",
+    "lib/features/activity",
+    "lib/features/devices",
+    "lib/features/files",
+    "lib/features/home",
+    "lib/features/search",
+    "lib/features/settings",
+    "lib/features/spaces",
+    "lib/main.dart",
+    "pubspec.yaml",
+    "analysis_options.yaml"
+  ],
+  "intentionalPlatformDivergence": {
+    "core/platform/": {
+      "rationale": "Each platform physically owns its isolated NativePlatformAdapter implementation without importing other platforms.",
+      "allowDifferentAdapters": true,
+      "mappings": {
+        "windows": "org.peerlink.core.platform.windows.WindowsPlatformAdapter",
+        "linux": "org.peerlink.core.platform.linux.LinuxPlatformAdapter",
+        "macos": "org.peerlink.core.platform.macos.MacPlatformAdapter",
+        "android": "org.peerlink.core.platform.android.AndroidPlatformAdapter"
+      }
+    },
+    "nativeRunners": {
+      "windows": "app/flutter/windows (C++ CMake runner)",
+      "linux": "app/flutter/linux (C++ GTK CMake runner)",
+      "macos": "app/flutter/macos (Xcode Runner.xcworkspace & Runner.xcodeproj)",
+      "android": "app/flutter/android (Gradle Android host project)"
+    },
+    "platformSpecificFlutterCode": {
+      "androidOnly": [
+        "app/flutter/lib/features/android/android_node_status_widget.dart",
+        "app/flutter/lib/platform/android_node_bridge.dart"
+      ]
+    },
+    "platformSubsystemJava": {
+      "windows": "Windows DPAPI credentials, netsh firewall diagnostics, shell associations",
+      "linux": "LinuxPosixFileProvider, LinuxSecretStore, XdgDesktopIntegration, LinuxPowerManager, LinuxNotificationManager",
+      "macos": "MacApfsFileProvider, MacKeychainStore, MacPowerManager, MacFinderIntegration, MacNotificationManager",
+      "android": "AndroidNodeService, AndroidKeystoreStorage, SafStorageProvider"
+    }
+  },
+  "forbiddenRetiredPaths": [
+    "apps/",
+    "apps/peerlink-app",
+    "shared-source/canonical"
+  ]
+}
