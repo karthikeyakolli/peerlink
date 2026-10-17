@@ -24,6 +24,8 @@ public final class ClipboardManager {
     private final ClipboardLoopGuard loopGuard;
     private final AtomicLong outboundSequence = new AtomicLong(1);
     private volatile ClipboardItem currentItem;
+    private final LinkedList<ClipboardItem> history = new LinkedList<>();
+    private static final int MAX_HISTORY_SIZE = 50;
 
     public ClipboardManager(String localPeerId, ClipboardSyncMode mode) {
         this.localPeerId = Objects.requireNonNull(localPeerId, "localPeerId is required");
@@ -64,6 +66,29 @@ public final class ClipboardManager {
                 System.currentTimeMillis(), DEFAULT_TTL_MS
         );
         this.currentItem = item;
+        addToHistory(item);
+        return Optional.of(item);
+    }
+
+    public synchronized Optional<ClipboardItem> publishLocalImage(byte[] imageBytes) throws IOException {
+        if (mode != ClipboardSyncMode.TEXT_AND_SUPPORTED_IMAGE) {
+            return Optional.empty();
+        }
+
+        if (imageBytes.length > MAX_CLIPBOARD_SIZE_BYTES) {
+            throw new IOException("Clipboard image exceeds size limit of 5 MB");
+        }
+
+        ContentHash hash = ContentHash.computeSha256(imageBytes);
+        loopGuard.markOutbound(hash);
+
+        String id = "clp_img_" + UUID.randomUUID().toString().replace("-", "");
+        ClipboardItem item = new ClipboardItem(
+                id, ClipboardItemType.IMAGE, imageBytes, hash, localPeerId,
+                outboundSequence.getAndIncrement(), System.currentTimeMillis(), DEFAULT_TTL_MS
+        );
+        this.currentItem = item;
+        addToHistory(item);
         return Optional.of(item);
     }
 
@@ -90,7 +115,26 @@ public final class ClipboardManager {
         }
 
         this.currentItem = item;
+        addToHistory(item);
         return true;
+    }
+
+    private void addToHistory(ClipboardItem item) {
+        history.addFirst(item);
+        while (history.size() > MAX_HISTORY_SIZE) {
+            history.removeLast();
+        }
+    }
+
+    public synchronized List<ClipboardItem> getHistory() {
+        long now = System.currentTimeMillis();
+        history.removeIf(it -> it.isExpired(now));
+        return List.copyOf(history);
+    }
+
+    public synchronized void clearHistory() {
+        history.clear();
+        this.currentItem = null;
     }
 
     public Optional<ClipboardItem> getCurrentItem() {
