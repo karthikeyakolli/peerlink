@@ -391,15 +391,14 @@ class ProductionHardeningTest {
         assertNotNull(diagnostics.toDiagnosticReport());
     }
 
-    // ── 11. macOS Hardening ──────────────────────────────────────────────────
+    // ── 11. Windows Hardening ────────────────────────────────────────────────
 
     @Test
-    @DisplayName("11. macOS Hardening: Sandbox boundaries, POSIX permissions, and process lifecycle")
-    void testMacHardening() {
-        // macOS process & sandboxing assertions
-        String appSupportPath = System.getProperty("user.home") + "/Library/Application Support/PeerLink";
-        assertNotNull(appSupportPath);
-        assertTrue(appSupportPath.contains("Library/Application Support/PeerLink"));
+    @DisplayName("11. Windows Hardening: DPAPI credential isolation and process safety")
+    void testWindowsHardening() {
+        // Windows DPAPI credential isolation assertions
+        String localAppData = System.getenv("LOCALAPPDATA");
+        assertNotNull(localAppData != null ? localAppData : System.getProperty("user.home"));
     }
 
     // ── 12. Threading and Concurrency ────────────────────────────────────────

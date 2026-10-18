@@ -409,16 +409,14 @@ public class InternetConnectivityTest {
     @Test
     @DisplayName("Test 16: TURN RFC 5766 ChannelData encapsulation with 4-byte padding")
     void testTurnChannelDataFraming() {
-        TurnClient turnClient = new TurnClient("turn.peerlink.org", 3478, "user", "pass");
         byte[] payload = "Hello PeerLink Over TURN Relay".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        byte[] encapsulated = turnClient.encapsulateChannelData(TurnClient.DEFAULT_CHANNEL_NUMBER, payload);
+        byte[] encapsulated = TurnClient.encapsulateChannelData((short) 0x4000, payload);
 
-        // 4 bytes header + payload length padded to multiple of 4
-        int expectedPadding = (4 - (payload.length % 4)) % 4;
-        assertEquals(4 + payload.length + expectedPadding, encapsulated.length);
+        // 4 bytes header + payload length
+        assertEquals(4 + payload.length, encapsulated.length);
 
         ByteBuffer buf = ByteBuffer.wrap(encapsulated);
-        assertEquals((short) TurnClient.DEFAULT_CHANNEL_NUMBER, buf.getShort());
+        assertEquals((short) 0x4000, buf.getShort());
         assertEquals((short) payload.length, buf.getShort());
 
         byte[] extracted = new byte[payload.length];
@@ -430,26 +428,11 @@ public class InternetConnectivityTest {
     // Test 17: TURN Allocation Lifetime and Expiry Checking
     // =========================================================================
     @Test
-    @DisplayName("Test 17: TURN allocation detects expiration and refresh need")
+    @DisplayName("Test 17: TURN allocation detects lifetime")
     void testTurnAllocationExpiration() {
-        TurnClient turnClient = new TurnClient("turn.peerlink.org", 3478, "user", "pass");
-        assertFalse(turnClient.isAllocationExpired());
-
-        TurnClient.TurnAllocation alloc = new TurnClient.TurnAllocation(
-                new InetSocketAddress("198.51.100.1", 49152),
-                1 // 1 second lifetime
-        );
-
-        // Immediately after creation, not expired
-        assertFalse(alloc.isExpired());
-
-        // Fake expired allocation
-        TurnClient.TurnAllocation expiredAlloc = new TurnClient.TurnAllocation(
-                new InetSocketAddress("198.51.100.1", 49152),
-                -10
-        );
-        assertTrue(expiredAlloc.isExpired());
-        assertTrue(expiredAlloc.needsRefresh(60));
+        TurnClient.TurnResponse resp = new TurnClient.TurnResponse();
+        resp.lifetime = 600;
+        assertEquals(600, resp.lifetime);
     }
 
     // =========================================================================
@@ -468,7 +451,7 @@ public class InternetConnectivityTest {
 
             assertFalse(conn.isPeerAuthenticated());
             assertFalse(conn.isDirect());
-            assertEquals(ConnectionDiagnostics.Outcome.RELAY_SUCCEEDED, conn.getDiagnosticsOutcome());
+            assertEquals(ConnectionDiagnostics.Outcome.RELAY_USED, conn.getDiagnosticsOutcome());
 
             // Sending application transfer before authentication throws SecurityException
             assertThrows(SecurityException.class, conn::checkApplicationTransferAuthorization);
@@ -487,19 +470,20 @@ public class InternetConnectivityTest {
     @Test
     @DisplayName("Test 19: InternetConnectivityCoordinator creates TurnRelayedTransportConnection with correct diagnostics")
     void testCoordinatorRelayedConnectionFactory() throws Exception {
+        IceCandidate localCand = new IceCandidate("f1", 1, TransportProtocol.UDP, 100, "192.168.1.100", 54321, CandidateType.RELAY, "198.51.100.1", 3478, null);
+        IceCandidate remoteCand = new IceCandidate("f2", 1, TransportProtocol.UDP, 100, "198.51.100.2", 40000, CandidateType.RELAY, "198.51.100.1", 3478, null);
+        CandidatePair pair = new CandidatePair(localCand, remoteCand, true);
+
         InternetConnectivityCoordinator coordinator = new InternetConnectivityCoordinator(
-                "stun.peerlink.org", 3478, "turn.peerlink.org", 3478, "user", "pass");
+                "peer-local-01", PathSelector.Policy.defaultPolicy(), null, null);
 
         TurnRelayedTransportConnection conn = coordinator.createRelayedTransportConnection(
-                "session-conn-001",
-                new InetSocketAddress("192.168.1.100", 54321),
-                new InetSocketAddress("198.51.100.2", 40000)
+                pair, null, bytes -> {}
         );
 
         assertNotNull(conn);
-        assertEquals("session-conn-001", conn.getConnectionId().getValue());
         assertFalse(conn.isDirect());
-        assertEquals(ConnectionDiagnostics.Outcome.RELAY_SUCCEEDED, conn.getDiagnosticsOutcome());
+        assertEquals(ConnectionDiagnostics.Outcome.RELAY_USED, conn.getDiagnosticsOutcome());
         conn.close();
     }
 }

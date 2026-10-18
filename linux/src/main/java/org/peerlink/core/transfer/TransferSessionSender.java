@@ -36,14 +36,25 @@ public class TransferSessionSender {
     private final BandwidthLimiter bandwidthLimiter;
     private final int maxChunkRetries;
 
+    private final TransferProgressTracker externalTracker;
+
     public TransferSessionSender(PeerSession session,
                                  TransferSessionCoordinator coordinator,
                                  BandwidthLimiter bandwidthLimiter,
                                  int maxChunkRetries) {
+        this(session, coordinator, bandwidthLimiter, maxChunkRetries, null);
+    }
+
+    public TransferSessionSender(PeerSession session,
+                                 TransferSessionCoordinator coordinator,
+                                 BandwidthLimiter bandwidthLimiter,
+                                 int maxChunkRetries,
+                                 TransferProgressTracker tracker) {
         this.session = session;
         this.coordinator = coordinator;
         this.bandwidthLimiter = bandwidthLimiter != null ? bandwidthLimiter : new BandwidthLimiter(0);
         this.maxChunkRetries = Math.max(1, maxChunkRetries);
+        this.externalTracker = tracker;
     }
 
     public TransferCompletedReceipt send(
@@ -59,15 +70,18 @@ public class TransferSessionSender {
             throw new IllegalStateException("Cannot initiate send: PeerSession is not established (" + session.getState() + ")");
         }
 
-        if (!manifest.getRecipientPeerId().equals(remotePeerId)) {
+        if (!manifest.getReceiverPeerId().getValue().equals(remotePeerId)) {
             throw new IllegalArgumentException(String.format(
                     "Recipient Peer ID in manifest (%s) does not match authenticated remote peer (%s)",
-                    manifest.getRecipientPeerId(), remotePeerId));
+                    manifest.getReceiverPeerId().getValue(), remotePeerId));
         }
 
-        TransferProgressTracker tracker = new TransferProgressTracker(
-                transferId, manifest.getTotalBytes(), manifest.getItemsCount(), progressCallback);
-        tracker.start();
+        TransferProgressTracker tracker = externalTracker != null
+                ? externalTracker
+                : new TransferProgressTracker(transferId, manifest.getTotalBytes(), manifest.getItemsCount(), progressCallback);
+        if (externalTracker == null) {
+            tracker.start();
+        }
 
         try {
             // 2. Offer & Preflight Negotiation over Session
@@ -96,7 +110,12 @@ public class TransferSessionSender {
 
             for (int i = 0; i < manifest.getItemsCount(); i++) {
                 if (tracker.isCancelled()) {
+                    notifyReceiverCancelled(transferId, tracker.getCancelReason());
                     throw new IllegalStateException("Transfer cancelled during transmission: " + tracker.getCancelReason());
+                }
+                if (tracker.isPaused()) {
+                    log.info("Transfer {} is paused; exiting chunk loop cleanly", transferId);
+                    return null;
                 }
 
                 TransferItem item = manifest.getItems(i);
@@ -115,6 +134,15 @@ public class TransferSessionSender {
 
                 try (FileInputStream fis = new FileInputStream(sourceFile.toFile())) {
                     while (offset < fileSize) {
+                        if (tracker.isCancelled()) {
+                            notifyReceiverCancelled(transferId, tracker.getCancelReason());
+                            throw new IllegalStateException("Transfer cancelled during transmission: " + tracker.getCancelReason());
+                        }
+                        if (tracker.isPaused()) {
+                            log.info("Transfer {} is paused; exiting chunk loop cleanly", transferId);
+                            return null;
+                        }
+
                         int toRead = (int) Math.min(chunkSizeBytes, fileSize - offset);
                         int read = fis.read(buffer, 0, toRead);
                         if (read <= 0) {
@@ -141,7 +169,6 @@ public class TransferSessionSender {
             log.info("All chunks sent for transfer [{}]. Signaling commit to peer [{}]", transferId, remotePeerId);
             TransferCommitSignal commit = TransferCommitSignal.newBuilder()
                     .setTransferId(transferId)
-                    .setTimestampUtcMs(System.currentTimeMillis())
                     .build();
 
             CompletableFuture<TransferCompletedReceipt> receiptFuture = coordinator.registerPendingReceipt(transferId);
@@ -251,6 +278,19 @@ public class TransferSessionSender {
             }
         } catch (IOException e) {
             throw new SourceMutationException(expectedItem.getRelativePath(), "Cannot read file attributes: " + e.getMessage());
+        }
+    }
+
+    private void notifyReceiverCancelled(String transferId, String reason) {
+        try {
+            TransferCancelRequest cancelReq = TransferCancelRequest.newBuilder()
+                    .setTransferId(transferId)
+                    .setReason(reason != null ? reason : "Cancelled by sender")
+                    .build();
+            TransferWireMessage cancelWire = TransferWireMessage.newBuilder().setCancel(cancelReq).build();
+            session.sendPayloadAsync(cancelWire.toByteArray());
+        } catch (Exception e) {
+            log.warn("Failed to send cancel wire message for transfer {}: {}", transferId, e.getMessage());
         }
     }
 }

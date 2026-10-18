@@ -209,6 +209,25 @@ public final class DesktopLocalNodeServiceImpl extends DesktopLocalNodeServiceGr
         }
     }
 
+    public AuthenticateIpcResponse authenticateDirect(String token, long clientPid, String clientVersion) {
+        final java.util.concurrent.atomic.AtomicReference<AuthenticateIpcResponse> ref = new java.util.concurrent.atomic.AtomicReference<>();
+        authenticate(AuthenticateIpcRequest.newBuilder()
+                .setAuthToken(token)
+                .setClientPid(clientPid)
+                .setClientVersion(clientVersion)
+                .build(), new StreamObserver<>() {
+            @Override
+            public void onNext(AuthenticateIpcResponse value) {
+                ref.set(value);
+            }
+            @Override
+            public void onError(Throwable t) {}
+            @Override
+            public void onCompleted() {}
+        });
+        return ref.get();
+    }
+
     public boolean isSessionValid(String token) {
         if (token == null || token.isBlank()) {
             return false;

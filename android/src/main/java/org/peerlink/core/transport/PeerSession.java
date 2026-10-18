@@ -23,6 +23,7 @@ public interface PeerSession extends Closeable {
 
     CompletableFuture<Void> sendPayloadAsync(byte[] payload);
     void setPayloadHandler(SessionPayloadHandler handler);
+    default SessionPayloadHandler getPayloadHandler() { return null; }
 
     /**
      * Sends keepalive ping and returns measured round-trip time in milliseconds.

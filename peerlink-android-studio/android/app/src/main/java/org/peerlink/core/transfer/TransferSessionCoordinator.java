@@ -24,6 +24,8 @@ public class TransferSessionCoordinator implements SessionPayloadHandler {
     private final Map<String, CompletableFuture<TransferResponse>> pendingOffers = new ConcurrentHashMap<>();
     private final Map<String, CompletableFuture<TransferChunkAck>> pendingChunkAcks = new ConcurrentHashMap<>();
     private final Map<String, CompletableFuture<TransferCompletedReceipt>> pendingReceipts = new ConcurrentHashMap<>();
+    private final Map<String, CompletableFuture<TransferResumeState>> pendingResumeStates = new ConcurrentHashMap<>();
+    private final Map<String, CompletableFuture<TransferPauseResponse>> pendingPauseResponses = new ConcurrentHashMap<>();
     private volatile TransferSessionReceiver receiver;
 
     public TransferSessionCoordinator(PeerSession session) {
@@ -54,6 +56,18 @@ public class TransferSessionCoordinator implements SessionPayloadHandler {
         return future;
     }
 
+    public CompletableFuture<TransferResumeState> registerPendingResumeState(String transferId) {
+        CompletableFuture<TransferResumeState> future = new CompletableFuture<>();
+        pendingResumeStates.put(transferId, future);
+        return future;
+    }
+
+    public CompletableFuture<TransferPauseResponse> registerPendingPauseResponse(String transferId) {
+        CompletableFuture<TransferPauseResponse> future = new CompletableFuture<>();
+        pendingPauseResponses.put(transferId, future);
+        return future;
+    }
+
     public void failPendingRequests(Throwable throwable) {
         for (CompletableFuture<TransferResponse> f : pendingOffers.values()) {
             f.completeExceptionally(throwable);
@@ -69,6 +83,16 @@ public class TransferSessionCoordinator implements SessionPayloadHandler {
             f.completeExceptionally(throwable);
         }
         pendingReceipts.clear();
+
+        for (CompletableFuture<TransferResumeState> f : pendingResumeStates.values()) {
+            f.completeExceptionally(throwable);
+        }
+        pendingResumeStates.clear();
+
+        for (CompletableFuture<TransferPauseResponse> f : pendingPauseResponses.values()) {
+            f.completeExceptionally(throwable);
+        }
+        pendingPauseResponses.clear();
     }
 
     @Override
@@ -104,6 +128,24 @@ public class TransferSessionCoordinator implements SessionPayloadHandler {
                         log.debug("Unmatched TransferCompletedReceipt received: {}", receipt.getTransferId());
                     }
                 }
+                case RESUME_STATE -> {
+                    TransferResumeState resumeState = wireMsg.getResumeState();
+                    CompletableFuture<TransferResumeState> f = pendingResumeStates.remove(resumeState.getTransferId());
+                    if (f != null) {
+                        f.complete(resumeState);
+                    } else {
+                        log.debug("Unmatched TransferResumeState received: {}", resumeState.getTransferId());
+                    }
+                }
+                case PAUSE_RESPONSE -> {
+                    TransferPauseResponse pr = wireMsg.getPauseResponse();
+                    CompletableFuture<TransferPauseResponse> f = pendingPauseResponses.remove(pr.getTransferId());
+                    if (f != null) {
+                        f.complete(pr);
+                    } else {
+                        log.debug("Unmatched TransferPauseResponse received: {}", pr.getTransferId());
+                    }
+                }
                 case OFFER -> {
                     if (receiver != null) {
                         receiver.handleOffer(session, wireMsg.getOffer());
@@ -123,6 +165,20 @@ public class TransferSessionCoordinator implements SessionPayloadHandler {
                         receiver.handleCommit(session, wireMsg.getCommit());
                     } else {
                         log.warn("TransferCommitSignal received on session {} but no receiver registered", session.getSessionId().getValue());
+                    }
+                }
+                case RESUME_OFFER -> {
+                    if (receiver != null) {
+                        receiver.handleResumeOffer(session, wireMsg.getResumeOffer());
+                    } else {
+                        log.warn("TransferResumeOffer received on session {} but no receiver registered", session.getSessionId().getValue());
+                    }
+                }
+                case PAUSE -> {
+                    if (receiver != null) {
+                        receiver.handlePause(session, wireMsg.getPause());
+                    } else {
+                        log.warn("TransferPauseRequest received on session {} but no receiver registered", session.getSessionId().getValue());
                     }
                 }
                 case CANCEL -> {

@@ -16,7 +16,8 @@ import org.peerlink.protocol.v1.PeerId
  * Platform bridge connecting Flutter UI to the native Android PeerLink Node.
  */
 class AndroidPigeonBridge(
-    private val nodeFacade: AndroidNodeFacade
+    private val nodeFacade: AndroidNodeFacade,
+    private val filePicker: ((MethodChannel.Result) -> Unit)? = null
 ) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 
     companion object {
@@ -107,6 +108,12 @@ class AndroidPigeonBridge(
             "getLocalPeerId" -> {
                 result.success(nodeFacade.localPeerId.value)
             }
+            "getFingerprint" -> {
+                result.success(nodeFacade.keystoreManager.fingerprintHex)
+            }
+            "getSecurityLevel" -> {
+                result.success(nodeFacade.keystoreManager.securityLevelDescription)
+            }
             "initiateSend" -> {
                 val targetPeerStr = call.argument<String>("targetPeerId") ?: ""
                 val uris = call.argument<List<String>>("contentUris") ?: emptyList()
@@ -134,6 +141,13 @@ class AndroidPigeonBridge(
                     }
                 } catch (e: Exception) {
                     result.error("CLIPBOARD_ERROR", e.message, null)
+                }
+            }
+            "pickContentUris" -> {
+                if (filePicker != null) {
+                    filePicker.invoke(result)
+                } else {
+                    result.success(emptyList<String>())
                 }
             }
             else -> result.notImplemented()

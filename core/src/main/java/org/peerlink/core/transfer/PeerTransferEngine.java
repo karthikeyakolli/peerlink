@@ -865,9 +865,23 @@ public final class PeerTransferEngine {
             List<Path> sourcePaths,
             Consumer<TransferProgress> progressCallback) throws Exception {
 
-        TransferSessionCoordinator coordinator = new TransferSessionCoordinator(session);
-        TransferSessionSender sender = new TransferSessionSender(session, coordinator, bandwidthLimiter, maxChunkRetries);
-        return sender.send(manifest, sourcePaths, progressCallback);
+        String transferId = manifest.getTransferId();
+        TransferProgressTracker tracker = new TransferProgressTracker(
+                transferId, manifest.getTotalBytes(), manifest.getItemsCount(), progressCallback);
+        activeTransfers.put(transferId, tracker);
+
+        try {
+            TransferSessionCoordinator coordinator;
+            if (session.getPayloadHandler() instanceof TransferSessionCoordinator existing) {
+                coordinator = existing;
+            } else {
+                coordinator = new TransferSessionCoordinator(session);
+            }
+            TransferSessionSender sender = new TransferSessionSender(session, coordinator, bandwidthLimiter, maxChunkRetries, tracker);
+            return sender.send(manifest, sourcePaths, progressCallback);
+        } finally {
+            activeTransfers.remove(transferId);
+        }
     }
 
     /**

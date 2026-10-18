@@ -1,6 +1,5 @@
 package org.peerlink.linux.filesystem;
 
-import org.peerlink.core.filesystem.DestinationSafety;
 import org.peerlink.core.filesystem.PeerFileHandle;
 import org.peerlink.core.filesystem.PeerFileProvider;
 import org.peerlink.core.model.ObjectIdentity;
@@ -40,10 +39,10 @@ public final class LinuxPosixFileProvider implements PeerFileProvider {
 
     @Override
     public Optional<PeerFileHandle> resolve(ObjectIdentity objectId) throws IOException {
-        if (objectId == null || objectId.value() == null) {
+        if (objectId == null || objectId.getValue() == null) {
             return Optional.empty();
         }
-        return resolveByPhysicalPath(objectId.value());
+        return resolveByPhysicalPath(objectId.getValue());
     }
 
     @Override
@@ -103,23 +102,18 @@ public final class LinuxPosixFileProvider implements PeerFileProvider {
     }
 
     @Override
-    public DestinationSafety validateDestinationSafety(String transferId, String relativeDestinationPath) {
-        if (relativeDestinationPath == null || relativeDestinationPath.isBlank()) {
-            return DestinationSafety.unsafe("Destination path cannot be empty");
-        }
+    public boolean delete(PeerFileHandle handle) throws IOException {
+        if (handle == null) return false;
+        Path target = Path.of(handle.getDisplayName()).normalize();
+        return Files.deleteIfExists(target);
+    }
 
-        try {
-            validatePosixPathSafety(relativeDestinationPath);
-        } catch (IllegalArgumentException e) {
-            return DestinationSafety.unsafe(e.getMessage());
+    @Override
+    public void reconcile(String rootPath) throws IOException {
+        Path root = Path.of(rootPath).normalize();
+        if (!Files.exists(root)) {
+            Files.createDirectories(root);
         }
-
-        Path dest = rootDirectory.resolve(relativeDestinationPath).normalize();
-        if (!dest.startsWith(rootDirectory)) {
-            return DestinationSafety.unsafe("Destination escapes root directory jail");
-        }
-
-        return DestinationSafety.safe(dest.toString());
     }
 
     public static void validatePosixPathSafety(String path) {

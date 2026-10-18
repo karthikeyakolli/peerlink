@@ -416,6 +416,20 @@ class NodeIpcClient {
     return await _stub!.listTransfers(req, options: options);
   }
 
+  Future<SetBandwidthLimitResponse> setBandwidthLimit(int limitBytesPerSec) async {
+    if (_stub == null || _sessionToken == null) {
+      throw StateError('Local Node IPC not connected or authenticated');
+    }
+    final options = CallOptions(
+      metadata: {'x-peerlink-auth-token': _sessionToken!},
+      timeout: const Duration(seconds: 5),
+    );
+    final req = SetBandwidthLimitRequest()
+      ..sessionToken = _sessionToken!
+      ..maxBytesPerSec = fixnum.Int64(limitBytesPerSec);
+    return await _stub!.setBandwidthLimit(req, options: options);
+  }
+
   Future<RevealInFolderResponse> revealInFolder(String path) async {
     if (_stub == null || _sessionToken == null) {
       throw StateError('Local Node IPC not connected or authenticated');

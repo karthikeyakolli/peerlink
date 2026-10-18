@@ -67,31 +67,56 @@ public class TwoNodeRealTransportTransferTest {
 
     private ProtocolVersion protocolVersion;
 
+    private String alicePeerId;
+    private String bobPeerId;
+    private String evePeerId;
+
     @BeforeEach
     void setUp() throws Exception {
         aliceDir = Files.createDirectory(testRoot.resolve("alice"));
         bobDir = Files.createDirectory(testRoot.resolve("bob"));
         eveDir = Files.createDirectory(testRoot.resolve("eve"));
 
-        aliceSigner = PeerCryptoSigner.generate();
-        bobSigner = PeerCryptoSigner.generate();
-        eveSigner = PeerCryptoSigner.generate();
+        aliceSigner = PeerCryptoSigner.generate("key_alice_01");
+        bobSigner = PeerCryptoSigner.generate("key_bob_01");
+        eveSigner = PeerCryptoSigner.generate("key_eve_01");
+
+        alicePeerId = PeerCryptoSigner.deriveStablePeerId(aliceSigner.getPublicKeyEncoded());
+        bobPeerId = PeerCryptoSigner.deriveStablePeerId(bobSigner.getPublicKeyEncoded());
+        evePeerId = PeerCryptoSigner.deriveStablePeerId(eveSigner.getPublicKeyEncoded());
 
         aliceTrustStore = new InMemoryTrustStore();
         bobTrustStore = new InMemoryTrustStore();
 
-        // Cryptographic Pairing: Alice and Bob mutually trust each other's public identity keys
-        aliceTrustStore.addTrustedPeer(bobSigner.getPeerId(), bobSigner.getPublicKeyEncoded());
-        bobTrustStore.addTrustedPeer(aliceSigner.getPeerId(), aliceSigner.getPublicKeyEncoded());
-
+        long now = System.currentTimeMillis();
         protocolVersion = ProtocolVersion.newBuilder().setMajor(1).setMinor(0).setPatch(0).build();
 
         // 1. Initialize Bob's Transport and Session Manager (Receiver)
+        DeviceId bobDevId = DeviceId.newBuilder().setValue("dev_bob").build();
+        PeerId bobId = PeerId.newBuilder().setValue(bobPeerId).build();
+        DeviceIdentity bobDevice = DeviceIdentity.newBuilder()
+                .setDeviceId(bobDevId)
+                .setDeviceName("Bob Desktop")
+                .setDeviceType(DeviceType.DEVICE_TYPE_DESKTOP_WINDOWS)
+                .setOsVersion("Windows")
+                .setAppVersion("0.1.0")
+                .setIdentityKey(bobSigner.toProtobufKey(now))
+                .build();
+        PeerIdentity bobPeer = PeerIdentity.newBuilder()
+                .setPeerId(bobId)
+                .setDeviceId(bobDevId)
+                .setDisplayName("Bob")
+                .setIdentityKey(bobSigner.toProtobufKey(now))
+                .setFingerprintHex(bobSigner.computeFingerprint())
+                .setTrustLevel(TrustLevel.TRUST_LEVEL_TRUSTED_PAIRED)
+                .setPairedAtUtcMs(now)
+                .build();
+
         bobTransport = new StandardTcpTransportProvider("127.0.0.1");
         var bobNegotiator = new TransportCapabilityNegotiator(List.of(bobTransport));
         bobSessionManager = new PeerSessionManager(
-                bobSigner.getPeerIdentity(),
-                bobSigner.getDeviceIdentity(),
+                bobPeer,
+                bobDevice,
                 bobSigner,
                 bobTrustStore,
                 protocolVersion,
@@ -100,11 +125,35 @@ public class TwoNodeRealTransportTransferTest {
         );
 
         // 2. Initialize Alice's Transport and Session Manager (Sender)
+        DeviceId aliceDevId = DeviceId.newBuilder().setValue("dev_alice").build();
+        PeerId aliceId = PeerId.newBuilder().setValue(alicePeerId).build();
+        DeviceIdentity aliceDevice = DeviceIdentity.newBuilder()
+                .setDeviceId(aliceDevId)
+                .setDeviceName("Alice Desktop")
+                .setDeviceType(DeviceType.DEVICE_TYPE_DESKTOP_WINDOWS)
+                .setOsVersion("Windows")
+                .setAppVersion("0.1.0")
+                .setIdentityKey(aliceSigner.toProtobufKey(now))
+                .build();
+        PeerIdentity alicePeer = PeerIdentity.newBuilder()
+                .setPeerId(aliceId)
+                .setDeviceId(aliceDevId)
+                .setDisplayName("Alice")
+                .setIdentityKey(aliceSigner.toProtobufKey(now))
+                .setFingerprintHex(aliceSigner.computeFingerprint())
+                .setTrustLevel(TrustLevel.TRUST_LEVEL_TRUSTED_PAIRED)
+                .setPairedAtUtcMs(now)
+                .build();
+
+        // Cryptographic Pairing: Alice and Bob mutually trust each other's public identity keys
+        aliceTrustStore.addTrustedPeer(bobPeer);
+        bobTrustStore.addTrustedPeer(alicePeer);
+
         aliceTransport = new StandardTcpTransportProvider("127.0.0.1");
         var aliceNegotiator = new TransportCapabilityNegotiator(List.of(aliceTransport));
         aliceSessionManager = new PeerSessionManager(
-                aliceSigner.getPeerIdentity(),
-                aliceSigner.getDeviceIdentity(),
+                alicePeer,
+                aliceDevice,
                 aliceSigner,
                 aliceTrustStore,
                 protocolVersion,
@@ -113,12 +162,31 @@ public class TwoNodeRealTransportTransferTest {
         );
 
         // 3. Initialize Eve's Transport and Session Manager (Untrusted Attacker)
+        DeviceId eveDevId = DeviceId.newBuilder().setValue("dev_eve").build();
+        PeerId eveId = PeerId.newBuilder().setValue(evePeerId).build();
+        DeviceIdentity eveDevice = DeviceIdentity.newBuilder()
+                .setDeviceId(eveDevId)
+                .setDeviceName("Eve Desktop")
+                .setDeviceType(DeviceType.DEVICE_TYPE_DESKTOP_WINDOWS)
+                .setOsVersion("Windows")
+                .setAppVersion("0.1.0")
+                .setIdentityKey(eveSigner.toProtobufKey(now))
+                .build();
+        PeerIdentity evePeer = PeerIdentity.newBuilder()
+                .setPeerId(eveId)
+                .setDeviceId(eveDevId)
+                .setDisplayName("Eve")
+                .setIdentityKey(eveSigner.toProtobufKey(now))
+                .setFingerprintHex(eveSigner.computeFingerprint())
+                .setTrustLevel(TrustLevel.TRUST_LEVEL_UNTRUSTED)
+                .build();
+
         eveTransport = new StandardTcpTransportProvider("127.0.0.1");
         var eveNegotiator = new TransportCapabilityNegotiator(List.of(eveTransport));
         InMemoryTrustStore eveTrustStore = new InMemoryTrustStore();
         eveSessionManager = new PeerSessionManager(
-                eveSigner.getPeerIdentity(),
-                eveSigner.getDeviceIdentity(),
+                evePeer,
+                eveDevice,
                 eveSigner,
                 eveTrustStore,
                 protocolVersion,
@@ -128,11 +196,11 @@ public class TwoNodeRealTransportTransferTest {
 
         // 4. Initialize Engines with isolated staging directories
         aliceEngine = new PeerTransferEngine(
-                new org.peerlink.core.operation.InMemoryOperationJournal(),
+                new org.peerlink.core.chaos.ChaosTestPeer.InMemoryOperationJournal(),
                 aliceDir.resolve("staging"));
 
         bobEngine = new PeerTransferEngine(
-                new org.peerlink.core.operation.InMemoryOperationJournal(),
+                new org.peerlink.core.chaos.ChaosTestPeer.InMemoryOperationJournal(),
                 bobDir.resolve("staging"));
     }
 
@@ -173,12 +241,12 @@ public class TwoNodeRealTransportTransferTest {
         PeerSession aliceSession = aliceSessionManager.initiateSessionAsync(aliceConn).get(5, TimeUnit.SECONDS);
         assertNotNull(aliceSession);
         assertEquals(SessionState.SESSION_STATE_ESTABLISHED, aliceSession.getState());
-        assertEquals(bobSigner.getPeerId(), aliceSession.getRemotePeer().getPeerId().getValue());
+        assertEquals(bobPeerId, aliceSession.getRemotePeer().getPeerId().getValue());
 
         // Locate Bob's session
         PeerSession bobSession = null;
         for (int i = 0; i < 50; i++) {
-            var opt = bobSessionManager.getSessionByPeerId(aliceSigner.getPeerId());
+            var opt = bobSessionManager.getSessionByPeerId(alicePeerId);
             if (opt.isPresent()) {
                 bobSession = opt.get();
                 break;
@@ -200,10 +268,10 @@ public class TwoNodeRealTransportTransferTest {
 
         // Alice prepares manifest
         TransferManifest manifest = aliceEngine.prepareSend(
-                aliceSigner.getPeerId(),
-                bobSigner.getPeerId(),
+                alicePeerId,
+                bobPeerId,
                 List.of(sampleFile),
-                DuplicateDestinationPolicy.DUPLICATE_POLICY_RENAME);
+                DuplicateDestinationPolicy.DUPLICATE_DESTINATION_POLICY_RENAME_WITH_SUFFIX);
 
         AtomicBoolean progressNotified = new AtomicBoolean(false);
 
@@ -213,7 +281,7 @@ public class TwoNodeRealTransportTransferTest {
                 manifest,
                 List.of(sampleFile),
                 progress -> {
-                    if (progress.getBytesTransferred() > 0) {
+                    if (progress.getTransferredBytes() > 0) {
                         progressNotified.set(true);
                     }
                 }

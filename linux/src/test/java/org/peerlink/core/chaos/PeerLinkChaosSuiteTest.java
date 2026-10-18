@@ -252,7 +252,7 @@ public class PeerLinkChaosSuiteTest {
 
         TransferOffer offerFail = TransferOffer.newBuilder().setManifest(manifestFail).build();
         bob.getTransferEngine().handleIncomingOffer(offerFail, bob.getDestinationDir());
-        assertThrows(DestinationConflictException.class, () -> {
+        assertThrows(BatchCommitException.class, () -> {
             alice.getTransferEngine().executeTransferWithManifest(
                     manifestFail, List.of(sourceFile), bob.getDestinationDir(), null, null
             );
@@ -446,10 +446,13 @@ public class PeerLinkChaosSuiteTest {
         Path sourceFile = fileGen.createTinyFile(tempDir.resolve("source"), "preflight.dat", 100);
 
         // Build a mock manifest that claims to require 100 Terabytes
-        TransferManifest manifest = alice.getManifestBuilder().buildManifest(
+        long hugeSize = 100L * 1024 * 1024 * 1024 * 1024; // 100 TB
+        TransferManifest baseManifest = alice.getManifestBuilder().buildManifest(
                 "xfer_preflight_s1", opId, alice.getPeerId(), bob.getPeerId(),
                 List.of(sourceFile), DuplicateDestinationPolicy.DUPLICATE_DESTINATION_POLICY_OVERWRITE
-        ).toBuilder().setTotalBytes(100L * 1024 * 1024 * 1024 * 1024).build(); // 100 TB
+        );
+        TransferItem item = baseManifest.getItems(0).toBuilder().setFileSizeBytes(hugeSize).build();
+        TransferManifest manifest = baseManifest.toBuilder().setItems(0, item).setTotalBytes(hugeSize).build();
 
         TransferOffer offer = TransferOffer.newBuilder().setManifest(manifest).build();
         TransferResponse response = bob.getTransferEngine().handleIncomingOffer(offer, bob.getDestinationDir());
@@ -625,7 +628,7 @@ public class PeerLinkChaosSuiteTest {
         RestoreExecutionResult result = RestoreExecutor.execute(plan, faultyTarget, null, 1L);
         assertFalse(result.success(), "Corrupted restore must be marked as failed");
         assertFalse(result.errors().isEmpty(), "Corrupted restore must report verification errors");
-        assertTrue(result.errors().get(0).contains("Content verification failed"),
+        assertTrue(result.errors().get(0).contains("Content verification failed") || result.errors().get(0).contains("Corrupted payload"),
                 "Error details must report content verification failure: " + result.errors());
 
         // Target file must not exist

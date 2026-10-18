@@ -17,6 +17,8 @@ import org.peerlink.protocol.v1.*;
 
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -43,7 +45,7 @@ public class DeviceIdentityAndTrustLifecycleTest {
         try (LocalSqliteStorage storage1 = new LocalSqliteStorage(dbPath)) {
             EncryptedFileKeyStore keyStore1 = new EncryptedFileKeyStore(keystoreDir, passphrase);
             DeviceIdentityManager idManager1 = DeviceIdentityManager.loadOrCreate(
-                    keyStore1, storage1, "Workstation-A", "Windows");
+                    keyStore1, storage1, "Workstation-A", DeviceType.DEVICE_TYPE_DESKTOP_WINDOWS, "Windows", "0.1.0");
 
             peerId1 = idManager1.getPeerIdentity().getPeerId().getValue();
             fingerprint1 = idManager1.getFingerprint();
@@ -52,14 +54,15 @@ public class DeviceIdentityAndTrustLifecycleTest {
 
             assertNotNull(peerId1);
             assertTrue(peerId1.startsWith("peer_"));
-            assertEquals(keyId1, idManager1.getDeviceIdentity().getDeviceId().getValue());
+            assertEquals(keyId1, idManager1.getSigner().getKeyId());
+            assertTrue(idManager1.getDeviceIdentity().getDeviceId().getValue().startsWith("dev_"));
         }
 
         // --- Run 2: Cold restart from disk storage ---
         try (LocalSqliteStorage storage2 = new LocalSqliteStorage(dbPath)) {
             EncryptedFileKeyStore keyStore2 = new EncryptedFileKeyStore(keystoreDir, passphrase);
             DeviceIdentityManager idManager2 = DeviceIdentityManager.loadOrCreate(
-                    keyStore2, storage2, "Workstation-A", "Windows");
+                    keyStore2, storage2, "Workstation-A", DeviceType.DEVICE_TYPE_DESKTOP_WINDOWS, "Windows", "0.1.0");
 
             String peerId2 = idManager2.getPeerIdentity().getPeerId().getValue();
             String fingerprint2 = idManager2.getFingerprint();
@@ -83,14 +86,14 @@ public class DeviceIdentityAndTrustLifecycleTest {
         try (LocalSqliteStorage storage = new LocalSqliteStorage(dbPath)) {
             EncryptedFileKeyStore keyStore = new EncryptedFileKeyStore(keystoreDir, passphrase);
             DeviceIdentityManager idManager = DeviceIdentityManager.loadOrCreate(
-                    keyStore, storage, "TestDevice", "Windows");
+                    keyStore, storage, "TestDevice", DeviceType.DEVICE_TYPE_DESKTOP_WINDOWS, "Windows", "0.1.0");
 
             byte[] pubKey = idManager.getSigner().getPublicKeyEncoded();
             String derived = PeerCryptoSigner.deriveStablePeerId(pubKey);
 
             assertEquals(derived, idManager.getPeerIdentity().getPeerId().getValue(),
                     "Peer ID must follow the deterministic versioned derivation rule");
-            assertEquals("v1:ed25519:sha256_16", storage.loadIdentityMetadata("derivation_rule"));
+            assertEquals("v1:ed25519:sha256_16", storage.loadIdentityMetadata().orElseThrow().get("derivation_version"));
         }
     }
 
@@ -103,17 +106,19 @@ public class DeviceIdentityAndTrustLifecycleTest {
 
         try (LocalSqliteStorage storage = new LocalSqliteStorage(dbPath)) {
             EncryptedFileKeyStore keyStore = new EncryptedFileKeyStore(keystoreDir, passphrase);
-            DeviceIdentityManager.loadOrCreate(keyStore, storage, "CorruptTest", "Windows");
+            DeviceIdentityManager.loadOrCreate(keyStore, storage, "CorruptTest", DeviceType.DEVICE_TYPE_DESKTOP_WINDOWS, "Windows", "0.1.0");
 
             // Tamper with SQLite metadata: change the stored fingerprint to a fraudulent value
-            storage.saveIdentityMetadata("fingerprint", "TAMPERED_FRAUDULENT_FINGERPRINT_VALUE");
+            Map<String, String> meta = new HashMap<>(storage.loadIdentityMetadata().orElseThrow());
+            meta.put("fingerprint", "TAMPERED_FRAUDULENT_FINGERPRINT_VALUE");
+            storage.saveIdentityMetadata(meta);
         }
 
         // On next load, must throw IdentityCorruptionException and NEVER silently overwrite
         try (LocalSqliteStorage storage2 = new LocalSqliteStorage(dbPath)) {
             EncryptedFileKeyStore keyStore2 = new EncryptedFileKeyStore(keystoreDir, passphrase);
             assertThrows(IdentityCorruptionException.class, () ->
-                    DeviceIdentityManager.loadOrCreate(keyStore2, storage2, "CorruptTest", "Windows"),
+                    DeviceIdentityManager.loadOrCreate(keyStore2, storage2, "CorruptTest", DeviceType.DEVICE_TYPE_DESKTOP_WINDOWS, "Windows", "0.1.0"),
                     "Corrupted identity metadata must fail explicitly without silent re-creation"
             );
         }
@@ -127,7 +132,7 @@ public class DeviceIdentityAndTrustLifecycleTest {
         Path aliceKs = tempDir.resolve("alice_ks");
         LocalSqliteStorage aliceStorage = new LocalSqliteStorage(aliceDb);
         EncryptedFileKeyStore aliceKeyStore = new EncryptedFileKeyStore(aliceKs, "alice-pass".toCharArray());
-        DeviceIdentityManager aliceId = DeviceIdentityManager.loadOrCreate(aliceKeyStore, aliceStorage, "Alice", "Windows");
+        DeviceIdentityManager aliceId = DeviceIdentityManager.loadOrCreate(aliceKeyStore, aliceStorage, "Alice", DeviceType.DEVICE_TYPE_DESKTOP_WINDOWS, "Windows", "0.1.0");
         PersistentTrustStore aliceTrust = new PersistentTrustStore(tempDir.resolve("alice_trust.pb"));
         PairingCoordinator aliceCoord = new PairingCoordinator(aliceId, aliceTrust);
 
@@ -136,7 +141,7 @@ public class DeviceIdentityAndTrustLifecycleTest {
         Path bobKs = tempDir.resolve("bob_ks");
         LocalSqliteStorage bobStorage = new LocalSqliteStorage(bobDb);
         EncryptedFileKeyStore bobKeyStore = new EncryptedFileKeyStore(bobKs, "bob-pass".toCharArray());
-        DeviceIdentityManager bobId = DeviceIdentityManager.loadOrCreate(bobKeyStore, bobStorage, "Bob", "Windows");
+        DeviceIdentityManager bobId = DeviceIdentityManager.loadOrCreate(bobKeyStore, bobStorage, "Bob", DeviceType.DEVICE_TYPE_DESKTOP_WINDOWS, "Windows", "0.1.0");
         PersistentTrustStore bobTrust = new PersistentTrustStore(tempDir.resolve("bob_trust.pb"));
         PairingCoordinator bobCoord = new PairingCoordinator(bobId, bobTrust);
 
@@ -166,14 +171,14 @@ public class DeviceIdentityAndTrustLifecycleTest {
         Path aliceDb = tempDir.resolve("alice_fp.db");
         LocalSqliteStorage aliceStorage = new LocalSqliteStorage(aliceDb);
         EncryptedFileKeyStore aliceKeyStore = new EncryptedFileKeyStore(tempDir.resolve("alice_fp_ks"), "pass".toCharArray());
-        DeviceIdentityManager aliceId = DeviceIdentityManager.loadOrCreate(aliceKeyStore, aliceStorage, "Alice", "Windows");
+        DeviceIdentityManager aliceId = DeviceIdentityManager.loadOrCreate(aliceKeyStore, aliceStorage, "Alice", DeviceType.DEVICE_TYPE_DESKTOP_WINDOWS, "Windows", "0.1.0");
         PersistentTrustStore aliceTrust = new PersistentTrustStore(tempDir.resolve("alice_fp_trust.pb"));
         PairingCoordinator aliceCoord = new PairingCoordinator(aliceId, aliceTrust);
 
         Path bobDb = tempDir.resolve("bob_fp.db");
         LocalSqliteStorage bobStorage = new LocalSqliteStorage(bobDb);
         EncryptedFileKeyStore bobKeyStore = new EncryptedFileKeyStore(tempDir.resolve("bob_fp_ks"), "pass".toCharArray());
-        DeviceIdentityManager bobId = DeviceIdentityManager.loadOrCreate(bobKeyStore, bobStorage, "Bob", "Windows");
+        DeviceIdentityManager bobId = DeviceIdentityManager.loadOrCreate(bobKeyStore, bobStorage, "Bob", DeviceType.DEVICE_TYPE_DESKTOP_WINDOWS, "Windows", "0.1.0");
         PairingCoordinator bobCoord = new PairingCoordinator(bobId, new PersistentTrustStore(tempDir.resolve("bob_fp_trust.pb")));
 
         PairingOffer offer = aliceCoord.initiatePairing(PairingMethod.PAIRING_METHOD_NUMERIC_CODE, 60_000);
@@ -279,10 +284,13 @@ public class DeviceIdentityAndTrustLifecycleTest {
 
     @Test
     @DisplayName("Key Store: Key storage failure handled cleanly when passphrase incorrect")
-    void testKeyStoreFailureHandling() {
+    void testKeyStoreFailureHandling() throws Exception {
         Path ksDir = tempDir.resolve("bad_ks");
+        EncryptedFileKeyStore ks = new EncryptedFileKeyStore(ksDir, "correct_pass".toCharArray());
+        ks.storePrivateKey("test_key", new byte[]{1, 2, 3});
+        EncryptedFileKeyStore wrongKs = new EncryptedFileKeyStore(ksDir, "WRONG_PASS".toCharArray());
         assertThrows(KeyStorageException.class, () ->
-                new EncryptedFileKeyStore(ksDir, null)
+                wrongKs.getPrivateKey("test_key")
         );
     }
 }

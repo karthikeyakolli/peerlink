@@ -7,6 +7,8 @@ class RadarPeerInfo {
   final String deviceType; // 'phone', 'desktop', 'laptop', 'tablet'
   final bool isTrusted;
   final String ip;
+  final String technology;
+  final int routeCount;
 
   const RadarPeerInfo({
     required this.id,
@@ -14,6 +16,8 @@ class RadarPeerInfo {
     this.deviceType = 'desktop',
     this.isTrusted = false,
     this.ip = '127.0.0.1',
+    this.technology = 'mDNS',
+    this.routeCount = 1,
   });
 }
 
@@ -23,6 +27,7 @@ class RadarSonarView extends StatefulWidget {
   final List<RadarPeerInfo> discoveredPeers;
   final void Function(RadarPeerInfo peer) onPeerSelected;
   final VoidCallback? onQrScanPressed;
+  final void Function(String ip, int port, String name)? onAddManualEndpoint;
   final String localDeviceName;
 
   const RadarSonarView({
@@ -30,6 +35,7 @@ class RadarSonarView extends StatefulWidget {
     required this.discoveredPeers,
     required this.onPeerSelected,
     this.onQrScanPressed,
+    this.onAddManualEndpoint,
     this.localDeviceName = 'This Device',
   });
 
@@ -69,6 +75,84 @@ class _RadarSonarViewState extends State<RadarSonarView>
     }
   }
 
+  void _showManualEndpointDialog(BuildContext context) {
+    final ipController = TextEditingController();
+    final portController = TextEditingController(text: '8765');
+    final nameController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.add_link_rounded, color: Color(0xFF2563EB)),
+            SizedBox(width: 8),
+            Text('Add Manual Endpoint'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Fallback connection route when mDNS or multicast is restricted by network infrastructure.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ipController,
+              decoration: const InputDecoration(
+                labelText: 'Remote IP Address',
+                hintText: '192.168.1.100',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              keyboardType: TextInputType.datetime,
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: portController,
+              decoration: const InputDecoration(
+                labelText: 'Port',
+                hintText: '8765',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              keyboardType: TextInputType.number,
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(
+                labelText: 'Device Name (Optional)',
+                hintText: 'Workstation',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final ip = ipController.text.trim();
+              final port = int.tryParse(portController.text.trim()) ?? 8765;
+              final name = nameController.text.trim();
+              if (ip.isNotEmpty) {
+                Navigator.pop(ctx);
+                widget.onAddManualEndpoint?.call(ip, port, name.isNotEmpty ? name : 'Manual Endpoint');
+              }
+            },
+            child: const Text('Add Route'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -76,7 +160,7 @@ class _RadarSonarViewState extends State<RadarSonarView>
 
     return Column(
       children: [
-        // Header with status & QR Scanner fallback button
+        // Header with status & actions
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
           child: Row(
@@ -103,15 +187,28 @@ class _RadarSonarViewState extends State<RadarSonarView>
                   ),
                 ],
               ),
-              if (widget.onQrScanPressed != null)
-                TextButton.icon(
-                  onPressed: widget.onQrScanPressed,
-                  icon: const Icon(Icons.qr_code_scanner_rounded, size: 18),
-                  label: const Text('Scan QR'),
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ),
+              Row(
+                children: [
+                  if (widget.onAddManualEndpoint != null)
+                    TextButton.icon(
+                      onPressed: () => _showManualEndpointDialog(context),
+                      icon: const Icon(Icons.add_link_rounded, size: 16),
+                      label: const Text('Add IP'),
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
+                  if (widget.onQrScanPressed != null)
+                    TextButton.icon(
+                      onPressed: widget.onQrScanPressed,
+                      icon: const Icon(Icons.qr_code_scanner_rounded, size: 16),
+                      label: const Text('Scan QR'),
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
+                ],
+              ),
             ],
           ),
         ),

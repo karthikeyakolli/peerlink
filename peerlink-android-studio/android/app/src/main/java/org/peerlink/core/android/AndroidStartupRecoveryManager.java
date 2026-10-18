@@ -119,6 +119,14 @@ public class AndroidStartupRecoveryManager {
                 }
             } else if (journal instanceof org.peerlink.core.operation.InMemoryOperationJournal memJournal) {
                 stage = memJournal.getStage(opId);
+                Optional<org.peerlink.core.operation.InMemoryOperationJournal.OperationRecoveryMetadata> metaOpt = memJournal.getOperationMetadata(opId);
+                if (metaOpt.isPresent()) {
+                    org.peerlink.core.operation.InMemoryOperationJournal.OperationRecoveryMetadata meta = metaOpt.get();
+                    if (meta.stage() != null) stage = meta.stage();
+                    stagingPath = meta.stagingPath();
+                    destPath = meta.destinationPath();
+                    expectedSha256 = meta.expectedSha256();
+                }
             }
 
             if (currentState == OperationState.EXECUTING) {

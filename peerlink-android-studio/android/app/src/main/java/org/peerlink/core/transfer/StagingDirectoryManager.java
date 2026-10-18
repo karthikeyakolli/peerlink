@@ -31,6 +31,7 @@ public final class StagingDirectoryManager {
 
     private final Path stagingRoot;
     private final Map<Path, FileChannel> openChannels = new ConcurrentHashMap<>();
+    private volatile boolean syncEveryChunk = false;
 
     public StagingDirectoryManager(Path stagingRoot) {
         this.stagingRoot = stagingRoot;
@@ -39,6 +40,14 @@ public final class StagingDirectoryManager {
         } catch (IOException e) {
             throw new RuntimeException("Cannot initialize staging root: " + stagingRoot, e);
         }
+    }
+
+    public void setSyncEveryChunk(boolean sync) {
+        this.syncEveryChunk = sync;
+    }
+
+    public boolean isSyncEveryChunk() {
+        return syncEveryChunk;
     }
 
     /**
@@ -149,8 +158,11 @@ public final class StagingDirectoryManager {
             curOffset += written;
         }
 
-        // Durability flush: persist chunk bytes to OS page cache / disk before acknowledging
-        channel.force(false);
+        // Durability flush: persist chunk bytes if syncEveryChunk is enabled,
+        // or defer to file completion / commit to maximize mobile flash disk I/O throughput
+        if (syncEveryChunk) {
+            channel.force(false);
+        }
     }
 
     public synchronized void truncateStagedFile(String transferId, int itemIndex, long validLength) throws IOException {

@@ -135,6 +135,15 @@ public final class DesktopNodeDaemon implements Closeable {
             );
 
             var receiver = transferEngine.createSessionReceiver(receivedDir, trustStore);
+            sessionManager.addSessionLifecycleListener(new org.peerlink.core.transport.PeerSessionManager.SessionLifecycleListener() {
+                @Override
+                public void onSessionEstablished(org.peerlink.core.transport.PeerSession session) {
+                    log.info("Session [{}] established with peer [{}]. Attaching TransferSessionCoordinator and Receiver",
+                            session.getSessionId().getValue(), session.getRemotePeer().getPeerId().getValue());
+                    var coordinator = new org.peerlink.core.transfer.TransferSessionCoordinator(session);
+                    coordinator.registerReceiver(receiver);
+                }
+            });
 
             tcpTransport.startListening(configuration.getP2pPort(), conn -> {
                 sessionManager.handleInboundConnection(conn);

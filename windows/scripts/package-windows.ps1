@@ -19,22 +19,17 @@ Write-Host "==========================================================" -Foregro
 # 1. Locate Node JAR
 $nodeJar = $null
 $localJar = Join-Path $windowsDir "target\peerlink-windows-node-0.1.0-SNAPSHOT.jar"
-$shadedJar = Join-Path $repoRoot "desktop-node\target\peerlink-desktop-node-0.1.0-SNAPSHOT-all.jar"
 
 if (Test-Path $localJar) {
     $nodeJar = $localJar
-} elseif (Test-Path $shadedJar) {
-    $nodeJar = $shadedJar
 }
 
 if (-not $nodeJar) {
-    Write-Host "Local Node JAR not found at $localJar or $shadedJar." -ForegroundColor Yellow
-    Write-Host "Attempting build via build-windows.ps1..." -ForegroundColor Yellow
-    & "$scriptDir\build-windows.ps1" -SkipUi
+    Write-Host "Local Node JAR not found at $localJar." -ForegroundColor Yellow
+    Write-Host "Building Windows Local Node jar..." -ForegroundColor Yellow
+    & "$repoRoot\mvnw.cmd" package -DskipTests -f "$windowsDir\pom.xml" -B
     if (Test-Path $localJar) {
         $nodeJar = $localJar
-    } elseif (Test-Path $shadedJar) {
-        $nodeJar = $shadedJar
     } else {
         Write-Error "Cannot package: Local Node JAR is missing."
         exit 1

@@ -19,8 +19,7 @@ Future<void> main(List<String> args) async {
 
   try {
     // 1. Authenticate with Incompatible Version
-    stdout.writeln(
-        '\n[Step 1] Testing Incompatible Protocol Version (v2.0.0)...');
+    stdout.writeln('\n[Step 1] Testing Incompatible Protocol Version (v2.0.0)...');
     final incompResult = await client.connectAndAuthenticate(
       port: port,
       localAuthToken: token,
@@ -31,12 +30,10 @@ Future<void> main(List<String> args) async {
       exit(10);
     }
     if (client.currentState.status != IpcConnectionStatus.incompatibleVersion) {
-      stderr.writeln(
-          'FAIL: Expected incompatibleVersion status, got ${client.currentState.status}');
+      stderr.writeln('FAIL: Expected incompatibleVersion status, got ${client.currentState.status}');
       exit(11);
     }
-    stdout.writeln(
-        'PASS: Incompatible version rejected cleanly (${client.currentState.errorMessage})');
+    stdout.writeln('PASS: Incompatible version rejected cleanly (${client.currentState.errorMessage})');
     await client.disconnect();
 
     // 2. Authenticate with Invalid Token
@@ -50,8 +47,7 @@ Future<void> main(List<String> args) async {
       stderr.writeln('FAIL: Invalid token was accepted!');
       exit(12);
     }
-    stdout.writeln(
-        'PASS: Invalid token rejected cleanly (${client.currentState.errorMessage})');
+    stdout.writeln('PASS: Invalid token rejected cleanly (${client.currentState.errorMessage})');
     await client.disconnect();
 
     // 3. Connect and Authenticate with Valid Token
@@ -62,24 +58,19 @@ Future<void> main(List<String> args) async {
       clientVersion: '0.1.0',
     );
     if (!authSuccess) {
-      stderr.writeln(
-          'FAIL: Valid authentication failed: ${client.currentState.errorMessage}');
+      stderr.writeln('FAIL: Valid authentication failed: ${client.currentState.errorMessage}');
       exit(13);
     }
-    stdout.writeln(
-        'PASS: Authenticated successfully. Peer ID: ${client.currentState.peerId}, Node Version: ${client.currentState.nodeVersion}');
+    stdout.writeln('PASS: Authenticated successfully. Peer ID: ${client.currentState.peerId}, Node Version: ${client.currentState.nodeVersion}');
 
     // 4. Query Node Status
-    stdout
-        .writeln('\n[Step 4] Requesting Node Status via authenticated IPC...');
+    stdout.writeln('\n[Step 4] Requesting Node Status via authenticated IPC...');
     final status = await client.getStatus();
-    if (status == null ||
-        status.status != NodeExecutionStatus.NODE_EXECUTION_STATUS_RUNNING) {
+    if (status == null || status.status != NodeExecutionStatus.NODE_EXECUTION_STATUS_RUNNING) {
       stderr.writeln('FAIL: Node status query returned null or not running');
       exit(14);
     }
-    stdout.writeln(
-        'PASS: Node Status: ${status.status}, Uptime: ${status.uptimeSeconds}s, Memory: ${status.memoryUsedBytes ~/ (1024 * 1024)}MB');
+    stdout.writeln('PASS: Node Status: ${status.status}, Uptime: ${status.uptimeSeconds}s, Memory: ${status.memoryUsedBytes ~/ (1024 * 1024)}MB');
 
     // 5. Receive Server-Streamed Events
     stdout.writeln('\n[Step 5] Awaiting Server-Streamed Heartbeats...');
@@ -89,19 +80,16 @@ Future<void> main(List<String> args) async {
       await Future.delayed(const Duration(milliseconds: 200));
     }
     if (client.currentState.activeHeartbeatCount < 2) {
-      stderr.writeln(
-          'FAIL: Did not receive expected server-streamed heartbeats (received ${client.currentState.activeHeartbeatCount})');
+      stderr.writeln('FAIL: Did not receive expected server-streamed heartbeats (received ${client.currentState.activeHeartbeatCount})');
       exit(15);
     }
-    stdout.writeln(
-        'PASS: Received ${client.currentState.activeHeartbeatCount} streaming heartbeats (Last seq: ${client.currentState.lastHeartbeat?.sequenceNumber})');
+    stdout.writeln('PASS: Received ${client.currentState.activeHeartbeatCount} streaming heartbeats (Last seq: ${client.currentState.lastHeartbeat?.sequenceNumber})');
 
     // 6. Test Disconnect
     stdout.writeln('\n[Step 6] Testing Client Disconnect...');
     await client.disconnect();
     if (client.isAuthenticated) {
-      stderr
-          .writeln('FAIL: Client still reports authenticated after disconnect');
+      stderr.writeln('FAIL: Client still reports authenticated after disconnect');
       exit(16);
     }
     stdout.writeln('PASS: Disconnected cleanly');
@@ -120,15 +108,13 @@ Future<void> main(List<String> args) async {
     stdout.writeln('PASS: Reconnected successfully');
 
     // 8. Test Restart Node via IPC & Auto-Reconnect
-    stdout.writeln(
-        '\n[Step 8] Triggering Node Restart via IPC and testing Reconnect...');
+    stdout.writeln('\n[Step 8] Triggering Node Restart via IPC and testing Reconnect...');
     final restartAccepted = await client.restartNode(delayMs: 200);
     if (!restartAccepted) {
       stderr.writeln('FAIL: Restart request was not accepted by Node');
       exit(18);
     }
-    stdout.writeln(
-        'Restart request accepted. Waiting for Node to restart and client to auto-reconnect...');
+    stdout.writeln('Restart request accepted. Waiting for Node to restart and client to auto-reconnect...');
 
     // Wait for auto-reconnect
     bool postRestartHealthy = false;
@@ -136,9 +122,7 @@ Future<void> main(List<String> args) async {
       await Future.delayed(const Duration(milliseconds: 300));
       if (client.isAuthenticated) {
         final postStatus = await client.getStatus();
-        if (postStatus != null &&
-            postStatus.status ==
-                NodeExecutionStatus.NODE_EXECUTION_STATUS_RUNNING) {
+        if (postStatus != null && postStatus.status == NodeExecutionStatus.NODE_EXECUTION_STATUS_RUNNING) {
           postRestartHealthy = true;
           break;
         }
@@ -149,8 +133,7 @@ Future<void> main(List<String> args) async {
       stderr.writeln('FAIL: Client failed to reconnect to Node after restart');
       exit(19);
     }
-    stdout.writeln(
-        'PASS: Node restarted successfully; Flutter client reconnected without application rebuild!');
+    stdout.writeln('PASS: Node restarted successfully; Flutter client reconnected without application rebuild!');
 
     await client.disconnect();
     stdout.writeln('\n=== ALL PHASE 01 INTEGRATION CHECKS PASSED ===');

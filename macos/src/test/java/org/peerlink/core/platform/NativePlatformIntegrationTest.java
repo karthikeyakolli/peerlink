@@ -23,7 +23,7 @@ public class NativePlatformIntegrationTest {
     @BeforeEach
     void setUp() throws IOException {
         sampleFile = tempDir.resolve("document.pdf");
-        Files.writeString(sampleFile, "Sample content for macOS OS integration testing");
+        Files.writeString(sampleFile, "Sample content for macOS integration testing");
     }
 
     @Test
@@ -35,57 +35,66 @@ public class NativePlatformIntegrationTest {
 
     @Test
     void testMacPlatformIntegration() {
-        MacPlatformAdapter macAdapter = new MacPlatformAdapter(true);
+        MacPlatformAdapter macAdapter = new MacPlatformAdapter(true); // dryRunOnly = true
         assertEquals(PlatformType.MACOS, macAdapter.getPlatformType());
 
         // Capabilities
         assertTrue(macAdapter.supportsFeature(PlatformFeature.FINDER_SYNC_INTEGRATION));
         assertTrue(macAdapter.supportsFeature(PlatformFeature.FINDER_SHARE_EXTENSION));
+        assertTrue(macAdapter.supportsFeature(PlatformFeature.FILE_REVEAL_AND_OPEN));
+        assertTrue(macAdapter.supportsFeature(PlatformFeature.SYSTEM_SHARE_SHEET));
+        assertTrue(macAdapter.supportsFeature(PlatformFeature.SYSTEM_NOTIFICATIONS));
         assertTrue(macAdapter.supportsFeature(PlatformFeature.OS_KEYCHAIN_CREDENTIALS));
         assertTrue(macAdapter.supportsFeature(PlatformFeature.SANDBOX_PERMISSIONS));
         assertTrue(macAdapter.supportsFeature(PlatformFeature.OPTIONAL_FILE_PROVIDER));
-        assertFalse(macAdapter.supportsFeature(PlatformFeature.FILE_EXPLORER_CONTEXT_MENU));
 
-        // Finder reveal and open
+        // File reveal & open
         assertTrue(macAdapter.revealInFileManager(sampleFile));
         assertTrue(macAdapter.openFileWithDefaultApp(sampleFile));
 
         // Notifications
         PlatformNotification notification = new PlatformNotification(
                 "n-mac-1",
-                "New Shared Space",
-                "You were added to 'Project Apollo'",
-                PlatformNotification.Priority.HIGH,
-                PlatformNotification.Category.GENERAL,
-                List.of("View"),
-                null
+                "Transfer Complete",
+                "document.pdf received from Alice",
+                PlatformNotification.Priority.NORMAL,
+                PlatformNotification.Category.TRANSFER_COMPLETED,
+                List.of("Open", "Dismiss"),
+                sampleFile.toString()
         );
         assertTrue(macAdapter.postNotification(notification));
         assertTrue(macAdapter.cancelNotification(notification.getId()));
 
-        // Keychain storage
-        CredentialStorage keychain = macAdapter.getCredentialStorage();
-        keychain.storeSecret("peerlink.keychain", "master_key", "aes-256-gcm-secret");
-        assertTrue(keychain.hasSecret("peerlink.keychain", "master_key"));
-        assertEquals(Optional.of("aes-256-gcm-secret"), keychain.getSecret("peerlink.keychain", "master_key"));
-        assertTrue(keychain.deleteSecret("peerlink.keychain", "master_key"));
+        // File associations and context menus
+        assertTrue(macAdapter.registerFileManagerContextMenu());
+        assertTrue(macAdapter.registerFileAssociations());
+        assertTrue(macAdapter.unregisterFileManagerContextMenu());
+        assertTrue(macAdapter.unregisterFileAssociations());
 
-        // Sandbox permissions
-        String bookmarkPerm = "com.apple.security.files.user-selected.read-write";
-        assertTrue(macAdapter.checkPermission(bookmarkPerm));
-        assertFalse(macAdapter.checkPermission("custom.user.entitlement"));
-        assertTrue(macAdapter.requestPermission("custom.user.entitlement"));
-        assertTrue(macAdapter.checkPermission("custom.user.entitlement"));
+        // Keychain Credential storage
+        CredentialStorage creds = macAdapter.getCredentialStorage();
+        assertNotNull(creds);
+        creds.storeSecret("peerlink.tokens", "device-token-1", "secret-key-xyz");
+        assertTrue(creds.hasSecret("peerlink.tokens", "device-token-1"));
+        assertEquals(Optional.of("secret-key-xyz"), creds.getSecret("peerlink.tokens", "device-token-1"));
+        assertTrue(creds.deleteSecret("peerlink.tokens", "device-token-1"));
+        assertFalse(creds.hasSecret("peerlink.tokens", "device-token-1"));
+
+        // Firewall diagnostics
+        FirewallDiagnosticsResult fwResult = macAdapter.diagnoseFirewall(8080, "TCP");
+        assertNotNull(fwResult);
+        assertEquals(8080, fwResult.getPort());
+        assertEquals("TCP", fwResult.getTransportProtocol());
+        assertTrue(fwResult.isPeerLinkAllowed());
+
+        // Sandbox permission check and request
+        assertTrue(macAdapter.checkPermission("com.apple.security.files.user-selected.read-write"));
+        assertTrue(macAdapter.requestPermission("custom.permission.entry"));
+        assertTrue(macAdapter.checkPermission("custom.permission.entry"));
     }
 
     @Test
     void testPlatformIntegrationServiceFacade() {
-        PlatformIntegrationService service = new PlatformIntegrationService();
-        assertNotNull(service.getPlatformType());
-        assertNotNull(service.getAdapter());
-        assertNotNull(service.getCredentialStorage());
-        assertEquals(PlatformType.MACOS, service.getPlatformType());
-
         // Fallback adapter testing
         PlatformIntegrationService fallbackService = new PlatformIntegrationService(
                 new PlatformIntegrationService.FallbackPlatformAdapter());

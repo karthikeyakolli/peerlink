@@ -11,6 +11,7 @@ import android.net.NetworkRequest
 import android.os.BatteryManager
 import android.os.Build
 import android.os.PowerManager
+import java.io.File
 import org.peerlink.app.discovery.AndroidNsdAdapter
 import org.peerlink.app.discovery.AndroidWifiAwareAdapter
 import org.peerlink.app.discovery.AndroidWifiDirectAdapter
@@ -20,7 +21,14 @@ import org.peerlink.app.storage.SafStorageProvider
 import org.peerlink.app.worker.PeerLinkSyncWorker
 import org.peerlink.core.android.*
 import org.peerlink.core.android.discovery.AndroidDiscoveryEngine
+import org.peerlink.core.android.discovery.TransportRouteSelector
 import org.peerlink.core.collaboration.clipboard.ClipboardSyncMode
+import org.peerlink.core.security.InMemoryTrustStore
+import org.peerlink.core.transfer.PeerTransferEngine
+import org.peerlink.core.transport.PeerSessionManager
+import org.peerlink.core.transport.StandardTcpTransportProvider
+import org.peerlink.core.transport.TransportCapabilityNegotiator
+import org.peerlink.protocol.v1.ProtocolVersion
 
 /**
  * Android Application entry point initializing the authoritative Android Node Facade.
@@ -28,6 +36,9 @@ import org.peerlink.core.collaboration.clipboard.ClipboardSyncMode
 class PeerLinkApplication : Application() {
 
     var nodeFacade: AndroidNodeFacade? = null
+        private set
+
+    var recoveryManager: AndroidStartupRecoveryManager? = null
         private set
 
     override fun onCreate() {
@@ -103,8 +114,30 @@ class PeerLinkApplication : Application() {
         // 7. Authoritative Persistent SQLite Operation Journal & Startup Recovery (Rule 9)
         val operationJournal = AndroidSqliteOperationJournal(this)
         val recoveryManager = AndroidStartupRecoveryManager(operationJournal)
+        this.recoveryManager = recoveryManager
 
-        // 8. Assemble master Facade
+        val stagingRoot = File(filesDir, "staging").apply { mkdirs() }.toPath()
+        val destRoot = File(filesDir, "received").apply { mkdirs() }.toPath()
+        recoveryManager.reconcileOnStartup(stagingRoot, destRoot)
+
+        val transferEngine = PeerTransferEngine(operationJournal, stagingRoot)
+
+        // 8. Transport, Session Manager, and Route Selection
+        val transportProvider = StandardTcpTransportProvider("0.0.0.0")
+        val trustStore = InMemoryTrustStore()
+        val protocolVersion = ProtocolVersion.newBuilder().setMajor(1).setMinor(0).setPatch(0).build()
+        val sessionManager = PeerSessionManager(
+            keystoreManager.peerIdentity,
+            keystoreManager.deviceIdentity,
+            keystoreManager.signer,
+            trustStore,
+            protocolVersion,
+            protocolVersion,
+            TransportCapabilityNegotiator(listOf(transportProvider))
+        )
+        val routeSelector = TransportRouteSelector(transportProvider)
+
+        // 9. Assemble master Facade
         val facade = AndroidNodeFacade(
             stateMachine,
             keystoreManager,
@@ -113,7 +146,12 @@ class PeerLinkApplication : Application() {
             discoveryEngine,
             notificationController,
             operationJournal,
-            recoveryManager
+            transferEngine,
+            transportProvider,
+            sessionManager,
+            routeSelector,
+            destRoot,
+            trustStore
         )
         this.nodeFacade = facade
         facade.start()
@@ -180,6 +218,25 @@ class PeerLinkApplication : Application() {
         val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
                 status == BatteryManager.BATTERY_STATUS_FULL
 
+        // Real runtime permission checks
+        val notifGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else true
+
+        val nearbyGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            checkSelfPermission(android.Manifest.permission.NEARBY_WIFI_DEVICES) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else true
+
+        val localNetGranted = if (Build.VERSION.SDK_INT >= 37 && applicationInfo.targetSdkVersion >= 37) {
+            checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else true
+
+        val cameraGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else true
+
         return AndroidNodeContext.builder()
             .appInForeground(inForeground)
             .powerSaveMode(isPowerSave)
@@ -187,9 +244,11 @@ class PeerLinkApplication : Application() {
             .networkType(netType)
             .batteryCharging(isCharging)
             .batteryLevelPercent(batteryPct)
-            .storagePermissionGranted(true)
-            .notificationPermissionGranted(true)
-            .nearbyDevicesPermissionGranted(true)
+            .storagePermissionGranted(true) // SAF is default, always granted without broad storage permissions
+            .notificationPermissionGranted(notifGranted)
+            .nearbyDevicesPermissionGranted(nearbyGranted)
+            .localNetworkPermissionGranted(localNetGranted)
+            .cameraPermissionGranted(cameraGranted)
             .build()
     }
 }

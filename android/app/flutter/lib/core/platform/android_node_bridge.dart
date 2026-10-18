@@ -16,7 +16,36 @@ class AndroidNodeBridge {
       EventChannel('org.peerlink/android_node_events');
 
   static final AndroidNodeBridge instance = AndroidNodeBridge._();
-  AndroidNodeBridge._();
+
+  final StreamController<List<String>> _sharedFilesController =
+      StreamController<List<String>>.broadcast();
+
+  Stream<List<String>> get sharedFilesStream => _sharedFilesController.stream;
+
+  AndroidNodeBridge._() {
+    _methodChannel.setMethodCallHandler((call) async {
+      if (call.method == 'onFilesSharedViaIntent') {
+        final args = call.arguments as Map<dynamic, dynamic>?;
+        final uris = (args?['uris'] as List<dynamic>?)?.cast<String>() ?? [];
+        if (uris.isNotEmpty) {
+          _sharedFilesController.add(uris);
+        }
+      }
+    });
+  }
+
+  Future<List<String>> pickContentUris() async {
+    try {
+      final List<dynamic>? res =
+          await _methodChannel.invokeMethod<List<dynamic>>('pickContentUris');
+      if (res != null) {
+        return res.cast<String>();
+      }
+      return [];
+    } catch (e) {
+      return [];
+    }
+  }
 
   Stream<Map<dynamic, dynamic>>? _eventStream;
 

@@ -3,7 +3,6 @@ package org.peerlink.linux.filesystem;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.peerlink.core.filesystem.DestinationSafety;
 import org.peerlink.core.filesystem.PeerFileHandle;
 
 import java.io.IOException;
@@ -55,15 +54,16 @@ class LinuxPosixFileProviderTest {
         });
 
         Optional<PeerFileHandle> handle = assertDoesNotThrow(() ->
-                provider.resolveByPhysicalPath(tempDir.resolve("bad\0file").toString()));
+                provider.resolveByPhysicalPath(tempDir.toString() + "/bad\0file"));
         assertFalse(handle.isPresent());
     }
 
     @Test
     void testRejectsPathTraversalSequences() {
         String traversal = "../../../etc/shadow";
-        DestinationSafety safety = provider.validateDestinationSafety("trans-1", traversal);
-        assertFalse(safety.isSafe());
+        assertThrows(IllegalArgumentException.class, () -> {
+            LinuxPosixFileProvider.validatePosixPathSafety(traversal);
+        });
 
         Optional<PeerFileHandle> handle = assertDoesNotThrow(() ->
                 provider.resolveByPhysicalPath(tempDir.resolve(traversal).toString()));

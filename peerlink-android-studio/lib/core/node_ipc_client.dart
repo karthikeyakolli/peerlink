@@ -79,18 +79,14 @@ class NodeIpcClient {
   bool _manualDisconnect = false;
 
   final _stateController = StreamController<IpcConnectionState>.broadcast();
-  final _transferProgressController =
-      StreamController<TransferProgress>.broadcast();
-  IpcConnectionState _currentState =
-      const IpcConnectionState(status: IpcConnectionStatus.disconnected);
+  final _transferProgressController = StreamController<TransferProgress>.broadcast();
+  IpcConnectionState _currentState = const IpcConnectionState(status: IpcConnectionStatus.disconnected);
 
   IpcConnectionState get currentState => _currentState;
   Stream<IpcConnectionState> get stateStream => _stateController.stream;
-  Stream<TransferProgress> get transferProgressStream =>
-      _transferProgressController.stream;
+  Stream<TransferProgress> get transferProgressStream => _transferProgressController.stream;
 
-  bool get isAuthenticated =>
-      _currentState.status == IpcConnectionStatus.connected;
+  bool get isAuthenticated => _currentState.status == IpcConnectionStatus.connected;
   String? get sessionToken => _sessionToken;
 
   void _updateState(IpcConnectionState newState) {
@@ -129,8 +125,7 @@ class NodeIpcClient {
       );
       _stub = DesktopLocalNodeServiceClient(_channel!);
 
-      _updateState(
-          _currentState.copyWith(status: IpcConnectionStatus.authenticating));
+      _updateState(_currentState.copyWith(status: IpcConnectionStatus.authenticating));
 
       final authRequest = AuthenticateIpcRequest()
         ..authToken = localAuthToken
@@ -296,8 +291,7 @@ class NodeIpcClient {
   }
 
   void _scheduleReconnect() {
-    if (_manualDisconnect ||
-        _currentState.status == IpcConnectionStatus.incompatibleVersion) {
+    if (_manualDisconnect || _currentState.status == IpcConnectionStatus.incompatibleVersion) {
       return;
     }
     _reconnectTimer?.cancel();
@@ -324,8 +318,7 @@ class NodeIpcClient {
     _channel = null;
     _stub = null;
     _sessionToken = null;
-    _updateState(
-        const IpcConnectionState(status: IpcConnectionStatus.disconnected));
+    _updateState(const IpcConnectionState(status: IpcConnectionStatus.disconnected));
   }
 
   // Transfer Operations
@@ -334,8 +327,7 @@ class NodeIpcClient {
     required String targetPeerId,
     required List<String> sourcePaths,
     String destinationDirectory = '',
-    DuplicateDestinationPolicy duplicatePolicy =
-        DuplicateDestinationPolicy.DUPLICATE_DESTINATION_POLICY_FAIL_IF_EXISTS,
+    DuplicateDestinationPolicy duplicatePolicy = DuplicateDestinationPolicy.DUPLICATE_DESTINATION_POLICY_FAIL_IF_EXISTS,
   }) async {
     if (_stub == null || _sessionToken == null) {
       throw StateError('Local Node IPC not connected or authenticated');
@@ -353,8 +345,7 @@ class NodeIpcClient {
     return await _stub!.initiateSend(req, options: options);
   }
 
-  Future<CancelTransferResponse> cancelTransfer(String transferId,
-      {String reason = 'User cancelled'}) async {
+  Future<CancelTransferResponse> cancelTransfer(String transferId, {String reason = 'User cancelled'}) async {
     if (_stub == null || _sessionToken == null) {
       throw StateError('Local Node IPC not connected or authenticated');
     }
@@ -369,8 +360,7 @@ class NodeIpcClient {
     return await _stub!.cancelTransfer(req, options: options);
   }
 
-  Future<PauseTransferResponse> pauseTransfer(String transferId,
-      {String reason = 'User paused'}) async {
+  Future<PauseTransferResponse> pauseTransfer(String transferId, {String reason = 'User paused'}) async {
     if (_stub == null || _sessionToken == null) {
       throw StateError('Local Node IPC not connected or authenticated');
     }
@@ -421,8 +411,23 @@ class NodeIpcClient {
       metadata: {'x-peerlink-auth-token': _sessionToken!},
       timeout: const Duration(seconds: 5),
     );
-    final req = ListTransfersRequest()..sessionToken = _sessionToken!;
+    final req = ListTransfersRequest()
+      ..sessionToken = _sessionToken!;
     return await _stub!.listTransfers(req, options: options);
+  }
+
+  Future<SetBandwidthLimitResponse> setBandwidthLimit(int limitBytesPerSec) async {
+    if (_stub == null || _sessionToken == null) {
+      throw StateError('Local Node IPC not connected or authenticated');
+    }
+    final options = CallOptions(
+      metadata: {'x-peerlink-auth-token': _sessionToken!},
+      timeout: const Duration(seconds: 5),
+    );
+    final req = SetBandwidthLimitRequest()
+      ..sessionToken = _sessionToken!
+      ..maxBytesPerSec = fixnum.Int64(limitBytesPerSec);
+    return await _stub!.setBandwidthLimit(req, options: options);
   }
 
   Future<RevealInFolderResponse> revealInFolder(String path) async {

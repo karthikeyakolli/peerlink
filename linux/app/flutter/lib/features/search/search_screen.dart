@@ -1,14 +1,24 @@
 import 'package:flutter/material.dart';
+import '../../core/device_trust_service.dart';
+import '../../core/operation_journal_service.dart';
+import '../../core/sync_backup_service.dart';
 import '../../design_system/components/glass_container.dart';
 import '../../design_system/components/interactive_glass_card.dart';
+
+enum ResultAvailability {
+  localRetrievable,
+  remoteRetrievable,
+  remoteOfflineDiscovered,
+}
 
 class SearchResultItem {
   final String filename;
   final String path;
   final String deviceName;
-  final String deviceType;
+  final String deviceId;
   final String size;
-  final String modified;
+  final String category;
+  final ResultAvailability availability;
   final IconData icon;
   final Color iconColor;
 
@@ -16,9 +26,10 @@ class SearchResultItem {
     required this.filename,
     required this.path,
     required this.deviceName,
-    this.deviceType = 'desktop',
+    required this.deviceId,
     required this.size,
-    required this.modified,
+    required this.category,
+    required this.availability,
     required this.icon,
     this.iconColor = const Color(0xFF6366F1),
   });
@@ -36,53 +47,10 @@ class _SearchScreenState extends State<SearchScreen> {
   int _selectedFilter = 0;
 
   final List<String> _filters = [
-    'All Files',
-    'Documents',
-    'Photos & Video',
-    'Shared Spaces',
-  ];
-
-  final List<SearchResultItem> _results = [
-    SearchResultItem(
-      filename: 'PeerLink_Architecture_Spec.pdf',
-      path: 'Documents/Specs/',
-      deviceName: 'This Device (Local Node)',
-      deviceType: 'phone',
-      size: '1.4 MB',
-      modified: 'Modified today',
-      icon: Icons.picture_as_pdf_rounded,
-      iconColor: Colors.red,
-    ),
-    SearchResultItem(
-      filename: 'Q3_Financial_Summary.xlsx',
-      path: 'Work/Reports/',
-      deviceName: 'MacBook Pro 16"',
-      deviceType: 'laptop',
-      size: '840 KB',
-      modified: 'Modified 2 days ago',
-      icon: Icons.table_chart_rounded,
-      iconColor: Colors.green,
-    ),
-    SearchResultItem(
-      filename: 'IMG_20261003_Sunset.jpg',
-      path: 'Camera/2026/',
-      deviceName: 'Pixel 8 Pro',
-      deviceType: 'phone',
-      size: '4.8 MB',
-      modified: 'Modified yesterday',
-      icon: Icons.image_rounded,
-      iconColor: Colors.purple,
-    ),
-    SearchResultItem(
-      filename: 'dataset_export_v2.json',
-      path: 'Projects/Analysis/',
-      deviceName: 'Ubuntu Studio',
-      deviceType: 'desktop',
-      size: '12.4 MB',
-      modified: 'Modified 3 days ago',
-      icon: Icons.data_object_rounded,
-      iconColor: const Color(0xFF06B6D4),
-    ),
+    'All',
+    'Local Spaces',
+    'Peer Indexes',
+    'Backups',
   ];
 
   @override
@@ -91,248 +59,303 @@ class _SearchScreenState extends State<SearchScreen> {
     super.dispose();
   }
 
+  List<SearchResultItem> _generateResults(String query) {
+    final results = <SearchResultItem>[];
+    final q = query.toLowerCase();
+
+    // 1. Search configured Sync Spaces
+    for (final space in SyncBackupService.instance.spaces) {
+      if (q.isEmpty || space.name.toLowerCase().contains(q) || space.localPath.toLowerCase().contains(q)) {
+        results.add(SearchResultItem(
+          filename: space.name,
+          path: space.localPath,
+          deviceName: 'This Device (Sync Space)',
+          deviceId: 'local',
+          size: '${space.fileCount} files',
+          category: 'Sync Space',
+          availability: ResultAvailability.localRetrievable,
+          icon: Icons.folder_shared_rounded,
+          iconColor: const Color(0xFF2563EB),
+        ));
+      }
+    }
+
+    // 2. Search Backup Snapshots
+    for (final snap in SyncBackupService.instance.snapshots) {
+      if (q.isEmpty || snap.name.toLowerCase().contains(q) || snap.sourcePath.toLowerCase().contains(q)) {
+        results.add(SearchResultItem(
+          filename: snap.name,
+          path: snap.sourcePath,
+          deviceName: 'Local Merkle Vault',
+          deviceId: 'local',
+          size: snap.totalSize,
+          category: 'Backup Snapshot',
+          availability: ResultAvailability.localRetrievable,
+          icon: Icons.history_edu_rounded,
+          iconColor: const Color(0xFF7C3AED),
+        ));
+      }
+    }
+
+    // 3. Search Operation Journal records
+    for (final op in OperationJournalService.instance.operations) {
+      if (q.isEmpty || op.summary.toLowerCase().contains(q) || op.operationId.toLowerCase().contains(q)) {
+        results.add(SearchResultItem(
+          filename: op.summary,
+          path: 'Journal: ${op.operationId}',
+          deviceName: 'Journal Record',
+          deviceId: op.peerId,
+          size: '${(op.totalBytes / 1048576).toStringAsFixed(1)} MB',
+          category: 'Transfer Record',
+          availability: ResultAvailability.localRetrievable,
+          icon: Icons.receipt_long_rounded,
+          iconColor: const Color(0xFF10B981),
+        ));
+      }
+    }
+
+    // 4. Search Authorized Peer Indexes
+    if (q.isNotEmpty) {
+      for (final peer in DeviceTrustService.instance.devices) {
+        if (peer.name.toLowerCase().contains(q) || peer.id.toLowerCase().contains(q) || query.length >= 2) {
+          final isOnline = peer.isOnline;
+          results.add(SearchResultItem(
+            filename: '${peer.name} Index Manifest',
+            path: 'peer://${peer.id}/manifest.json',
+            deviceName: peer.name,
+            deviceId: peer.id,
+            size: isOnline ? 'Available via P2P' : 'Cached Catalog Only',
+            category: 'Peer Index',
+            availability: isOnline
+                ? ResultAvailability.remoteRetrievable
+                : ResultAvailability.remoteOfflineDiscovered,
+            icon: isOnline ? Icons.cloud_done_rounded : Icons.cloud_off_rounded,
+            iconColor: isOnline ? const Color(0xFF10B981) : Colors.amber.shade700,
+          ));
+        }
+      }
+    }
+
+    return results;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    final query = _searchController.text.trim().toLowerCase();
-    final filteredResults = _results.where((item) {
-      if (query.isEmpty) return true;
-      return item.filename.toLowerCase().contains(query) ||
-          item.path.toLowerCase().contains(query) ||
-          item.deviceName.toLowerCase().contains(query);
+    final query = _searchController.text.trim();
+    final allResults = _generateResults(query);
+
+    final filteredResults = allResults.where((item) {
+      if (_selectedFilter == 1) return item.category == 'Sync Space';
+      if (_selectedFilter == 2) return item.category == 'Peer Index';
+      if (_selectedFilter == 3) return item.category == 'Backup Snapshot';
+      return true;
     }).toList();
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Cross-Device Omni-Search'),
       ),
-      body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Glassmorphic Search Input Bar
-            GlassContainer(
+      body: Column(
+        children: [
+          // Search Input Bar
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            child: GlassContainer(
               glowColor: const Color(0xFF6366F1),
               borderRadius: BorderRadius.circular(16),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               child: TextField(
                 controller: _searchController,
+                onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
-                  hintText: 'Search files across connected peers...',
+                  hintText: 'Search local spaces, backups, and authorized peers...',
                   border: InputBorder.none,
                   prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF6366F1)),
-                  suffixIcon: _searchController.text.isNotEmpty
+                  suffixIcon: query.isNotEmpty
                       ? IconButton(
                           icon: const Icon(Icons.clear_rounded, size: 18),
                           onPressed: () {
-                            setState(() {
-                              _searchController.clear();
-                            });
+                            _searchController.clear();
+                            setState(() {});
                           },
                         )
                       : null,
                 ),
-                onChanged: (_) => setState(() {}),
               ),
             ),
-            const SizedBox(height: 12),
+          ),
 
-            // Horizontal Filter Chips
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: List.generate(_filters.length, (index) {
-                  final isSelected = _selectedFilter == index;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8.0),
-                    child: FilterChip(
-                      selected: isSelected,
-                      label: Text(_filters[index]),
-                      selectedColor: const Color(0xFF6366F1).withValues(alpha: 0.18),
-                      checkmarkColor: const Color(0xFF6366F1),
-                      labelStyle: TextStyle(
-                        fontSize: 11,
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                        color: isSelected ? const Color(0xFF6366F1) : null,
-                      ),
-                      onSelected: (val) {
-                        setState(() {
-                          _selectedFilter = index;
-                        });
-                      },
-                    ),
-                  );
-                }),
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            // Info Callout
-            GlassContainer(
-              glowColor: Colors.blueGrey,
-              padding: const EdgeInsets.all(12),
-              borderRadius: BorderRadius.circular(14),
-              child: const Row(
-                children: [
-                  Icon(Icons.bolt_rounded, size: 16, color: Color(0xFF6366F1)),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Omni-search queries indexed peer manifests with zero cloud relay. 1-tap beam downloads directly from remote node.',
-                      style: TextStyle(fontSize: 11, color: Colors.grey),
-                    ),
+          // Filter Chips
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
+            child: Row(
+              children: List.generate(_filters.length, (idx) {
+                final isSelected = _selectedFilter == idx;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: FilterChip(
+                    label: Text(_filters[idx]),
+                    selected: isSelected,
+                    onSelected: (selected) {
+                      setState(() {
+                        _selectedFilter = idx;
+                      });
+                    },
+                    selectedColor: const Color(0xFF6366F1).withValues(alpha: 0.25),
+                    checkmarkColor: const Color(0xFF6366F1),
                   ),
-                ],
-              ),
+                );
+              }),
             ),
-            const SizedBox(height: 16),
+          ),
 
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Indexed Network Files (${filteredResults.length})',
-                  style: theme.textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  '3 Nodes Online',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: const Color(0xFF10B981),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
+          const SizedBox(height: 8),
 
-            Expanded(
-              child: filteredResults.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.search_off_rounded,
-                              size: 48, color: theme.colorScheme.outline),
-                          const SizedBox(height: 10),
-                          Text('No matching files found',
-                              style: TextStyle(
-                                  color: theme.colorScheme.outline,
-                                  fontWeight: FontWeight.bold)),
-                        ],
+          // Content List
+          Expanded(
+            child: allResults.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24.0),
+                      child: GlassContainer(
+                        glowColor: const Color(0xFF6366F1),
+                        borderRadius: BorderRadius.circular(20),
+                        padding: const EdgeInsets.all(24.0),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.saved_search_rounded, size: 48, color: Color(0xFF6366F1)),
+                            const SizedBox(height: 12),
+                            Text(
+                              'Search Local and Authorized Peer Indexes',
+                              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 6),
+                            const Text(
+                              'Search local sync directories, verified backup snapshots, and authorized peer catalogs. Discovered remote results are clearly distinguished from content retrievable right now.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(fontSize: 12, color: Colors.grey),
+                            ),
+                          ],
+                        ),
                       ),
-                    )
-                  : ListView.builder(
-                      itemCount: filteredResults.length,
-                      itemBuilder: (context, index) {
-                        final item = filteredResults[index];
-                        return InteractiveGlassCard(
-                          glowColor: item.iconColor,
-                          margin: const EdgeInsets.only(bottom: 10),
-                          borderRadius: BorderRadius.circular(18),
-                          padding: const EdgeInsets.all(14),
-                          child: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: item.iconColor.withValues(alpha: 0.15),
-                                  shape: BoxShape.circle,
+                    ),
+                  )
+                : filteredResults.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.search_off_rounded, size: 44, color: theme.disabledColor),
+                            const SizedBox(height: 12),
+                            Text(
+                              'No matching items found for "$query"',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Check spelling or ensure target peer is paired.',
+                              style: TextStyle(fontSize: 12, color: Colors.grey),
+                            ),
+                          ],
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                        itemCount: filteredResults.length,
+                        itemBuilder: (context, idx) {
+                          final item = filteredResults[idx];
+                          Color availColor;
+                          String availText;
+
+                          switch (item.availability) {
+                            case ResultAvailability.localRetrievable:
+                              availColor = const Color(0xFF10B981);
+                              availText = 'LOCAL RETRIEVABLE';
+                              break;
+                            case ResultAvailability.remoteRetrievable:
+                              availColor = const Color(0xFF10B981);
+                              availText = 'RETRIEVABLE (ONLINE)';
+                              break;
+                            case ResultAvailability.remoteOfflineDiscovered:
+                              availColor = const Color(0xFFF59E0B);
+                              availText = 'DISCOVERED (OFFLINE)';
+                              break;
+                          }
+
+                          return InteractiveGlassCard(
+                            glowColor: availColor,
+                            margin: const EdgeInsets.only(bottom: 10),
+                            borderRadius: BorderRadius.circular(16),
+                            padding: const EdgeInsets.all(14.0),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: item.iconColor.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Icon(item.icon, color: item.iconColor, size: 22),
                                 ),
-                                child: Icon(item.icon, color: item.iconColor, size: 22),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      item.filename,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 13,
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        item.filename,
+                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                        overflow: TextOverflow.ellipsis,
                                       ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    const SizedBox(height: 3),
-                                    Row(
-                                      children: [
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 6, vertical: 2),
-                                          decoration: BoxDecoration(
-                                            color: isDark
-                                                ? const Color(0xFF1E293B)
-                                                : const Color(0xFFF1F5F9),
-                                            borderRadius: BorderRadius.circular(6),
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(
-                                                item.deviceType == 'phone'
-                                                    ? Icons.smartphone_rounded
-                                                    : Icons.laptop_rounded,
-                                                size: 11,
-                                                color: Colors.grey,
-                                              ),
-                                              const SizedBox(width: 4),
-                                              Text(
-                                                item.deviceName,
-                                                style: const TextStyle(
-                                                    fontSize: 10,
-                                                    color: Colors.grey),
-                                              ),
-                                            ],
-                                          ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        '${item.deviceName} • ${item.size}',
+                                        style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        item.path,
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color: isDark ? Colors.white38 : Colors.black45,
+                                          fontFamily: 'monospace',
                                         ),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          '${item.size} • ${item.modified}',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            color: isDark
-                                                ? Colors.white54
-                                                : Colors.black45,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                              FilledButton.tonalIcon(
-                                onPressed: () {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                          'Beaming "${item.filename}" from ${item.deviceName}...'),
-                                      backgroundColor: const Color(0xFF2563EB),
-                                      duration: const Duration(seconds: 2),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: availColor.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: availColor),
+                                  ),
+                                  child: Text(
+                                    availText,
+                                    style: TextStyle(
+                                      color: availColor,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold,
                                     ),
-                                  );
-                                },
-                                icon: const Icon(Icons.download_rounded, size: 16),
-                                label: const Text('Pull'),
-                                style: FilledButton.styleFrom(
-                                  visualDensity: VisualDensity.compact,
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 6),
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-            ),
-          ],
-        ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+          ),
+        ],
       ),
     );
   }

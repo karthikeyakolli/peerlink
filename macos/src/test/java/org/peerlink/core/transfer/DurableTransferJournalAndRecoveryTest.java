@@ -99,10 +99,10 @@ class DurableTransferJournalAndRecoveryTest {
         byte[] chunk0 = Arrays.copyOfRange(fileBytes, 0, 15);
         byte[] chunk1 = Arrays.copyOfRange(fileBytes, 15, 30);
 
-        TransferChunkAck ack0 = engine.handleIncomingChunk(createChunkMsg(transferId, 0, 0, 0, chunk0), destDir);
+        TransferChunkAck ack0 = engine.handleIncomingChunk(createChunkMsg(transferId, 0, 0, 0, chunk0));
         assertTrue(ack0.getSuccess());
 
-        TransferChunkAck ack1 = engine.handleIncomingChunk(createChunkMsg(transferId, 0, 1, 15, chunk1), destDir);
+        TransferChunkAck ack1 = engine.handleIncomingChunk(createChunkMsg(transferId, 0, 1, 15, chunk1));
         assertTrue(ack1.getSuccess());
 
         // Verify chunks persisted in SQLite
@@ -134,16 +134,17 @@ class DurableTransferJournalAndRecoveryTest {
                 .build();
         TransferResumeState resumeState = restartedEngine.handleResumeOffer(resumeOffer, destDir);
         assertTrue(resumeState.getCanResume());
-        assertEquals(2, resumeState.getItemProgress(0).getAcknowledgedChunkIndicesCount());
+        assertEquals(2, resumeState.getAckedChunkIndicesCount());
 
         // Resume: transfer chunk 2
         byte[] chunk2 = Arrays.copyOfRange(fileBytes, 30, fileBytes.length);
-        TransferChunkAck ack2 = restartedEngine.handleIncomingChunk(createChunkMsg(transferId, 0, 2, 30, chunk2), destDir);
+        TransferChunkAck ack2 = restartedEngine.handleIncomingChunk(createChunkMsg(transferId, 0, 2, 30, chunk2));
         assertTrue(ack2.getSuccess());
 
-        // Finalize
-        TransferFinalizeRequest finReq = TransferFinalizeRequest.newBuilder().setTransferId(transferId).build();
-        TransferFinalizeResponse finResp = restartedEngine.handleFinalize(finReq, destDir);
+        // Verify and commit
+        TransferVerifyResult verify = restartedEngine.verifyReceivedTransfer(transferId, manifest);
+        assertTrue(verify.getVerified());
+        TransferCompletedReceipt finResp = restartedEngine.commitReceivedTransfer(transferId, manifest, destDir);
         assertTrue(finResp.getSuccess());
 
         // Verify final content
@@ -169,7 +170,7 @@ class DurableTransferJournalAndRecoveryTest {
         byte[] chunk1 = Arrays.copyOfRange(fileBytes, 16, fileBytes.length);
 
         // Chunk 0 is normally acknowledged
-        TransferChunkAck ack0 = engine.handleIncomingChunk(createChunkMsg(transferId, 0, 0, 0, chunk0), destDir);
+        TransferChunkAck ack0 = engine.handleIncomingChunk(createChunkMsg(transferId, 0, 0, 0, chunk0));
         assertTrue(ack0.getSuccess());
 
         // Simulate chunk 1 data written to staging, but process crashes before SQLite metadata update / ACK
@@ -186,13 +187,14 @@ class DurableTransferJournalAndRecoveryTest {
         assertFalse(ackedInDb.contains(1L));
 
         // Sender re-sends unacknowledged chunk 1
-        TransferChunkAck ack1 = restartedEngine.handleIncomingChunk(createChunkMsg(transferId, 0, 1, 16, chunk1), destDir);
+        TransferChunkAck ack1 = restartedEngine.handleIncomingChunk(createChunkMsg(transferId, 0, 1, 16, chunk1));
         assertTrue(ack1.getSuccess());
         assertTrue(sessionJournal.getAckedChunks(transferId, 0).contains(1L));
 
         // Finalize and verify
-        TransferFinalizeResponse finResp = restartedEngine.handleFinalize(
-                TransferFinalizeRequest.newBuilder().setTransferId(transferId).build(), destDir);
+        TransferVerifyResult verify = restartedEngine.verifyReceivedTransfer(transferId, manifest);
+        assertTrue(verify.getVerified());
+        TransferCompletedReceipt finResp = restartedEngine.commitReceivedTransfer(transferId, manifest, destDir);
         assertTrue(finResp.getSuccess());
         assertArrayEquals(fileBytes, Files.readAllBytes(destDir.resolve("unacked.txt")));
     }
@@ -211,7 +213,7 @@ class DurableTransferJournalAndRecoveryTest {
         setupSession(transferId, opId, manifest);
 
         // Chunk 0 is acknowledged and recorded in SQLite
-        TransferChunkAck ack0 = engine.handleIncomingChunk(createChunkMsg(transferId, 0, 0, 0, fileBytes), destDir);
+        TransferChunkAck ack0 = engine.handleIncomingChunk(createChunkMsg(transferId, 0, 0, 0, fileBytes));
         assertTrue(ack0.getSuccess());
 
         // Crash occurs before finalize
@@ -226,8 +228,9 @@ class DurableTransferJournalAndRecoveryTest {
         assertEquals(Set.of(0L), sessionJournal.getAckedChunks(transferId, 0));
 
         // Finalize completes successfully
-        TransferFinalizeResponse finResp = restartedEngine.handleFinalize(
-                TransferFinalizeRequest.newBuilder().setTransferId(transferId).build(), destDir);
+        TransferVerifyResult verify = restartedEngine.verifyReceivedTransfer(transferId, manifest);
+        assertTrue(verify.getVerified());
+        TransferCompletedReceipt finResp = restartedEngine.commitReceivedTransfer(transferId, manifest, destDir);
         assertTrue(finResp.getSuccess());
         assertTrue(Files.exists(destDir.resolve("ack_state.txt")));
     }
@@ -251,7 +254,7 @@ class DurableTransferJournalAndRecoveryTest {
         }
 
         // Attempt to process chunk: must NOT return success = true!
-        TransferChunkAck ack = engine.handleIncomingChunk(createChunkMsg(transferId, 0, 0, 0, data), destDir);
+        TransferChunkAck ack = engine.handleIncomingChunk(createChunkMsg(transferId, 0, 0, 0, data));
         assertFalse(ack.getSuccess(), "Must NOT acknowledge positive completion when SQLite write fails");
         assertTrue(ack.getRetryRequested());
         assertTrue(ack.getErrorMessage().contains("persistence failure") || ack.getErrorMessage().contains("readonly"));
@@ -262,7 +265,7 @@ class DurableTransferJournalAndRecoveryTest {
         }
 
         // Now retrying succeeds
-        TransferChunkAck retryAck = engine.handleIncomingChunk(createChunkMsg(transferId, 0, 0, 0, data), destDir);
+        TransferChunkAck retryAck = engine.handleIncomingChunk(createChunkMsg(transferId, 0, 0, 0, data));
         assertTrue(retryAck.getSuccess());
     }
 
@@ -289,13 +292,13 @@ class DurableTransferJournalAndRecoveryTest {
                 .setChunkSha256("0000000000000000000000000000000000000000000000000000000000000000") // corrupt hash
                 .build();
 
-        TransferChunkAck ack = engine.handleIncomingChunk(corruptChunk, destDir);
+        TransferChunkAck ack = engine.handleIncomingChunk(corruptChunk);
         assertFalse(ack.getSuccess());
         assertTrue(ack.getRetryRequested());
 
         // Test missing staging file during startup reconciliation
         sessionJournal.updateSessionState(transferId, TransferState.TRANSFER_STATE_TRANSFERRING);
-        stagingManager.cleanupStagingDir(transferId);
+        stagingManager.cleanupStaging(transferId);
 
         var report = engine.reconcileAtStartup(destDir);
         assertEquals(1, report.markedFailed());
@@ -319,12 +322,12 @@ class DurableTransferJournalAndRecoveryTest {
         TransferChunk chunkMsg = createChunkMsg(transferId, 0, 0, 0, data);
 
         // First delivery: success
-        TransferChunkAck ack1 = engine.handleIncomingChunk(chunkMsg, destDir);
+        TransferChunkAck ack1 = engine.handleIncomingChunk(chunkMsg);
         assertTrue(ack1.getSuccess());
         assertEquals(data.length, ack1.getBytesReceived());
 
         // Duplicate delivery (lost connection / retransmitted packet): idempotent success
-        TransferChunkAck ack2 = engine.handleIncomingChunk(chunkMsg, destDir);
+        TransferChunkAck ack2 = engine.handleIncomingChunk(chunkMsg);
         assertTrue(ack2.getSuccess());
         assertEquals(data.length, ack2.getBytesReceived());
 
@@ -338,10 +341,10 @@ class DurableTransferJournalAndRecoveryTest {
                 .setChunkSha256(FileManifestBuilder.calculateSha256Hex("Tampered data".getBytes(StandardCharsets.UTF_8)))
                 .build();
 
-        TransferChunkAck conflictAck = engine.handleIncomingChunk(conflicting, destDir);
+        TransferChunkAck conflictAck = engine.handleIncomingChunk(conflicting);
         assertFalse(conflictAck.getSuccess());
-        assertTrue(conflictAck.getRetryRequested());
-        assertTrue(conflictAck.getErrorMessage().contains("Conflicting chunk digest"));
+        assertFalse(conflictAck.getRetryRequested());
+        assertTrue(conflictAck.getErrorMessage().contains("Conflicting chunk"));
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -362,13 +365,13 @@ class DurableTransferJournalAndRecoveryTest {
                 .addItems(TransferItem.newBuilder()
                         .setRelativePath("file0.txt")
                         .setFileSizeBytes(file0Data.length)
-                        .setSha256(FileManifestBuilder.calculateSha256Hex(file0Data))
+                        .setSha256Hex(FileManifestBuilder.calculateSha256Hex(file0Data))
                         .setIsDirectory(false)
                         .build())
                 .addItems(TransferItem.newBuilder()
                         .setRelativePath("file1.txt")
                         .setFileSizeBytes(file1Data.length)
-                        .setSha256(FileManifestBuilder.calculateSha256Hex(file1Data))
+                        .setSha256Hex(FileManifestBuilder.calculateSha256Hex(file1Data))
                         .setIsDirectory(false)
                         .build())
                 .build();
@@ -376,8 +379,8 @@ class DurableTransferJournalAndRecoveryTest {
         setupSession(transferId, opId, manifest);
 
         // Receive chunks for both files
-        engine.handleIncomingChunk(createChunkMsg(transferId, 0, 0, 0, file0Data), destDir);
-        engine.handleIncomingChunk(createChunkMsg(transferId, 1, 0, 0, file1Data), destDir);
+        engine.handleIncomingChunk(createChunkMsg(transferId, 0, 0, 0, file0Data));
+        engine.handleIncomingChunk(createChunkMsg(transferId, 1, 0, 0, file1Data));
 
         // Simulate crash during finalization where file0 was moved to destination, but file1 was not!
         Files.write(destDir.resolve("file0.txt"), file0Data);
@@ -435,13 +438,13 @@ class DurableTransferJournalAndRecoveryTest {
                 .addItems(TransferItem.newBuilder()
                         .setRelativePath("multi0.txt")
                         .setFileSizeBytes(file0Data.length)
-                        .setSha256(FileManifestBuilder.calculateSha256Hex(file0Data))
+                        .setSha256Hex(FileManifestBuilder.calculateSha256Hex(file0Data))
                         .setIsDirectory(false)
                         .build())
                 .addItems(TransferItem.newBuilder()
                         .setRelativePath("multi1.txt")
                         .setFileSizeBytes(file1Chunk0.length + 50)
-                        .setSha256(FileManifestBuilder.calculateSha256Hex("dummy".getBytes()))
+                        .setSha256Hex(FileManifestBuilder.calculateSha256Hex("dummy".getBytes()))
                         .setIsDirectory(false)
                         .build())
                 .build();
@@ -449,11 +452,11 @@ class DurableTransferJournalAndRecoveryTest {
         setupSession(transferId, opId, manifest);
 
         // File 0: fully received and ACKed
-        TransferChunkAck ack0 = engine.handleIncomingChunk(createChunkMsg(transferId, 0, 0, 0, file0Data), destDir);
+        TransferChunkAck ack0 = engine.handleIncomingChunk(createChunkMsg(transferId, 0, 0, 0, file0Data));
         assertTrue(ack0.getSuccess());
 
         // File 1: chunk 0 received and ACKed
-        TransferChunkAck ack1_0 = engine.handleIncomingChunk(createChunkMsg(transferId, 1, 0, 0, file1Chunk0), destDir);
+        TransferChunkAck ack1_0 = engine.handleIncomingChunk(createChunkMsg(transferId, 1, 0, 0, file1Chunk0));
         assertTrue(ack1_0.getSuccess());
 
         // Simulate torn/unacked write appending extra bytes to file 1 staging file past the chunk boundary
@@ -494,10 +497,7 @@ class DurableTransferJournalAndRecoveryTest {
                 System.currentTimeMillis(), System.currentTimeMillis()
         ));
 
-        TransferRequest req = TransferRequest.newBuilder()
-                .setTransferId(transferId)
-                .setSenderPeerId("peer-sender")
-                .setReceiverPeerId("peer-receiver")
+        TransferOffer req = TransferOffer.newBuilder()
                 .setManifest(manifest)
                 .build();
         engine.handleIncomingOffer(req, destDir);
@@ -510,7 +510,7 @@ class DurableTransferJournalAndRecoveryTest {
                 .addItems(TransferItem.newBuilder()
                         .setRelativePath(relativePath)
                         .setFileSizeBytes(data.length)
-                        .setSha256(FileManifestBuilder.calculateSha256Hex(data))
+                        .setSha256Hex(FileManifestBuilder.calculateSha256Hex(data))
                         .setIsDirectory(false)
                         .build())
                 .build();

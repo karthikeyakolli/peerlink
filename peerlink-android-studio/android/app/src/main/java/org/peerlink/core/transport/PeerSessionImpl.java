@@ -179,6 +179,11 @@ public class PeerSessionImpl implements PeerSession {
     }
 
     @Override
+    public SessionPayloadHandler getPayloadHandler() {
+        return payloadHandler.get();
+    }
+
+    @Override
     public CompletableFuture<Long> sendPingAsync() {
         if (state.get() != SessionState.SESSION_STATE_ESTABLISHED) {
             return CompletableFuture.failedFuture(new IllegalStateException("Session is not established"));

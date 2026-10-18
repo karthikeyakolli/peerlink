@@ -27,6 +27,8 @@ public final class AndroidNodeContext {
     private final boolean storagePermissionGranted;
     private final boolean notificationPermissionGranted;
     private final boolean nearbyDevicesPermissionGranted;
+    private final boolean localNetworkPermissionGranted;
+    private final boolean cameraPermissionGranted;
 
     public AndroidNodeContext(Builder builder) {
         this.appInForeground = builder.appInForeground;
@@ -40,6 +42,8 @@ public final class AndroidNodeContext {
         this.storagePermissionGranted = builder.storagePermissionGranted;
         this.notificationPermissionGranted = builder.notificationPermissionGranted;
         this.nearbyDevicesPermissionGranted = builder.nearbyDevicesPermissionGranted;
+        this.localNetworkPermissionGranted = builder.localNetworkPermissionGranted;
+        this.cameraPermissionGranted = builder.cameraPermissionGranted;
     }
 
     public boolean isAppInForeground() {
@@ -86,6 +90,14 @@ public final class AndroidNodeContext {
         return nearbyDevicesPermissionGranted;
     }
 
+    public boolean isLocalNetworkPermissionGranted() {
+        return localNetworkPermissionGranted;
+    }
+
+    public boolean isCameraPermissionGranted() {
+        return cameraPermissionGranted;
+    }
+
     public static Builder builder() {
         return new Builder();
     }
@@ -102,6 +114,8 @@ public final class AndroidNodeContext {
         private boolean storagePermissionGranted = true;
         private boolean notificationPermissionGranted = true;
         private boolean nearbyDevicesPermissionGranted = true;
+        private boolean localNetworkPermissionGranted = true;
+        private boolean cameraPermissionGranted = true;
 
         public Builder appInForeground(boolean appInForeground) {
             this.appInForeground = appInForeground;
@@ -155,6 +169,16 @@ public final class AndroidNodeContext {
 
         public Builder nearbyDevicesPermissionGranted(boolean nearbyDevicesPermissionGranted) {
             this.nearbyDevicesPermissionGranted = nearbyDevicesPermissionGranted;
+            return this;
+        }
+
+        public Builder localNetworkPermissionGranted(boolean localNetworkPermissionGranted) {
+            this.localNetworkPermissionGranted = localNetworkPermissionGranted;
+            return this;
+        }
+
+        public Builder cameraPermissionGranted(boolean cameraPermissionGranted) {
+            this.cameraPermissionGranted = cameraPermissionGranted;
             return this;
         }
 

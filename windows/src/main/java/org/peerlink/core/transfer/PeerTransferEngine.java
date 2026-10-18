@@ -12,8 +12,10 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.FileTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -436,44 +438,16 @@ public final class PeerTransferEngine {
         // Duplicate and Conflicting chunk handling
         Set<Long> ackedChunks = sessionJournal.getAckedChunks(transferId, itemIndex);
         if (ackedChunks.contains(chunkIndex)) {
-            // Check if existing staged content at this offset matches the new chunk
-            try {
-                Path partPath = stagingManager.getStagedPartPath(transferId, itemIndex);
-                if (Files.exists(partPath)) {
-                    long fileSize = Files.size(partPath);
-                    if (offset + data.length != fileSize && fileSize > 0) {
-                        return TransferChunkAck.newBuilder()
-                                .setTransferId(transferId)
-                                .setItemIndex(itemIndex)
-                                .setChunkIndex(chunkIndex)
-                                .setSuccess(false)
-                                .setRetryRequested(false)
-                                .setErrorMessage("Conflicting duplicate chunk size at offset " + offset)
-                                .build();
-                    }
-                    if (offset + data.length <= fileSize) {
-                        byte[] existing = new byte[data.length];
-                        try (java.nio.channels.FileChannel fc = java.nio.channels.FileChannel.open(partPath, java.nio.file.StandardOpenOption.READ)) {
-                            fc.position(offset);
-                            java.nio.ByteBuffer buf = java.nio.ByteBuffer.wrap(existing);
-                            while (buf.hasRemaining()) {
-                                if (fc.read(buf) < 0) break;
-                            }
-                        }
-                        if (!java.util.Arrays.equals(existing, data)) {
-                            return TransferChunkAck.newBuilder()
-                                    .setTransferId(transferId)
-                                    .setItemIndex(itemIndex)
-                                    .setChunkIndex(chunkIndex)
-                                    .setSuccess(false)
-                                    .setRetryRequested(false)
-                                    .setErrorMessage("Conflicting duplicate chunk data at offset " + offset)
-                                    .build();
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                log.warn("Error verifying duplicate chunk data: {}", e.getMessage());
+            // Verify if incoming data differs from what was already staged
+            if (!stagingManager.verifyChunkMatches(transferId, itemIndex, offset, data)) {
+                return TransferChunkAck.newBuilder()
+                        .setTransferId(transferId)
+                        .setItemIndex(itemIndex)
+                        .setChunkIndex(chunkIndex)
+                        .setSuccess(false)
+                        .setRetryRequested(false)
+                        .setErrorMessage("Conflicting chunk data for already acknowledged chunk")
+                        .build();
             }
 
             // If hash is present, check for conflicting data
@@ -905,9 +879,23 @@ public final class PeerTransferEngine {
             List<Path> sourcePaths,
             Consumer<TransferProgress> progressCallback) throws Exception {
 
-        TransferSessionCoordinator coordinator = new TransferSessionCoordinator(session);
-        TransferSessionSender sender = new TransferSessionSender(session, coordinator, bandwidthLimiter, maxChunkRetries);
-        return sender.send(manifest, sourcePaths, progressCallback);
+        String transferId = manifest.getTransferId();
+        TransferProgressTracker tracker = new TransferProgressTracker(
+                transferId, manifest.getTotalBytes(), manifest.getItemsCount(), progressCallback);
+        activeTransfers.put(transferId, tracker);
+
+        try {
+            TransferSessionCoordinator coordinator;
+            if (session.getPayloadHandler() instanceof TransferSessionCoordinator existing) {
+                coordinator = existing;
+            } else {
+                coordinator = new TransferSessionCoordinator(session);
+            }
+            TransferSessionSender sender = new TransferSessionSender(session, coordinator, bandwidthLimiter, maxChunkRetries, tracker);
+            return sender.send(manifest, sourcePaths, progressCallback);
+        } finally {
+            activeTransfers.remove(transferId);
+        }
     }
 
     /**

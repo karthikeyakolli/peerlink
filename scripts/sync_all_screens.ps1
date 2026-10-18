@@ -1,20 +1,41 @@
-$RepoRoot = Split-Path -Parent $PSScriptRoot
+# sync_all_screens.ps1
+$ErrorActionPreference = 'Stop'
 
-$srcFeatures = Join-Path $RepoRoot "windows\app\flutter\lib\features\*"
-$srcDesign = Join-Path $RepoRoot "windows\app\flutter\lib\design_system\*"
-
-$desktopTargets = @(
-    "linux\app\flutter\lib",
-    "macos\app\flutter\lib",
-    "shared-source\canonical\flutter\lib"
+$screens = @(
+  'features/devices/devices_screen.dart',
+  'features/files/files_screen.dart',
+  'features/spaces/spaces_screen.dart',
+  'features/activity/activity_screen.dart',
+  'features/search/search_screen.dart',
+  'features/settings/settings_screen.dart'
 )
 
+$desktopTargets = @('linux/app/flutter', 'macos/app/flutter')
+
 foreach ($t in $desktopTargets) {
-    $featDir = Join-Path $RepoRoot "$t\features"
-    $designDir = Join-Path $RepoRoot "$t\design_system"
-    if (-not (Test-Path $featDir)) { New-Item -ItemType Directory -Path $featDir -Force | Out-Null }
-    if (-not (Test-Path $designDir)) { New-Item -ItemType Directory -Path $designDir -Force | Out-Null }
-    Copy-Item $srcFeatures $featDir -Recurse -Force
-    Copy-Item $srcDesign $designDir -Recurse -Force
-    Write-Host "Synced features and design system to: $t"
+  foreach ($s in $screens) {
+    $src = "windows/app/flutter/lib/$s"
+    $dst = "$t/lib/$s"
+    $dstDir = Split-Path -Parent $dst
+    if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Path $dstDir -Force | Out-Null }
+    Copy-Item -Path $src -Destination $dst -Force
+  }
+  Copy-Item -Path 'windows/app/flutter/test/ephemeral_sharing_test.dart' -Destination "$t/test/ephemeral_sharing_test.dart" -Force
+  Write-Host "Synced desktop screens to $t"
 }
+
+$mobileTargets = @('android/app/flutter')
+foreach ($t in $mobileTargets) {
+  foreach ($s in $screens) {
+    $src = "peerlink-android-studio/lib/$s"
+    $dst = "$t/lib/$s"
+    $dstDir = Split-Path -Parent $dst
+    if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Path $dstDir -Force | Out-Null }
+    Copy-Item -Path $src -Destination $dst -Force
+  }
+  Copy-Item -Path 'windows/app/flutter/test/ephemeral_sharing_test.dart' -Destination "$t/test/ephemeral_sharing_test.dart" -Force
+  Copy-Item -Path 'windows/app/flutter/test/ephemeral_sharing_test.dart' -Destination "peerlink-android-studio/test/ephemeral_sharing_test.dart" -Force
+  Write-Host "Synced mobile screens to $t"
+}
+
+Write-Host "All screen synchronization complete."

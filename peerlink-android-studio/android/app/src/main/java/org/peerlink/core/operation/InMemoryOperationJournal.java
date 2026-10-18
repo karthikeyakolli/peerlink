@@ -108,10 +108,31 @@ public class InMemoryOperationJournal implements OperationJournal {
         return stages.getOrDefault(operationId, JournalStage.INTENT);
     }
 
+    public record OperationRecoveryMetadata(
+            JournalStage stage,
+            String stagingPath,
+            String destinationPath,
+            String expectedSha256
+    ) {}
+
+    private final ConcurrentMap<String, OperationRecoveryMetadata> metadata = new ConcurrentHashMap<>();
+
+    public void setOperationMetadata(String operationId, JournalStage stage, String stagingPath, String destinationPath, String expectedSha256) {
+        metadata.put(operationId, new OperationRecoveryMetadata(stage, stagingPath, destinationPath, expectedSha256));
+        if (stage != null) {
+            stages.put(operationId, stage);
+        }
+    }
+
+    public Optional<OperationRecoveryMetadata> getOperationMetadata(String operationId) {
+        return Optional.ofNullable(metadata.get(operationId));
+    }
+
     public void clear() {
         records.clear();
         idempotencyIndex.clear();
         stages.clear();
         notes.clear();
+        metadata.clear();
     }
 }

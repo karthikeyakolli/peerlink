@@ -201,7 +201,7 @@ class _InstantBeamDeckState extends State<InstantBeamDeck>
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      widget.activePayloadSummary ?? '2 files selected (5.2 MB) • Ready to beam',
+                      widget.activePayloadSummary ?? 'No files staged • Tap to select',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -211,7 +211,7 @@ class _InstantBeamDeckState extends State<InstantBeamDeck>
                     ),
                   ),
                   Text(
-                    'Change',
+                    'Select',
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
@@ -245,17 +245,18 @@ class _InstantBeamDeckState extends State<InstantBeamDeck>
               child: Column(
                 children: [
                   Icon(
-                    Icons.radar_rounded,
+                    Icons.devices_outlined,
                     size: 36,
                     color: (isDark ? Colors.white30 : Colors.black26),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Scanning for nearby devices...',
+                    'No paired devices. Pair a device to use 1-Tap Instant Beam.',
                     style: TextStyle(
                       fontSize: 12,
                       color: isDark ? Colors.white54 : Colors.black54,
                     ),
+                    textAlign: TextAlign.center,
                   ),
                 ],
               ),

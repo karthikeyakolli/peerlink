@@ -34,14 +34,26 @@ public final class FileManifestBuilder {
     private final int chunkSizeBytes;
 
     public FileManifestBuilder() {
-        this(DEFAULT_CHUNK_SIZE_BYTES);
+        this(0); // 0 indicates adaptive sizing based on payload size
     }
 
     public FileManifestBuilder(int chunkSizeBytes) {
-        if (chunkSizeBytes <= 0) {
-            throw new IllegalArgumentException("chunkSizeBytes must be positive");
+        if (chunkSizeBytes < 0) {
+            throw new IllegalArgumentException("chunkSizeBytes cannot be negative");
         }
         this.chunkSizeBytes = chunkSizeBytes;
+    }
+
+    public static int calculateAdaptiveChunkSize(long totalBytes) {
+        if (totalBytes < 1024 * 1024) { // < 1 MB
+            return 32 * 1024; // 32 KB
+        } else if (totalBytes < 16 * 1024 * 1024) { // 1 MB - 16 MB
+            return 64 * 1024; // 64 KB
+        } else if (totalBytes < 128 * 1024 * 1024) { // 16 MB - 128 MB
+            return 256 * 1024; // 256 KB
+        } else { // > 128 MB
+            return 512 * 1024; // 512 KB
+        }
     }
 
     /**
@@ -104,6 +116,10 @@ public final class FileManifestBuilder {
         org.peerlink.core.filesystem.PathSafetyValidator.validateNoCollisions(
                 items.stream().map(TransferItem::getRelativePath).toList());
 
+        int effectiveChunkSize = (this.chunkSizeBytes > 0)
+                ? this.chunkSizeBytes
+                : calculateAdaptiveChunkSize(totalBytes);
+
         return TransferManifest.newBuilder()
                 .setTransferId(transferId)
                 .setOperationId(OperationId.newBuilder().setValue(operationId).build())
@@ -111,7 +127,7 @@ public final class FileManifestBuilder {
                 .setReceiverPeerId(PeerId.newBuilder().setValue(receiverPeerId).build())
                 .addAllItems(items)
                 .setTotalBytes(totalBytes)
-                .setChunkSizeBytes(chunkSizeBytes)
+                .setChunkSizeBytes(effectiveChunkSize)
                 .setDisplayName(displayName)
                 .setDuplicatePolicy(duplicatePolicy)
                 .build();

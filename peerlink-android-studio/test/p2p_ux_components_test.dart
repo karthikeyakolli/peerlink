@@ -7,6 +7,7 @@ import 'package:peerlink/design_system/components/transfer_speedometer.dart';
 import 'package:peerlink/design_system/components/glass_container.dart';
 import 'package:peerlink/design_system/components/instant_beam_deck.dart';
 import 'package:peerlink/design_system/components/interactive_glass_card.dart';
+import 'package:peerlink/core/sync_backup_service.dart';
 import 'package:peerlink/features/search/search_screen.dart';
 import 'package:peerlink/features/settings/settings_screen.dart';
 
@@ -208,6 +209,31 @@ void main() {
 
     testWidgets('SearchScreen filters items on user text query',
         (tester) async {
+      SyncBackupService.instance.addSpace(
+        const SyncSpace(
+          id: 'spec_pdf',
+          name: 'PeerLink_Architecture_Spec.pdf',
+          localPath: 'C:\\Specs',
+          remotePeerId: 'peer_node_1',
+          mode: SyncMode.twoWaySync,
+          status: SyncStatus.inSync,
+          fileCount: 1,
+          lastSyncTime: 'Just now',
+        ),
+      );
+      SyncBackupService.instance.addSpace(
+        const SyncSpace(
+          id: 'fin_xlsx',
+          name: 'Q3_Financial_Summary.xlsx',
+          localPath: 'C:\\Finance',
+          remotePeerId: 'peer_node_1',
+          mode: SyncMode.twoWaySync,
+          status: SyncStatus.inSync,
+          fileCount: 1,
+          lastSyncTime: 'Just now',
+        ),
+      );
+
       await tester.pumpWidget(
         const MaterialApp(
           home: Scaffold(
@@ -215,12 +241,15 @@ void main() {
           ),
         ),
       );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
       expect(find.text('Cross-Device Omni-Search'), findsOneWidget);
       expect(find.text('PeerLink_Architecture_Spec.pdf'), findsOneWidget);
 
       await tester.enterText(find.byType(TextField), 'Financial');
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
       expect(find.text('Q3_Financial_Summary.xlsx'), findsOneWidget);
       expect(find.text('PeerLink_Architecture_Spec.pdf'), findsNothing);
@@ -239,6 +268,8 @@ void main() {
       expect(find.text('Settings & Zero-Trust Safety'), findsOneWidget);
       expect(find.text('Zero-Trust Invariant Enforcement'), findsOneWidget);
       expect(find.text('Trust & Devices'), findsOneWidget);
+      await tester.drag(find.byType(ListView), const Offset(0, -300));
+      await tester.pump();
       expect(find.text('Safety & Antimalware'), findsOneWidget);
     });
   });

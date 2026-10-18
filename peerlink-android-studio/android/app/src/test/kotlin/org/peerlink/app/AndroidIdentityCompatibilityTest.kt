@@ -427,7 +427,7 @@ class AndroidIdentityCompatibilityTest {
         // 3. Ephemeral Session Authentication Code (Specific to a single connection attempt)
         val sessionId = "session_xyz_789"
         val nonceA = byteArrayOf(0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08)
-        val nonceB = byteArrayOf(0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80)
+        val nonceB = byteArrayOf(0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80.toByte())
         val now = 1700000000000L
 
         val sessionCodeAB = PeerCryptoSigner.computeSessionAuthCode(

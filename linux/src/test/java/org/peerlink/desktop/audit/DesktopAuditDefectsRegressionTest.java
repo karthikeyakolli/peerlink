@@ -44,7 +44,7 @@ public class DesktopAuditDefectsRegressionTest {
     @Test
     @DisplayName("Audit Defect 5b: LocalTokenAuthInterceptor must reject null or blank expectedToken in constructor")
     void testLocalTokenAuthInterceptorRejectsBlankToken() {
-        assertThrows(IllegalArgumentException.class, () -> new LocalTokenAuthInterceptor(null));
+        assertThrows(IllegalArgumentException.class, () -> new LocalTokenAuthInterceptor((String) null));
         assertThrows(IllegalArgumentException.class, () -> new LocalTokenAuthInterceptor(""));
         assertThrows(IllegalArgumentException.class, () -> new LocalTokenAuthInterceptor("   "));
     }

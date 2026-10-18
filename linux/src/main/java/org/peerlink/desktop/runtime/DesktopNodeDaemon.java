@@ -87,7 +87,7 @@ public final class DesktopNodeDaemon implements Closeable {
                 String platform = System.getProperty("os.name", "Windows");
 
                 this.identityManager = org.peerlink.core.identity.DeviceIdentityManager.loadOrCreate(
-                        keyStore, sqliteStorage, deviceName, platform);
+                        keyStore, sqliteStorage, deviceName, org.peerlink.protocol.v1.DeviceType.DEVICE_TYPE_DESKTOP_WINDOWS, platform, "0.1.0");
                 this.peerId = identityManager.getPeerIdentity().getPeerId().getValue();
                 log.info("Initialized device cryptographic identity. Stable Peer ID: {}, Fingerprint: {}",
                         this.peerId, identityManager.getFingerprint());
@@ -135,6 +135,15 @@ public final class DesktopNodeDaemon implements Closeable {
             );
 
             var receiver = transferEngine.createSessionReceiver(receivedDir, trustStore);
+            sessionManager.addSessionLifecycleListener(new org.peerlink.core.transport.PeerSessionManager.SessionLifecycleListener() {
+                @Override
+                public void onSessionEstablished(org.peerlink.core.transport.PeerSession session) {
+                    log.info("Session [{}] established with peer [{}]. Attaching TransferSessionCoordinator and Receiver",
+                            session.getSessionId().getValue(), session.getRemotePeer().getPeerId().getValue());
+                    var coordinator = new org.peerlink.core.transfer.TransferSessionCoordinator(session);
+                    coordinator.registerReceiver(receiver);
+                }
+            });
 
             tcpTransport.startListening(configuration.getP2pPort(), conn -> {
                 sessionManager.handleInboundConnection(conn);
@@ -192,9 +201,7 @@ public final class DesktopNodeDaemon implements Closeable {
             tcpTransport = null;
         }
         if (sessionManager != null) {
-            try {
-                sessionManager.close();
-            } catch (IOException ignored) {}
+            sessionManager.close();
             sessionManager = null;
         }
         if (grpcServer != null) {

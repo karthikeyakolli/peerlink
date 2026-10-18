@@ -211,7 +211,7 @@ class PeerTransferEngineTest {
         Path existingDest = destDir.resolve("contract.pdf");
         Files.writeString(existingDest, "Existing version at destination");
 
-        assertThrows(DestinationConflictException.class, () ->
+        assertThrows(BatchCommitException.class, () ->
                 engine.executeTransfer(
                         List.of(file),
                         destDir,

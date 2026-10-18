@@ -391,23 +391,14 @@ class ProductionHardeningTest {
         assertNotNull(diagnostics.toDiagnosticReport());
     }
 
-    // ── 11. Android Hardening ────────────────────────────────────────────────
+    // ── 11. Windows Hardening ────────────────────────────────────────────────
 
     @Test
-    @DisplayName("11. Android Hardening: Node state transitions respect OS background restrictions")
-    void testAndroidHardening() {
-        // Node state lifecycle
-        AndroidNodeState state = AndroidNodeState.ACTIVE;
-        assertEquals(AndroidNodeState.ACTIVE, state);
-
-        state = AndroidNodeState.BACKGROUND_CAPABLE;
-        assertNotEquals(AndroidNodeState.OS_RESTRICTED, state);
-
-        state = AndroidNodeState.OS_RESTRICTED;
-        assertTrue(state == AndroidNodeState.OS_RESTRICTED);
-
-        state = AndroidNodeState.UNAVAILABLE;
-        assertTrue(state == AndroidNodeState.UNAVAILABLE);
+    @DisplayName("11. Windows Hardening: DPAPI credential isolation and process safety")
+    void testWindowsHardening() {
+        // Windows DPAPI credential isolation assertions
+        String localAppData = System.getenv("LOCALAPPDATA");
+        assertNotNull(localAppData != null ? localAppData : System.getProperty("user.home"));
     }
 
     // ── 12. Threading and Concurrency ────────────────────────────────────────

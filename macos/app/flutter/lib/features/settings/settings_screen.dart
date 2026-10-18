@@ -1,233 +1,101 @@
 import 'package:flutter/material.dart';
+import '../../core/device_trust_service.dart';
+import '../../core/node_ipc_client.dart';
+import '../../core/sync_backup_service.dart';
 import '../../design_system/components/glass_container.dart';
 import '../../design_system/components/interactive_glass_card.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
-  void _showTrustDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.security_rounded, color: Color(0xFF8B5CF6)),
-            SizedBox(width: 8),
-            Text('Trust & Device Security',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          ],
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  int _selectedLimitBps = 0; // 0 = unlimited
+  bool _isRestarting = false;
+
+  final Map<int, String> _bandwidthOptions = {
+    0: 'Unlimited (Maximum Line Speed)',
+    5242880: '5 MB/s (Low Background)',
+    10485760: '10 MB/s (Standard)',
+    26214400: '25 MB/s (High Speed)',
+    52428800: '50 MB/s (Very High Speed)',
+  };
+
+  Future<void> _applyBandwidthLimit() async {
+    final client = NodeIpcClient.instance;
+    if (!client.isAuthenticated) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot apply bandwidth limit: Local Node daemon is disconnected.'),
+          backgroundColor: Colors.red,
         ),
-        content: const SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Cryptographic Trust Model',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-              ),
-              SizedBox(height: 6),
-              Text(
-                'PeerLink pairs devices using public Ed25519 identity keys. Fingerprints must be verified during initial pairing to prevent man-in-the-middle attacks.\n\n'
-                'Revocation Policy:\n'
-                'When you revoke trust for a device on this node, its session is closed immediately and subsequent requests are rejected. (Note: If the remote device is offline, it will be rejected as soon as it reconnects).',
-                style: TextStyle(fontSize: 12, height: 1.4),
-              ),
-            ],
+      );
+      return;
+    }
+
+    try {
+      final res = await client.setBandwidthLimit(_selectedLimitBps);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res.accepted
+                ? 'Bandwidth limit applied: ${_bandwidthOptions[_selectedLimitBps]!}'
+                : 'Bandwidth limit rejected by Local Node daemon.'),
+            backgroundColor: res.accepted ? const Color(0xFF10B981) : Colors.red,
           ),
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx),
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF8B5CF6)),
-            child: const Text('Close'),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to set bandwidth limit: $e'),
+            backgroundColor: Colors.red,
           ),
-        ],
-      ),
-    );
+        );
+      }
+    }
   }
 
-  void _showPrivacyDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.shield_rounded, color: Color(0xFF10B981)),
-            SizedBox(width: 8),
-            Text('Safety & Antimalware Policy',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          ],
-        ),
-        content: const SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Antimalware Verification Statuses:',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-              ),
-              SizedBox(height: 8),
-              Text(
-                  '• VERIFIED CLEAN: Inspected by active host antivirus and no threats detected.',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF10B981))),
-              SizedBox(height: 4),
-              Text(
-                  '• SCANNER UNAVAILABLE: Host antivirus is offline or not installed. SHA-256 integrity was verified, but malware inspection was skipped. Never assumed to be clean.',
-                  style: TextStyle(fontSize: 12, color: Color(0xFFF59E0B))),
-              SizedBox(height: 4),
-              Text(
-                  '• MALICIOUS: Known virus signature, disguised executable, or decompression bomb detected. The file is deleted from quarantine immediately.',
-                  style: TextStyle(fontSize: 12, color: Color(0xFFEF4444))),
-              SizedBox(height: 12),
-              Text(
-                'Executable Restrictions:',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-              ),
-              SizedBox(height: 4),
-              Text(
-                'Files with executable extensions (.exe, .bat, .cmd, .sh, .ps1) are held in staging quarantine and will not be launched or committed without explicit confirmation.',
-                style: TextStyle(fontSize: 12, height: 1.4),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx),
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF10B981)),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
+  Future<void> _restartDaemon() async {
+    setState(() => _isRestarting = true);
+    final client = NodeIpcClient.instance;
 
-  void _showSharingDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.folder_shared_rounded, color: Color(0xFF06B6D4)),
-            SizedBox(width: 8),
-            Text('Sharing & Permissions',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          ],
+    if (!client.isAuthenticated) {
+      setState(() => _isRestarting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Local Node daemon is already disconnected.'),
+          backgroundColor: Colors.grey,
         ),
-        content: const SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Guest Sharing vs Trusted Peers:',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-              ),
-              SizedBox(height: 8),
-              Text(
-                '• Trusted Peers: Permanent cryptographic pairing between your own devices. Full bi-directional sync, transfer, and backup capabilities.\n\n'
-                '• Guest Shares: Temporary link with explicit expiration TTL (e.g. 2 hours or 1 day). Strictly read-only by default and isolated from your private libraries.\n\n'
-                '• Sandboxing: Guests are strictly confined to the chosen folder path. Symlinks pointing outside the folder are forbidden.',
-                style: TextStyle(fontSize: 12, height: 1.4),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx),
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF06B6D4)),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
+      );
+      return;
+    }
 
-  void _showNetworkDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.wifi_rounded, color: Color(0xFF2563EB)),
-            SizedBox(width: 8),
-            Text('Network & Transports',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          ],
-        ),
-        content: const SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Direct-First Transport Hierarchy:',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-              ),
-              SizedBox(height: 8),
-              Text(
-                '1. Direct LAN TCP/TLS & QUIC: Transfers prioritize zero-latency local Wi-Fi and Ethernet.\n\n'
-                '2. WAN Direct P2P: Uses UDP hole punching when devices are on separate networks.\n\n'
-                '3. Encrypted Relay Fallback: If both peers are behind symmetric NAT / corporate firewalls, connections flow through an encrypted TURN relay. The relay cannot decrypt your data.',
-                style: TextStyle(fontSize: 12, height: 1.4),
-              ),
-            ],
+    try {
+      final success = await client.restartNode();
+      if (mounted) {
+        setState(() => _isRestarting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(success
+                ? 'Node restart command accepted by daemon.'
+                : 'Restart command failed or rejected.'),
+            backgroundColor: success ? const Color(0xFF10B981) : Colors.red,
           ),
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx),
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF2563EB)),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showStorageDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.storage_rounded, color: Color(0xFF7C3AED)),
-            SizedBox(width: 8),
-            Text('Storage & Maintenance',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          ],
-        ),
-        content: const SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Local Node Storage Policies:',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-              ),
-              SizedBox(height: 8),
-              Text(
-                '• Local SQLite WAL Database: Manages object index and transfer sessions (Max cap: 256 MB with auto-vacuum).\n\n'
-                '• Staging Directories: Incoming chunks are held in temporary staging until full SHA-256 verification. Orphaned staging files older than 24 hours are automatically purged on watchdog ticks.\n\n'
-                '• Operation Journal: Maximum 100,000 entries with automatic log rotation.',
-                style: TextStyle(fontSize: 12, height: 1.4),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx),
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF7C3AED)),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isRestarting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Restart error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   @override
@@ -239,183 +107,307 @@ class SettingsScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Settings & Zero-Trust Safety'),
       ),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-        children: [
-          // Security Invariant Attestation Header
-          GlassContainer(
-            glowColor: const Color(0xFF2563EB),
-            borderRadius: BorderRadius.circular(20),
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+      body: StreamBuilder<IpcConnectionState>(
+        stream: NodeIpcClient.instance.stateStream,
+        initialData: NodeIpcClient.instance.currentState,
+        builder: (context, snapshot) {
+          final ipc = snapshot.data ?? NodeIpcClient.instance.currentState;
+          final isConnected = ipc.status == IpcConnectionStatus.connected;
+
+          return ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+            children: [
+              // Security Invariant Attestation Header
+              GlassContainer(
+                glowColor: const Color(0xFF2563EB),
+                borderRadius: BorderRadius.circular(20),
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF2563EB).withValues(alpha: 0.16),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.verified_rounded,
-                          color: Color(0xFF2563EB), size: 20),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF2563EB).withValues(alpha: 0.16),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.verified_rounded,
+                              color: Color(0xFF2563EB), size: 20),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Zero-Trust Invariant Enforcement',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(height: 8),
                     Text(
-                      'Zero-Trust Invariant Enforcement',
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
+                      'All cryptographic keys, certificates, and transfer staging files are stored exclusively on local storage. No central server has access to private files.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: isDark ? Colors.white60 : Colors.black54,
+                        height: 1.3,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  'All cryptographic keys, certificates, and transfer staging files are stored exclusively on local storage. No central server has access to private files.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: isDark ? Colors.white60 : Colors.black54,
-                    height: 1.3,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
+              ),
+
+              const SizedBox(height: 16),
+
+              // Trust & Devices Summary Card
+              InteractiveGlassCard(
+                glowColor: const Color(0xFF8B5CF6),
+                borderRadius: BorderRadius.circular(20),
+                padding: const EdgeInsets.all(16.0),
+                child: Row(
                   children: [
-                    _buildPill('LOCAL-FIRST', const Color(0xFF10B981)),
-                    _buildPill('SHA-256 INTEGRITY', const Color(0xFF2563EB)),
-                    _buildPill('NO-CLOUD STAGING', const Color(0xFF8B5CF6)),
+                    const Icon(Icons.security_rounded, color: Color(0xFF8B5CF6), size: 22),
+                    const SizedBox(width: 10),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Trust & Devices',
+                          style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          '${DeviceTrustService.instance.devices.length} authoritative peer identity keys stored locally.',
+                          style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
+              ),
 
-          _buildGlassSettingTile(
-            context,
-            icon: Icons.security_rounded,
-            color: const Color(0xFF8B5CF6),
-            title: 'Trust & Devices',
-            subtitle:
-                'Device identity, pairing fingerprints, revocation guarantees',
-            onTap: () => _showTrustDialog(context),
-          ),
-          _buildGlassSettingTile(
-            context,
-            icon: Icons.shield_rounded,
-            color: const Color(0xFF10B981),
-            title: 'Safety & Antimalware',
-            subtitle:
-                'Malware inspection, scanner-unavailable alerts, executable policies',
-            onTap: () => _showPrivacyDialog(context),
-          ),
-          _buildGlassSettingTile(
-            context,
-            icon: Icons.folder_shared_rounded,
-            color: const Color(0xFF06B6D4),
-            title: 'Guest Sharing & Remote Access',
-            subtitle:
-                'Sandboxed guest links, expiration timers, permission boundaries',
-            onTap: () => _showSharingDialog(context),
-          ),
-          _buildGlassSettingTile(
-            context,
-            icon: Icons.wifi_rounded,
-            color: const Color(0xFF2563EB),
-            title: 'Network & Transports',
-            subtitle:
-                'Direct LAN, Netty QUIC/TCP-TLS, end-to-end encrypted relay',
-            onTap: () => _showNetworkDialog(context),
-          ),
-          _buildGlassSettingTile(
-            context,
-            icon: Icons.storage_rounded,
-            color: const Color(0xFF7C3AED),
-            title: 'Storage & Retention',
-            subtitle:
-                'Local SQLite WAL database, staging cleanup, operation limits',
-            onTap: () => _showStorageDialog(context),
-          ),
-        ],
+              const SizedBox(height: 16),
+
+              // Verified Live Status Indicator Card
+              GlassContainer(
+                glowColor: isConnected ? const Color(0xFF10B981) : Colors.amber,
+                borderRadius: BorderRadius.circular(20),
+                padding: const EdgeInsets.all(18.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: (isConnected ? const Color(0xFF10B981) : Colors.amber)
+                                    .withValues(alpha: 0.16),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                isConnected ? Icons.verified_user_rounded : Icons.sensors_off_rounded,
+                                color: isConnected ? const Color(0xFF10B981) : Colors.amber,
+                                size: 22,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Local Node Daemon Status',
+                                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                                ),
+                                Text(
+                                  isConnected ? 'AUTHORITATIVE RUNTIME ACTIVE' : 'DAEMON OFFLINE',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: isConnected ? const Color(0xFF10B981) : Colors.amber,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        FilledButton.tonalIcon(
+                          onPressed: _isRestarting ? null : _restartDaemon,
+                          icon: _isRestarting
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.restart_alt_rounded, size: 16),
+                          label: const Text('Restart Node'),
+                          style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          _buildMetricColumn('PORT', isConnected ? '50051 TLS' : 'N/A', theme),
+                          _buildMetricColumn('VERSION', ipc.nodeVersion ?? '1.0.0', theme),
+                          _buildMetricColumn('HEARTBEATS', '${ipc.activeHeartbeatCount}', theme),
+                          _buildMetricColumn('TRUST STORE', '${DeviceTrustService.instance.devices.length} Peers', theme),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Active Bandwidth Enforcement
+              InteractiveGlassCard(
+                glowColor: const Color(0xFF2563EB),
+                borderRadius: BorderRadius.circular(20),
+                padding: const EdgeInsets.all(18.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.speed_rounded, color: Color(0xFF2563EB), size: 22),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Transfer Bandwidth Limit',
+                          style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Enforce a strict throttling ceiling on outbound and inbound data transfer. Applied directly to the daemon socket engine.',
+                      style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                    const SizedBox(height: 14),
+                    DropdownButtonFormField<int>(
+                      value: _selectedLimitBps,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      ),
+                      items: _bandwidthOptions.entries.map((e) {
+                        return DropdownMenuItem<int>(
+                          value: e.key,
+                          child: Text(e.value, style: const TextStyle(fontSize: 13)),
+                        );
+                      }).toList(),
+                      onChanged: (val) {
+                        if (val != null) {
+                          setState(() => _selectedLimitBps = val);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: FilledButton.icon(
+                        onPressed: _applyBandwidthLimit,
+                        icon: const Icon(Icons.check_circle_rounded, size: 16),
+                        label: const Text('Apply Bandwidth Limit'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF2563EB),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Antimalware Safety Invariants
+              InteractiveGlassCard(
+                glowColor: const Color(0xFF10B981),
+                borderRadius: BorderRadius.circular(20),
+                padding: const EdgeInsets.all(18.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.shield_rounded, color: Color(0xFF10B981), size: 22),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Safety & Antimalware',
+                          style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      '• Executable files (.exe, .bat, .cmd, .ps1, .sh) are held in quarantine and will never be automatically launched or written to primary library folders.\n'
+                      '• Decompression bombs and malicious signatures trigger immediate staging purge.\n'
+                      '• Scanner availability is checked per-transfer; offline scanners are never assumed to be clean.',
+                      style: TextStyle(fontSize: 12, height: 1.4),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Deferred Features Notice (Complying with Product Scope Decision)
+              GlassContainer(
+                glowColor: Colors.blueGrey,
+                borderRadius: BorderRadius.circular(16),
+                padding: const EdgeInsets.all(14.0),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline_rounded, color: Colors.blueGrey, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Experimental tools (Web Beam browser relays, Burn-After-Read ephemeral destruction, Hotspot P2P direct fallback) are deferred pending complete cryptographic and multi-platform runtime verification.',
+                        style: TextStyle(fontSize: 11, color: isDark ? Colors.white60 : Colors.black54),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 
-  Widget _buildPill(String label, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 9,
-          fontWeight: FontWeight.bold,
-          color: color,
+  Widget _buildMetricColumn(String label, String value, ThemeData theme) {
+    return Column(
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 9,
+            fontWeight: FontWeight.bold,
+            color: theme.colorScheme.onSurfaceVariant,
+            letterSpacing: 0.5,
+          ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildGlassSettingTile(
-    BuildContext context, {
-    required IconData icon,
-    required Color color,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    return InteractiveGlassCard(
-      glowColor: color,
-      margin: const EdgeInsets.only(bottom: 12),
-      borderRadius: BorderRadius.circular(18),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      onTap: onTap,
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.15),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, color: color, size: 22),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: isDark ? Colors.white54 : Colors.black54,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Icon(Icons.chevron_right_rounded,
-              size: 20, color: color.withValues(alpha: 0.8)),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

@@ -18,6 +18,8 @@ public class AndroidNotificationController {
     public static final String CHANNEL_TRANSFERS = "peerlink_transfers";
     public static final String CHANNEL_PAIRING = "peerlink_pairing";
     public static final String CHANNEL_SYNC = "peerlink_sync";
+    public static final String CHANNEL_REQUESTS = "peerlink_requests";
+    public static final String CHANNEL_RESULTS = "peerlink_results";
 
     public interface PlatformNotificationBridge {
         void showTransferProgress(String transferId, String title, int progressPercent, long bytesTransferred, long totalBytes);
@@ -25,6 +27,8 @@ public class AndroidNotificationController {
         void showPairingPrompt(String sessionId, PeerId peerId, String peerName, String sasPin);
         void dismissPairingPrompt(String sessionId);
         void showStatusNotification(String title, String message);
+        default void showIncomingTransferPrompt(String transferId, PeerId senderPeer, String peerName, String fileName, long totalBytes, int itemCount) {}
+        default void dismissIncomingTransferPrompt(String transferId) {}
     }
 
     private final PlatformNotificationBridge bridge;
@@ -53,5 +57,18 @@ public class AndroidNotificationController {
 
     public void dismissPairingRequest(String sessionId) {
         bridge.dismissPairingPrompt(sessionId);
+    }
+
+    public void showIncomingTransferRequest(String transferId, PeerId remotePeerId, String peerName, String fileName, long totalBytes, int itemCount) {
+        Objects.requireNonNull(transferId, "transferId must not be null");
+        Objects.requireNonNull(remotePeerId, "remotePeerId must not be null");
+        log.info("Displaying incoming transfer request notification for transfer {} from peer {}", transferId, remotePeerId.getValue());
+        bridge.showIncomingTransferPrompt(transferId, remotePeerId, (peerName != null && !peerName.isEmpty()) ? peerName : remotePeerId.getValue(), fileName, totalBytes, itemCount);
+    }
+
+    public void dismissIncomingTransferRequest(String transferId) {
+        if (transferId != null) {
+            bridge.dismissIncomingTransferPrompt(transferId);
+        }
     }
 }

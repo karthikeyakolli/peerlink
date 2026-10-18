@@ -153,6 +153,35 @@ public final class StagingDirectoryManager {
         channel.force(false);
     }
 
+    public synchronized boolean verifyChunkMatches(String transferId, int itemIndex, long offsetBytes, byte[] data) {
+        if (data == null) {
+            return false;
+        }
+        Path partPath = getStagedPartPath(transferId, itemIndex);
+        FileChannel channel = openChannels.get(partPath);
+        try {
+            if (channel != null && channel.isOpen()) {
+                channel.force(false);
+                if (channel.size() >= offsetBytes + data.length) {
+                    java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocate(data.length);
+                    channel.read(buf, offsetBytes);
+                    return java.util.Arrays.equals(buf.array(), data);
+                }
+            } else if (Files.exists(partPath)) {
+                try (FileChannel fc = FileChannel.open(partPath, StandardOpenOption.READ)) {
+                    if (fc.size() >= offsetBytes + data.length) {
+                        java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocate(data.length);
+                        fc.read(buf, offsetBytes);
+                        return java.util.Arrays.equals(buf.array(), data);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Error verifying chunk match against staged file", e);
+        }
+        return false;
+    }
+
     public synchronized void truncateStagedFile(String transferId, int itemIndex, long validLength) throws IOException {
         Path partPath = getStagedPartPath(transferId, itemIndex);
         closeChannel(partPath);

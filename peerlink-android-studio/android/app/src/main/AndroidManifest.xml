@@ -22,6 +22,12 @@
         android:name="android.permission.ACCESS_FINE_LOCATION"
         android:maxSdkVersion="32" />
 
+    <!-- Camera for Authenticated QR Pairing (Phase 3) -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+
     <!-- Notifications & Foreground Execution -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -88,6 +94,11 @@
             android:name="org.peerlink.app.service.PeerLinkForegroundService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Notification Action Receiver for Inbound Transfers -->
+        <receiver
+            android:name="org.peerlink.app.notification.InboundTransferActionReceiver"
+            android:exported="false" />
 
         <meta-data
             android:name="flutterEmbedding"

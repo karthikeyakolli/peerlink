@@ -1,33 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/node_ipc_client.dart';
+import '../../core/device_trust_service.dart';
 import '../../design_system/components/glass_container.dart';
 import '../../design_system/components/interactive_glass_card.dart';
 
-enum DeviceTrustLevel {
-  trustedPeer,
-  temporaryGuest,
-}
-
-class PairedDevice {
-  final String id;
-  final String name;
-  final String deviceType;
-  final String fingerprint;
-  final DeviceTrustLevel trustLevel;
-  final bool isOnline;
-  final String lastSeen;
-
-  PairedDevice({
-    required this.id,
-    required this.name,
-    required this.deviceType,
-    required this.fingerprint,
-    required this.trustLevel,
-    required this.isOnline,
-    required this.lastSeen,
-  });
-}
+export '../../core/device_trust_service.dart' show PairedDevice, DeviceTrustLevel;
 
 class DevicesScreen extends StatefulWidget {
   const DevicesScreen({super.key});
@@ -39,40 +17,10 @@ class DevicesScreen extends StatefulWidget {
 class _DevicesScreenState extends State<DevicesScreen> {
   final NodeIpcClient _client = NodeIpcClient.instance;
 
-  final List<PairedDevice> _devices = [
-    PairedDevice(
-      id: 'peer_laptop_pro',
-      name: 'MacBook Pro 16" (Work)',
-      deviceType: 'Laptop',
-      fingerprint: 'SHA256:7b9a4f2e1c8d0e3a5f6b9c8d7e6f5a4b',
-      trustLevel: DeviceTrustLevel.trustedPeer,
-      isOnline: true,
-      lastSeen: 'Active now (Direct TCP/TLS)',
-    ),
-    PairedDevice(
-      id: 'peer_pixel_phone',
-      name: 'Pixel 8 Pro (Personal)',
-      deviceType: 'Phone',
-      fingerprint: 'SHA256:3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a',
-      trustLevel: DeviceTrustLevel.trustedPeer,
-      isOnline: false,
-      lastSeen: '18 minutes ago',
-    ),
-    PairedDevice(
-      id: 'guest_collaborator_bob',
-      name: 'Bob (Guest Project Share)',
-      deviceType: 'Desktop',
-      fingerprint: 'SHA256:e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9',
-      trustLevel: DeviceTrustLevel.temporaryGuest,
-      isOnline: true,
-      lastSeen: 'Active now (Sandboxed Read-Only)',
-    ),
-  ];
-
   void _showPairDeviceDialog() {
     final idController = TextEditingController();
     final nameController = TextEditingController();
-    String generatedCode = '749-281';
+    DeviceTrustLevel selectedTrustLevel = DeviceTrustLevel.trustedPeer;
 
     showDialog(
       context: context,
@@ -107,43 +55,36 @@ class _DevicesScreenState extends State<DevicesScreen> {
                 TextField(
                   controller: nameController,
                   decoration: const InputDecoration(
-                    labelText: 'Friendly Device Name (e.g. Living Room Tablet)',
+                    labelText: 'Friendly Device Name',
+                    hintText: 'e.g. Living Room Tablet',
                     border: OutlineInputBorder(),
                   ),
                 ),
-                const SizedBox(height: 16),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.blue.shade200),
-                  ),
-                  child: Column(
-                    children: [
-                      const Text(
-                        'VERIFICATION PIN (SAS)',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blueGrey),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        generatedCode,
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 3,
-                          color: Colors.blue,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Ensure both devices display this exact code to protect against network tampering.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 11, color: Colors.black54),
-                      ),
-                    ],
-                  ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Trust Authorization Level:',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 6),
+                SegmentedButton<DeviceTrustLevel>(
+                  segments: const [
+                    ButtonSegment(
+                      value: DeviceTrustLevel.trustedPeer,
+                      label: Text('Trusted Peer'),
+                      icon: Icon(Icons.verified_user_rounded, size: 16),
+                    ),
+                    ButtonSegment(
+                      value: DeviceTrustLevel.temporaryGuest,
+                      label: Text('Guest (Scoped)'),
+                      icon: Icon(Icons.person_outline_rounded, size: 16),
+                    ),
+                  ],
+                  selected: {selectedTrustLevel},
+                  onSelectionChanged: (newSelection) {
+                    setDialogState(() {
+                      selectedTrustLevel = newSelection.first;
+                    });
+                  },
                 ),
               ],
             ),
@@ -161,17 +102,22 @@ class _DevicesScreenState extends State<DevicesScreen> {
                     : (targetId.isNotEmpty ? targetId : 'New Paired Device');
 
                 if (targetId.isNotEmpty) {
-                  setState(() {
-                    _devices.add(PairedDevice(
+                  final fingerprint = DeviceTrustService.instance.getLocalFingerprint(targetId);
+                  final isGuest = selectedTrustLevel == DeviceTrustLevel.temporaryGuest;
+
+                  DeviceTrustService.instance.pairDevice(
+                    PairedDevice(
                       id: targetId,
                       name: name,
                       deviceType: 'Device',
-                      fingerprint: 'SHA256:1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d',
-                      trustLevel: DeviceTrustLevel.trustedPeer,
+                      fingerprint: fingerprint,
+                      trustLevel: selectedTrustLevel,
                       isOnline: true,
-                      lastSeen: 'Just paired',
-                    ));
-                  });
+                      lastSeen: 'Active now (Direct P2P)',
+                      scopedCapabilities: isGuest ? const ['READ'] : const ['READ', 'WRITE', 'SYNC'],
+                    ),
+                  );
+
                   Navigator.pop(ctx);
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
@@ -226,9 +172,9 @@ class _DevicesScreenState extends State<DevicesScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '• Trust token is invalidated immediately on this node.\n'
+                    '• Trust token is invalidated immediately in TrustStore.\n'
                     '• Any active session with this device will be disconnected.\n'
-                    '• Note: If the remote device is currently offline, it will be rejected as soon as it attempts to reconnect.',
+                    '• The device will be rejected if it attempts future transfers.',
                     style: TextStyle(fontSize: 12, color: Colors.red.shade900),
                   ),
                 ],
@@ -243,9 +189,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
           ),
           FilledButton(
             onPressed: () {
-              setState(() {
-                _devices.removeWhere((d) => d.id == device.id);
-              });
+              DeviceTrustService.instance.revokeDevice(device.id);
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
@@ -262,10 +206,123 @@ class _DevicesScreenState extends State<DevicesScreen> {
     );
   }
 
+  void _showRemoteAccessDialog(PairedDevice device) {
+    if (!device.isOnline) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.cloud_off_rounded, color: Colors.grey),
+              SizedBox(width: 8),
+              Text('Device Offline'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${device.name} (${device.id}) is currently offline.',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Device is currently offline or unreachable. Remote browsing is unavailable until this device comes online on the local network or established relay.',
+                style: TextStyle(fontSize: 13, height: 1.4),
+              ),
+            ],
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    // Device is online: show scoped remote access viewer
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.folder_shared_rounded, color: Colors.teal),
+            const SizedBox(width: 8),
+            Expanded(child: Text('Remote Access: ${device.name}')),
+          ],
+        ),
+        content: SizedBox(
+          width: 440,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.teal.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.teal.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Authorized Scopes:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.teal)),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Capabilities: ${device.scopedCapabilities.join(", ")}'
+                      '\nTrust: ${device.trustLevel == DeviceTrustLevel.trustedPeer ? "Full Trusted Peer" : "Temporary Guest Share"}'
+                      '\nSession: Active TLS Direct',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Available Remote Shares:',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+              const SizedBox(height: 8),
+              ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.folder_open_rounded, color: Colors.amber),
+                title: const Text('Shared Documents', style: TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: const Text('3 items · Scoped Read-Only'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Accessing "${device.name}" Shared Documents...'),
+                      backgroundColor: Colors.teal,
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final myPeerId = _client.currentState.peerId ?? 'local-desktop-node';
+    final localFingerprint = DeviceTrustService.instance.getLocalFingerprint(myPeerId);
 
     return Scaffold(
       appBar: AppBar(
@@ -278,177 +335,218 @@ class _DevicesScreenState extends State<DevicesScreen> {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-        children: [
-          // Trust Explanation Glass Banner
-          GlassContainer(
-            glowColor: const Color(0xFF8B5CF6),
-            borderRadius: BorderRadius.circular(20),
-            padding: const EdgeInsets.all(16.0),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF8B5CF6).withValues(alpha: 0.18),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.shield_rounded,
-                      color: Color(0xFF8B5CF6), size: 22),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Direct Cryptographic Trust Model',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        'PeerLink never relies on cloud authentication. Devices communicate using direct Ed25519 public keys without central servers.',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
+      body: StreamBuilder<List<PairedDevice>>(
+        stream: DeviceTrustService.instance.devicesStream,
+        initialData: DeviceTrustService.instance.devices,
+        builder: (context, snapshot) {
+          final devices = snapshot.data ?? [];
 
-          // This Device Node Card (InteractiveGlassCard)
-          InteractiveGlassCard(
-            glowColor: const Color(0xFF8B5CF6),
-            borderRadius: BorderRadius.circular(22),
-            padding: const EdgeInsets.all(18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          return ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+            children: [
+              // Trust Explanation Glass Banner
+              GlassContainer(
+                glowColor: const Color(0xFF8B5CF6),
+                borderRadius: BorderRadius.circular(20),
+                padding: const EdgeInsets.all(16.0),
+                child: Row(
                   children: [
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF8B5CF6).withValues(alpha: 0.15),
+                        color: const Color(0xFF8B5CF6).withValues(alpha: 0.18),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.laptop_windows_rounded,
+                      child: const Icon(Icons.shield_rounded,
                           color: Color(0xFF8B5CF6), size: 22),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 14),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
+                          Text(
+                            'Direct Cryptographic Trust Model',
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            'PeerLink never relies on cloud authentication. Devices communicate using direct Ed25519 public keys without central servers.',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // This Device Node Card
+              InteractiveGlassCard(
+                glowColor: const Color(0xFF8B5CF6),
+                borderRadius: BorderRadius.circular(22),
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF8B5CF6).withValues(alpha: 0.15),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.laptop_windows_rounded,
+                              color: Color(0xFF8B5CF6), size: 22),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                'This Device (Desktop Node)',
-                                style: theme.textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14,
-                                ),
+                              Row(
+                                children: [
+                                  Text(
+                                    'This Device (Desktop Node)',
+                                    style: theme.textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFF10B981),
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(width: 8),
-                              Container(
-                                width: 8,
-                                height: 8,
-                                decoration: const BoxDecoration(
-                                  color: Color(0xFF10B981),
-                                  shape: BoxShape.circle,
-                                ),
+                              Text(
+                                'ID: $myPeerId',
+                                style: const TextStyle(fontSize: 11, color: Colors.grey),
                               ),
                             ],
                           ),
-                          Text(
-                            'ID: $myPeerId',
-                            style: const TextStyle(fontSize: 11, color: Colors.grey),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF10B981).withValues(alpha: 0.14),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFF10B981)),
-                      ),
-                      child: const Text(
-                        'THIS NODE',
-                        style: TextStyle(
-                          color: Color(0xFF10B981),
-                          fontWeight: FontWeight.bold,
-                          fontSize: 10,
                         ),
-                      ),
-                    ),
-                  ],
-                ),
-                const Divider(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Public Key Fingerprint (Ed25519 · Keystore):',
-                              style: TextStyle(fontSize: 10, color: Colors.grey)),
-                          SizedBox(height: 2),
-                          Text(
-                            'SHA256:9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c',
-                            style: TextStyle(fontFamily: 'monospace', fontSize: 11, fontWeight: FontWeight.bold),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFF10B981)),
                           ),
-                        ],
-                      ),
+                          child: const Text(
+                            'THIS NODE',
+                            style: TextStyle(
+                              color: Color(0xFF10B981),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.copy_rounded, size: 18),
-                      tooltip: 'Copy Fingerprint',
-                      onPressed: () {
-                        Clipboard.setData(const ClipboardData(text: 'SHA256:9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c'));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Fingerprint copied to clipboard!')),
-                        );
-                      },
+                    const Divider(height: 24),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Public Key Fingerprint (Ed25519 · Keystore):',
+                                  style: TextStyle(fontSize: 10, color: Colors.grey)),
+                              const SizedBox(height: 2),
+                              Text(
+                                localFingerprint,
+                                style: const TextStyle(fontFamily: 'monospace', fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.copy_rounded, size: 18),
+                          tooltip: 'Copy Fingerprint',
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: localFingerprint));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Fingerprint copied to clipboard!')),
+                            );
+                          },
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
+              ),
+              const SizedBox(height: 20),
 
-          // Section Title
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Paired Devices (${_devices.length})',
-                style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+              // Section Title
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Paired Devices (${devices.length})',
+                    style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed: _showPairDeviceDialog,
+                    icon: const Icon(Icons.add_rounded, size: 16),
+                    label: const Text('Pair Device'),
+                    style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+                  ),
+                ],
               ),
-              FilledButton.tonalIcon(
-                onPressed: _showPairDeviceDialog,
-                icon: const Icon(Icons.add_rounded, size: 16),
-                label: const Text('Pair Device'),
-                style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
-              ),
+              const SizedBox(height: 12),
+
+              // Paired Devices List or Empty State
+              if (devices.isEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: theme.dividerColor.withValues(alpha: 0.1)),
+                  ),
+                  child: Column(
+                    children: [
+                      Icon(Icons.devices_other_rounded, size: 40, color: theme.disabledColor),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'No paired devices yet',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Pair your laptop, tablet, or phone to enable instant direct P2P transfers and remote access.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        onPressed: _showPairDeviceDialog,
+                        icon: const Icon(Icons.qr_code_scanner_rounded, size: 16),
+                        label: const Text('Pair a Device Now'),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                ...devices.map((device) => _buildDeviceCard(context, device)),
             ],
-          ),
-          const SizedBox(height: 12),
-
-          // Paired Devices List
-          ..._devices.map((device) => _buildDeviceCard(context, device)),
-        ],
+          );
+        },
       ),
     );
   }
@@ -475,7 +573,11 @@ class _DevicesScreenState extends State<DevicesScreen> {
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
-                  device.deviceType == 'Phone' ? Icons.smartphone_rounded : Icons.computer_rounded,
+                  device.deviceType.toLowerCase() == 'phone'
+                      ? Icons.smartphone_rounded
+                      : (device.deviceType.toLowerCase() == 'tablet'
+                          ? Icons.tablet_mac_rounded
+                          : Icons.computer_rounded),
                   color: glow,
                   size: 20,
                 ),
@@ -499,7 +601,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
-                            device.isOnline ? '1.8 ms' : 'Offline',
+                            device.isOnline ? 'Online' : 'Offline',
                             style: TextStyle(
                               fontSize: 9,
                               fontWeight: FontWeight.bold,
@@ -559,6 +661,15 @@ class _DevicesScreenState extends State<DevicesScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
+              FilledButton.tonalIcon(
+                onPressed: () => _showRemoteAccessDialog(device),
+                icon: const Icon(Icons.folder_shared_rounded, size: 15),
+                label: const Text('Access / Browse'),
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+              const SizedBox(width: 8),
               OutlinedButton.icon(
                 onPressed: () => _showRevokeDialog(device),
                 icon: const Icon(Icons.link_off_rounded, size: 15),

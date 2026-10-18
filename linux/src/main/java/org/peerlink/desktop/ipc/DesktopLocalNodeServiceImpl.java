@@ -41,11 +41,11 @@ public final class DesktopLocalNodeServiceImpl extends DesktopLocalNodeServiceGr
      */
     public static final class IpcSessionRecord {
         private final String sessionToken;
-        private final int clientPid;
+        private final long clientPid;
         private final long createdAtMs;
         private final long expiresAtMs;
 
-        public IpcSessionRecord(String sessionToken, int clientPid, long createdAtMs, long expiresAtMs) {
+        public IpcSessionRecord(String sessionToken, long clientPid, long createdAtMs, long expiresAtMs) {
             this.sessionToken = sessionToken;
             this.clientPid = clientPid;
             this.createdAtMs = createdAtMs;
@@ -53,7 +53,7 @@ public final class DesktopLocalNodeServiceImpl extends DesktopLocalNodeServiceGr
         }
 
         public String getSessionToken() { return sessionToken; }
-        public int getClientPid() { return clientPid; }
+        public long getClientPid() { return clientPid; }
         public long getCreatedAtMs() { return createdAtMs; }
         public long getExpiresAtMs() { return expiresAtMs; }
 
@@ -209,6 +209,25 @@ public final class DesktopLocalNodeServiceImpl extends DesktopLocalNodeServiceGr
         }
     }
 
+    public AuthenticateIpcResponse authenticateDirect(String token, long clientPid, String clientVersion) {
+        final java.util.concurrent.atomic.AtomicReference<AuthenticateIpcResponse> ref = new java.util.concurrent.atomic.AtomicReference<>();
+        authenticate(AuthenticateIpcRequest.newBuilder()
+                .setAuthToken(token)
+                .setClientPid(clientPid)
+                .setClientVersion(clientVersion)
+                .build(), new StreamObserver<>() {
+            @Override
+            public void onNext(AuthenticateIpcResponse value) {
+                ref.set(value);
+            }
+            @Override
+            public void onError(Throwable t) {}
+            @Override
+            public void onCompleted() {}
+        });
+        return ref.get();
+    }
+
     public boolean isSessionValid(String token) {
         if (token == null || token.isBlank()) {
             return false;
@@ -241,7 +260,7 @@ public final class DesktopLocalNodeServiceImpl extends DesktopLocalNodeServiceGr
         return activeSessions.size();
     }
 
-    public String createCustomSession(int clientPid, long ttlMs) {
+    public String createCustomSession(long clientPid, long ttlMs) {
         byte[] rand = new byte[32];
         secureRandom.nextBytes(rand);
         String sessionToken = "sess_" + Base64.getUrlEncoder().withoutPadding().encodeToString(rand);
@@ -498,11 +517,10 @@ public final class DesktopLocalNodeServiceImpl extends DesktopLocalNodeServiceGr
                         broadcastTransferProgress(TransferProgress.newBuilder()
                                 .setTransferId(transferId)
                                 .setState(TransferState.TRANSFER_STATE_FAILED)
-                                .setBytesTransferred(0)
+                                .setTransferredBytes(0L)
                                 .setTotalBytes(manifest.getTotalBytes())
                                 .setCurrentItemIndex(0)
                                 .setTotalItems(manifest.getItemsCount())
-                                .setPercentComplete(0.0f)
                                 .build());
                     }
                 } catch (Exception e) {

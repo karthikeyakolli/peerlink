@@ -40,6 +40,10 @@ public class AndroidStorageAbstraction implements PeerFileProvider {
         this.contentResolver = Objects.requireNonNull(contentResolver, "contentResolver must not be null");
     }
 
+    public ContentResolverBridge getContentResolverBridge() {
+        return contentResolver;
+    }
+
     public void registerMapping(ObjectIdentity objectId, String contentUri) {
         objectToUriMap.put(objectId, contentUri);
         uriToObjectMap.put(contentUri, objectId);

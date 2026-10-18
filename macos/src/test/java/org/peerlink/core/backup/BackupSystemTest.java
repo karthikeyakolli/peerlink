@@ -505,4 +505,63 @@ class BackupSystemTest {
         RestoreExecutionResult failResult = blindEngine.executeRestore(failPlan, null, 1);
         assertFalse(failResult.success(), "Restore without key must fail");
     }
+
+    // ── 13. Altered Manifest & Corrupted Content Rejection ───────────────────
+
+    @Test
+    @DisplayName("13. Altered manifest: Corrupted payload checksum or tampered manifest content is rejected during restore")
+    void testAlteredManifestRejectionDuringRestore() throws Exception {
+        createFile(sourceDir, "valid.txt", "Valid Plaintext Content");
+
+        BackupJobConfig config = new BackupJobConfig(
+                "job_tamper", "TamperJob", sourceDir, "peer_target_1",
+                RetentionPolicy.keepLastN(5), false, null, Set.of(), Set.of()
+        );
+
+        BackupManifest manifest = backupEngine.performBackup(config, BackupType.FULL);
+        HistoricalVersion validItem = manifest.getItemByPath("valid.txt").orElseThrow();
+
+        // Simulate an attacker corrupting the storage payload in the target repository
+        byte[] corruptedBytes = "TAMPERED PAYLOAD DATA".getBytes(StandardCharsets.UTF_8);
+        backupTarget.storePayload(validItem.getStorageHash(), corruptedBytes);
+
+        // Attempt restore
+        RestorePlan plan = backupEngine.planRestore(
+                manifest.getBackupId(), restoreDir, RestoreConflictPolicy.OVERWRITE_WITH_NEW_VERSION, null
+        );
+        RestoreExecutionResult result = backupEngine.executeRestore(plan, null, 1);
+
+        assertFalse(result.success(), "Restore of corrupted storage payload must fail");
+        assertFalse(result.errors().isEmpty(), "Error report must document the corruption");
+        assertFalse(Files.exists(restoreDir.resolve("valid.txt")),
+                "Corrupted payload must NEVER be committed to the target restore filesystem");
+    }
+
+    // ── 14. Merkle Root Hash Authenticity & Proof Validation ─────────────────
+
+    @Test
+    @DisplayName("14. Merkle snapshot: Manifest exposes valid Merkle root and verifiable inclusion proofs")
+    void testMerkleRootHashIntegrityAcrossBackupCycles() throws Exception {
+        createFile(sourceDir, "file1.txt", "Content Alpha");
+        createFile(sourceDir, "file2.txt", "Content Beta");
+        createFile(sourceDir, "file3.txt", "Content Gamma");
+
+        BackupJobConfig config = new BackupJobConfig(
+                "job_merkle", "MerkleJob", sourceDir, "peer_target_1",
+                RetentionPolicy.keepLastN(5), false, null, Set.of(), Set.of()
+        );
+
+        BackupManifest manifest = backupEngine.performBackup(config, BackupType.FULL);
+        assertNotNull(manifest.getMerkleRootHash(), "Manifest must possess a Merkle root hash");
+
+        SnapshotMerkleTree tree = SnapshotMerkleTree.build(manifest.getItems().values());
+        assertEquals(tree.getRootHash(), manifest.getMerkleRootHash());
+
+        // Verify proofs for each file
+        for (HistoricalVersion item : manifest.getActiveItems()) {
+            List<SnapshotMerkleTree.ProofNode> proof = tree.generateProof(item.getRelativePath());
+            assertTrue(SnapshotMerkleTree.verifyProof(item, proof, manifest.getMerkleRootHash()),
+                    "Proof for " + item.getRelativePath() + " must verify against manifest root hash");
+        }
+    }
 }

@@ -397,11 +397,38 @@ public class PeerSessionManager implements Closeable {
         return remote.getMajor() == localProtocolVersion.getMajor();
     }
 
+    public interface SessionLifecycleListener {
+        void onSessionEstablished(PeerSession session);
+        default void onSessionClosed(PeerSession session) {}
+    }
+
+    private final List<SessionLifecycleListener> sessionLifecycleListeners = new CopyOnWriteArrayList<>();
+
+    public void addSessionLifecycleListener(SessionLifecycleListener listener) {
+        if (listener != null) {
+            sessionLifecycleListeners.add(listener);
+        }
+    }
+
+    public void removeSessionLifecycleListener(SessionLifecycleListener listener) {
+        if (listener != null) {
+            sessionLifecycleListeners.remove(listener);
+        }
+    }
+
     private void registerSession(PeerSession session) {
         String peerId = session.getRemotePeer().getPeerId().getValue();
         String sessId = session.getSessionId().getValue();
         activeSessionsByPeerId.put(peerId, session);
         activeSessionsBySessionId.put(sessId, session);
+
+        for (SessionLifecycleListener listener : sessionLifecycleListeners) {
+            try {
+                listener.onSessionEstablished(session);
+            } catch (Exception e) {
+                log.error("Error in session established listener for session {}: {}", sessId, e.getMessage(), e);
+            }
+        }
 
         session.getConnection().addLifecycleListener(new ConnectionLifecycleListener() {
             @Override
@@ -410,6 +437,11 @@ public class PeerSessionManager implements Closeable {
                     activeSessionsByPeerId.remove(peerId, session);
                     activeSessionsBySessionId.remove(sessId, session);
                     log.info("Session [{}] deregistered following connection close", sessId);
+                    for (SessionLifecycleListener listener : sessionLifecycleListeners) {
+                        try {
+                            listener.onSessionClosed(session);
+                        } catch (Exception ignored) {}
+                    }
                 }
             }
 

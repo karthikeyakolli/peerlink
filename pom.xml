@@ -13,9 +13,9 @@
     <description>PeerLink privacy-first distributed personal data platform</description>
 
     <modules>
-        <module>protocol</module>
-        <module>core</module>
-        <module>desktop-node</module>
+        <module>windows</module>
+        <module>linux</module>
+        <module>macos</module>
     </modules>
 
     <properties>

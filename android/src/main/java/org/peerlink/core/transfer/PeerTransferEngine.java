@@ -12,8 +12,10 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.FileTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -198,7 +200,7 @@ public final class PeerTransferEngine {
                     .setAccepted(false)
                     .setRejectionReason(validationError)
                     .setError(ErrorDetail.newBuilder()
-                            .setCode(ErrorCode.ERROR_CODE_INVALID_ARGUMENT)
+                            .setCode(ErrorCode.ERROR_CODE_INTERNAL_ERROR)
                             .setHumanSummary(validationError)
                             .build())
                     .build();
@@ -436,6 +438,18 @@ public final class PeerTransferEngine {
         // Duplicate and Conflicting chunk handling
         Set<Long> ackedChunks = sessionJournal.getAckedChunks(transferId, itemIndex);
         if (ackedChunks.contains(chunkIndex)) {
+            // Verify if incoming data differs from what was already staged
+            if (!stagingManager.verifyChunkMatches(transferId, itemIndex, offset, data)) {
+                return TransferChunkAck.newBuilder()
+                        .setTransferId(transferId)
+                        .setItemIndex(itemIndex)
+                        .setChunkIndex(chunkIndex)
+                        .setSuccess(false)
+                        .setRetryRequested(false)
+                        .setErrorMessage("Conflicting chunk data for already acknowledged chunk")
+                        .build();
+            }
+
             // If hash is present, check for conflicting data
             if (chunk.getChunkSha256() != null && !chunk.getChunkSha256().isBlank()) {
                 String computed = FileManifestBuilder.calculateSha256Hex(data);
@@ -865,9 +879,23 @@ public final class PeerTransferEngine {
             List<Path> sourcePaths,
             Consumer<TransferProgress> progressCallback) throws Exception {
 
-        TransferSessionCoordinator coordinator = new TransferSessionCoordinator(session);
-        TransferSessionSender sender = new TransferSessionSender(session, coordinator, bandwidthLimiter, maxChunkRetries);
-        return sender.send(manifest, sourcePaths, progressCallback);
+        String transferId = manifest.getTransferId();
+        TransferProgressTracker tracker = new TransferProgressTracker(
+                transferId, manifest.getTotalBytes(), manifest.getItemsCount(), progressCallback);
+        activeTransfers.put(transferId, tracker);
+
+        try {
+            TransferSessionCoordinator coordinator;
+            if (session.getPayloadHandler() instanceof TransferSessionCoordinator existing) {
+                coordinator = existing;
+            } else {
+                coordinator = new TransferSessionCoordinator(session);
+            }
+            TransferSessionSender sender = new TransferSessionSender(session, coordinator, bandwidthLimiter, maxChunkRetries, tracker);
+            return sender.send(manifest, sourcePaths, progressCallback);
+        } finally {
+            activeTransfers.remove(transferId);
+        }
     }
 
     /**
@@ -1269,7 +1297,7 @@ public final class PeerTransferEngine {
                         anyCommitted = true;
                         try {
                             String sha = FileManifestBuilder.calculateSha256Hex(destFile);
-                            if (!sha.equalsIgnoreCase(item.getSha256())) {
+                            if (!sha.equalsIgnoreCase(item.getSha256Hex())) {
                                 allCommitted = false;
                             }
                         } catch (Exception e) {

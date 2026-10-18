@@ -66,9 +66,9 @@ public class TransferSessionReceiver {
         }
 
         // 3. Sender Identity Binding Invariant
-        if (!offer.getManifest().getSenderPeerId().equals(remotePeerId)) {
+        if (!offer.getManifest().getSenderPeerId().getValue().equals(remotePeerId)) {
             log.warn("Rejected offer {}: Sender peer in manifest ({}) does not match authenticated session peer ({})",
-                    transferId, offer.getManifest().getSenderPeerId(), remotePeerId);
+                    transferId, offer.getManifest().getSenderPeerId().getValue(), remotePeerId);
             sendResponse(session, TransferResponse.newBuilder()
                     .setTransferId(transferId)
                     .setAccepted(false)

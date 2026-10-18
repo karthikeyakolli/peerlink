@@ -38,19 +38,19 @@ try {
     $results["Java Core & Desktop Reactor"] = "FAILED: $_"
 }
 
-# 3. Android Studio Edition Tests (Flutter 16 tests)
-Write-Host "`n[3/6] Running Android Studio Edition Tests (16 Tests)..." -ForegroundColor Yellow
+# 3. Android Studio Edition Tests (Flutter 25 tests)
+Write-Host "`n[3/6] Running Android Studio Edition Tests (25 Tests)..." -ForegroundColor Yellow
 try {
     Push-Location (Join-Path $repoRoot "peerlink-android-studio")
     flutter test
     if ($LASTEXITCODE -eq 0) {
-        $results["Android Studio Edition (16 Tests)"] = "PASSED (100% Green)"
+        $results["Android Studio Edition (25 Tests)"] = "PASSED (100% Green)"
     } else {
-        $results["Android Studio Edition (16 Tests)"] = "FAILED (Exit code $LASTEXITCODE)"
+        $results["Android Studio Edition (25 Tests)"] = "FAILED (Exit code $LASTEXITCODE)"
     }
     Pop-Location
 } catch {
-    $results["Android Studio Edition (16 Tests)"] = "FAILED: $_"
+    $results["Android Studio Edition (25 Tests)"] = "FAILED: $_"
 }
 
 # 4. Android Native Gradle Compilation
@@ -72,23 +72,23 @@ if (-not $SkipGradle) {
     $results["Android Native APK Build"] = "SKIPPED"
 }
 
-# 5. Windows Desktop Flutter Tests (12 tests)
-Write-Host "`n[5/6] Running Windows Desktop App Tests (12 Tests)..." -ForegroundColor Yellow
+# 5. Windows Desktop Flutter Tests (23 tests)
+Write-Host "`n[5/6] Running Windows Desktop App Tests (23 Tests)..." -ForegroundColor Yellow
 try {
     Push-Location (Join-Path $repoRoot "windows\app\flutter")
     flutter test
     if ($LASTEXITCODE -eq 0) {
-        $results["Windows Desktop App (12 Tests)"] = "PASSED (100% Green)"
+        $results["Windows Desktop App (23 Tests)"] = "PASSED (100% Green)"
     } else {
-        $results["Windows Desktop App (12 Tests)"] = "FAILED (Exit code $LASTEXITCODE)"
+        $results["Windows Desktop App (23 Tests)"] = "FAILED (Exit code $LASTEXITCODE)"
     }
     Pop-Location
 } catch {
-    $results["Windows Desktop App (12 Tests)"] = "FAILED: $_"
+    $results["Windows Desktop App (23 Tests)"] = "FAILED: $_"
 }
 
-# 6. Linux & macOS Desktop Flutter Tests (24 tests total)
-Write-Host "`n[6/6] Running Linux & macOS Desktop App Tests (24 Tests)..." -ForegroundColor Yellow
+# 6. Linux & macOS Desktop Flutter Tests (46 tests total)
+Write-Host "`n[6/6] Running Linux & macOS Desktop App Tests (46 Tests)..." -ForegroundColor Yellow
 try {
     Push-Location (Join-Path $repoRoot "linux\app\flutter")
     flutter test
@@ -101,12 +101,12 @@ try {
     Pop-Location
 
     if ($linuxPassed -and $macosPassed) {
-        $results["Linux & macOS Desktop Apps (24 Tests)"] = "PASSED (100% Green)"
+        $results["Linux & macOS Desktop Apps (46 Tests)"] = "PASSED (100% Green)"
     } else {
-        $results["Linux & macOS Desktop Apps (24 Tests)"] = "FAILED"
+        $results["Linux & macOS Desktop Apps (46 Tests)"] = "FAILED"
     }
 } catch {
-    $results["Linux & macOS Desktop Apps (24 Tests)"] = "FAILED: $_"
+    $results["Linux & macOS Desktop Apps (46 Tests)"] = "FAILED: $_"
 }
 
 $elapsed = (Get-Date) - $startTime

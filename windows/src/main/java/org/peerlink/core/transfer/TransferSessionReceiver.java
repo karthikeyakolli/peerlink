@@ -6,7 +6,6 @@ import org.peerlink.protocol.v1.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.nio.file.Path;
 
 /**
@@ -95,19 +94,20 @@ public class TransferSessionReceiver {
             return;
         }
 
+        TransferChunkAck ack;
         try {
-            TransferChunkAck ack = engine.handleIncomingChunk(chunk);
-            sendChunkAck(session, ack);
-        } catch (IOException e) {
-            log.error("Failed to handle incoming chunk for transfer {}: {}", chunk.getTransferId(), e.getMessage(), e);
-            sendChunkAck(session, TransferChunkAck.newBuilder()
+            ack = engine.handleIncomingChunk(chunk);
+        } catch (java.io.IOException e) {
+            log.error("IOException handling chunk for transfer [{}]: {}", chunk.getTransferId(), e.getMessage());
+            ack = TransferChunkAck.newBuilder()
                     .setTransferId(chunk.getTransferId())
                     .setItemIndex(chunk.getItemIndex())
                     .setChunkIndex(chunk.getChunkIndex())
                     .setSuccess(false)
-                    .setErrorMessage("IO error writing chunk: " + e.getMessage())
-                    .build());
+                    .setErrorMessage("I/O error processing chunk: " + e.getMessage())
+                    .build();
         }
+        sendChunkAck(session, ack);
     }
 
     public void handleCommit(PeerSession session, TransferCommitSignal commit) {

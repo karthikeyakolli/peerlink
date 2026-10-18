@@ -32,6 +32,8 @@ public class AndroidNodeFacade {
     private final AndroidClipboardAdapter clipboardAdapter;
     private final AndroidDiscoveryEngine discoveryEngine;
     private final AndroidNotificationController notificationController;
+    private final org.peerlink.core.operation.OperationJournal operationJournal;
+    private final org.peerlink.core.transfer.PeerTransferEngine transferEngine;
 
     private final ConcurrentMap<String, String> activePairingSessions = new ConcurrentHashMap<>();
     private final List<TransferEventListener> transferListeners = new ArrayList<>();
@@ -44,12 +46,25 @@ public class AndroidNodeFacade {
                              AndroidClipboardAdapter clipboardAdapter,
                              AndroidDiscoveryEngine discoveryEngine,
                              AndroidNotificationController notificationController) {
+        this(stateMachine, keystoreManager, storageAbstraction, clipboardAdapter, discoveryEngine, notificationController, null, null);
+    }
+
+    public AndroidNodeFacade(AndroidNodeStateMachine stateMachine,
+                             AndroidKeystoreManager keystoreManager,
+                             AndroidStorageAbstraction storageAbstraction,
+                             AndroidClipboardAdapter clipboardAdapter,
+                             AndroidDiscoveryEngine discoveryEngine,
+                             AndroidNotificationController notificationController,
+                             org.peerlink.core.operation.OperationJournal operationJournal,
+                             org.peerlink.core.transfer.PeerTransferEngine transferEngine) {
         this.stateMachine = Objects.requireNonNull(stateMachine, "stateMachine must not be null");
         this.keystoreManager = Objects.requireNonNull(keystoreManager, "keystoreManager must not be null");
         this.storageAbstraction = Objects.requireNonNull(storageAbstraction, "storageAbstraction must not be null");
         this.clipboardAdapter = Objects.requireNonNull(clipboardAdapter, "clipboardAdapter must not be null");
         this.discoveryEngine = Objects.requireNonNull(discoveryEngine, "discoveryEngine must not be null");
         this.notificationController = Objects.requireNonNull(notificationController, "notificationController must not be null");
+        this.operationJournal = operationJournal;
+        this.transferEngine = transferEngine;
     }
 
     public synchronized void start() {
@@ -110,6 +125,14 @@ public class AndroidNodeFacade {
         return notificationController;
     }
 
+    public org.peerlink.core.operation.OperationJournal getOperationJournal() {
+        return operationJournal;
+    }
+
+    public org.peerlink.core.transfer.PeerTransferEngine getTransferEngine() {
+        return transferEngine;
+    }
+
     public void addTransferListener(TransferEventListener listener) {
         transferListeners.add(Objects.requireNonNull(listener));
     }
@@ -134,22 +157,51 @@ public class AndroidNodeFacade {
         if (getCurrentState() == AndroidNodeState.UNAVAILABLE) {
             throw new IllegalStateException("Cannot initiate send: Android node is UNAVAILABLE");
         }
-
-        String transferId = "tx_" + UUID.randomUUID().toString().replace("-", "");
-        long totalBytes = 0;
-        String firstFileName = "File";
-
-        for (String uri : contentUris) {
-            Optional<PeerFileHandle> handle = storageAbstraction.resolveByPhysicalPath(uri);
-            if (handle.isPresent()) {
-                totalBytes += handle.get().getSizeBytes();
-                firstFileName = handle.get().getDisplayName();
-            }
+        if (contentUris == null || contentUris.isEmpty()) {
+            throw new IllegalArgumentException("Cannot initiate send: contentUris list is empty");
         }
 
+        // 1. Resolve and validate EVERY SAF URI before recording operation or emitting events
+        List<PeerFileHandle> handles = new ArrayList<>();
+        List<String> targetNames = new ArrayList<>();
+        long totalBytes = 0;
+
+        for (String uri : contentUris) {
+            Optional<PeerFileHandle> handleOpt = storageAbstraction.resolveByPhysicalPath(uri);
+            if (handleOpt.isEmpty()) {
+                throw new java.io.FileNotFoundException("Cannot resolve SAF content URI: " + uri);
+            }
+            PeerFileHandle handle = handleOpt.get();
+            handles.add(handle);
+            targetNames.add(handle.getDisplayName());
+            totalBytes += handle.getSizeBytes();
+        }
+
+        String firstFileName = targetNames.isEmpty() ? "File" : targetNames.get(0);
+        String transferId = "tx_" + UUID.randomUUID().toString().replace("-", "");
+        String opId = "op_send_" + UUID.randomUUID().toString().replace("-", "");
+        long now = System.currentTimeMillis();
+
+        // 2. Durably commit operation record to OperationJournal BEFORE emitting any event
+        if (operationJournal != null) {
+            org.peerlink.core.operation.OperationRecord record = new org.peerlink.core.operation.OperationRecord(
+                    opId,
+                    org.peerlink.core.operation.OperationIntent.SEND,
+                    keystoreManager.getPeerId().getValue(),
+                    targetNames,
+                    org.peerlink.core.operation.OperationState.CREATED,
+                    "idemp_" + transferId,
+                    now,
+                    now
+            );
+            operationJournal.recordOperation(record);
+            operationJournal.recordJournalStage(opId, org.peerlink.core.operation.JournalStage.INTENT);
+        }
+
+        // 3. Only after durable journal commit, trigger background policy check, notifications, and events
         boolean needFgs = AndroidBackgroundPolicy.requiresForegroundService(totalBytes, (int) (totalBytes / (1024 * 1024) + 1));
-        log.info("Initiating send of {} files ({} bytes) to {} - requires Foreground Service: {}",
-                contentUris.size(), totalBytes, targetPeer.getValue(), needFgs);
+        log.info("Durably accepted send of {} files ({} bytes) to {} [transferId={}, opId={}] - FGS required: {}",
+                contentUris.size(), totalBytes, targetPeer.getValue(), transferId, opId, needFgs);
 
         notificationController.updateTransferProgress(transferId, firstFileName, 0, 0, totalBytes);
 

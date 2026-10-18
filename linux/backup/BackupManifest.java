@@ -25,6 +25,7 @@ public final class BackupManifest implements Serializable {
     private final long totalBytes;
     private final boolean blind;
     private final String manifestDigest;
+    private final String merkleRootHash;
 
     public BackupManifest(String backupId,
                           String jobId,
@@ -55,6 +56,7 @@ public final class BackupManifest implements Serializable {
         this.totalBytes = byteCount;
         this.blind = blind;
         this.manifestDigest = computeDigest(this.backupId, this.jobId, this.snapshotTimestampUtcMs, this.items);
+        this.merkleRootHash = SnapshotMerkleTree.build(this.items.values()).getRootHash();
     }
 
     private static String computeDigest(String backupId, String jobId, long timestamp, Map<ObjectIdentity, HistoricalVersion> items) {
@@ -86,6 +88,7 @@ public final class BackupManifest implements Serializable {
     public long getTotalBytes() { return totalBytes; }
     public boolean isBlind() { return blind; }
     public String getManifestDigest() { return manifestDigest; }
+    public String getMerkleRootHash() { return merkleRootHash; }
 
     public Optional<HistoricalVersion> getItem(ObjectIdentity id) {
         return Optional.ofNullable(items.get(id));

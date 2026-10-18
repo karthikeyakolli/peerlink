@@ -1,13 +1,36 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:fixnum/fixnum.dart' as fixnum;
 import 'package:flutter/material.dart';
 import '../../core/node_ipc_client.dart';
+import '../../core/operation_journal_service.dart';
 import '../../core/protocol/peerlink/v1/transfer.pb.dart';
 import '../../design_system/components/radar_sonar_view.dart';
 import '../../design_system/components/transfer_speedometer.dart';
 import '../../design_system/components/qr_pairing_sheet.dart';
 import '../../design_system/components/glass_container.dart';
 import '../../design_system/components/interactive_glass_card.dart';
+import '../../design_system/components/ephemeral_policy_modal.dart';
+import '../../design_system/components/burn_viewer_modal.dart';
+import '../../design_system/components/desktop_dropzone.dart';
+import '../../platform/windows_file_dialog.dart';
+import '../../platform/android_node_bridge.dart';
+
+class SelectedFileInfo {
+  final String path;
+  final String name;
+  final int sizeBytes;
+  final bool isDirectory;
+  bool selected;
+
+  SelectedFileInfo({
+    required this.path,
+    required this.name,
+    required this.sizeBytes,
+    required this.isDirectory,
+    this.selected = true,
+  });
+}
 
 class FilesScreen extends StatefulWidget {
   const FilesScreen({super.key});
@@ -29,62 +52,95 @@ class _FilesScreenState extends State<FilesScreen> {
 
   bool _isSending = false;
   String? _statusBanner;
+  String? _refreshError;
   StreamSubscription<TransferProgress>? _progressSub;
   final Map<String, TransferProgress> _transfers = {};
+  EphemeralPolicy _currentPolicy = EphemeralPolicy.permanent;
 
   String _activeCategory = 'All';
-  final List<Map<String, dynamic>> _quickMediaFiles = [
-    {
-      'name': 'camera_vacation_01.jpg',
-      'size': '3.4 MB',
-      'bytes': 3565158,
-      'category': 'Photos',
-      'icon': Icons.image_rounded,
-      'color': Colors.purple,
-      'path': '/storage/emulated/0/DCIM/camera_vacation_01.jpg',
-      'selected': true,
-    },
-    {
-      'name': 'project_overview.pdf',
-      'size': '1.8 MB',
-      'bytes': 1887436,
-      'category': 'Docs',
-      'icon': Icons.picture_as_pdf_rounded,
-      'color': Colors.red,
-      'path': '/storage/emulated/0/Documents/project_overview.pdf',
-      'selected': true,
-    },
-    {
-      'name': 'peerlink_v0.1.0.apk',
-      'size': '28.5 MB',
-      'bytes': 29884416,
-      'category': 'Apps',
-      'icon': Icons.android_rounded,
-      'color': Colors.green,
-      'path': '/storage/emulated/0/Download/peerlink_v0.1.0.apk',
-      'selected': false,
-    },
-    {
-      'name': 'voice_memo_draft.m4a',
-      'size': '6.2 MB',
-      'bytes': 6501171,
-      'category': 'Audio',
-      'icon': Icons.music_note_rounded,
-      'color': Colors.amber,
-      'path': '/storage/emulated/0/Music/voice_memo_draft.m4a',
-      'selected': false,
-    },
-    {
-      'name': 'screen_recording.mp4',
-      'size': '45.1 MB',
-      'bytes': 47290777,
-      'category': 'Videos',
-      'icon': Icons.video_file_rounded,
-      'color': Colors.blue,
-      'path': '/storage/emulated/0/Movies/screen_recording.mp4',
-      'selected': false,
-    },
-  ];
+  final List<SelectedFileInfo> _selectedFiles = [];
+
+  void _addPaths(List<String> paths) {
+    for (final p in paths) {
+      if (p.trim().isEmpty) continue;
+      final cleanPath = p.trim();
+      final f = File(cleanPath);
+      final d = Directory(cleanPath);
+      String name = cleanPath.split(RegExp(r'[\\/]')).last;
+      name = Uri.decodeComponent(name);
+      if (name.contains(':')) {
+        name = name.split(':').last;
+      }
+
+      int size = 0;
+      bool isDir = false;
+      try {
+        if (f.existsSync()) {
+          size = f.lengthSync();
+          isDir = false;
+        } else if (d.existsSync()) {
+          isDir = true;
+        }
+      } catch (_) {}
+
+      if (size == 0 && cleanPath.startsWith('content://')) {
+        size = 1024 * 1024;
+      }
+
+      if (!_selectedFiles.any((item) => item.path == cleanPath)) {
+        _selectedFiles.add(SelectedFileInfo(
+          path: cleanPath,
+          name: name.isEmpty ? cleanPath : name,
+          sizeBytes: size,
+          isDirectory: isDir,
+        ));
+      }
+    }
+    _syncController();
+  }
+
+  void _syncController() {
+    _sourcePathsController.text = _selectedFiles
+        .where((f) => f.selected)
+        .map((f) => f.path)
+        .join('\n');
+  }
+
+  Future<void> _pickFiles() async {
+    final paths = await WindowsFileDialog.pickFiles();
+    if (paths.isNotEmpty && mounted) {
+      setState(() {
+        _addPaths(paths);
+      });
+    }
+  }
+
+  Future<void> _pickFolder() async {
+    final folder = await WindowsFileDialog.pickDirectory();
+    if (folder != null && mounted) {
+      setState(() {
+        _addPaths([folder]);
+      });
+    }
+  }
+
+  Future<void> _pickSafFile() async {
+    try {
+      final uris = await AndroidNodeBridge.instance.pickContentUris();
+      if (uris.isNotEmpty && mounted) {
+        setState(() {
+          _addPaths(uris);
+        });
+      }
+    } catch (_) {}
+  }
+
+  void _clearSelectedFiles() {
+    setState(() {
+      _selectedFiles.clear();
+      _sourcePathsController.clear();
+    });
+  }
 
   @override
   void initState() {
@@ -95,10 +151,13 @@ class _FilesScreenState extends State<FilesScreen> {
         setState(() {
           _transfers[progress.transferId] = progress;
         });
+        // Invariant: Unknown or uncertain transfer events trigger reconciliation
+        if (progress.state == TransferState.TRANSFER_STATE_UNSPECIFIED ||
+            progress.state == TransferState.TRANSFER_STATE_OUTCOME_UNKNOWN) {
+          OperationJournalService.instance.runDiagnosticsAndReconcile(progress.transferId);
+        }
       }
     });
-
-
   }
 
   @override
@@ -111,6 +170,7 @@ class _FilesScreenState extends State<FilesScreen> {
   }
 
   Future<void> _refreshTransfers() async {
+    setState(() => _refreshError = null);
     if (!_client.isAuthenticated) return;
     try {
       final res = await _client.listTransfers();
@@ -121,7 +181,13 @@ class _FilesScreenState extends State<FilesScreen> {
           }
         });
       }
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _refreshError = 'Error refreshing transfer list: $e';
+        });
+      }
+    }
   }
 
   Future<void> _initiateSend() async {
@@ -154,59 +220,91 @@ class _FilesScreenState extends State<FilesScreen> {
       _statusBanner = null;
     });
 
-    try {
-      if (_client.isAuthenticated) {
-        final res = await _client.initiateSend(
+    if (paths.any((p) => p.startsWith('content://'))) {
+      try {
+        final transferId = await AndroidNodeBridge.instance.initiateSend(
           targetPeerId: targetPeer,
-          sourcePaths: paths,
-          destinationDirectory: _destinationDirController.text.trim(),
-          duplicatePolicy: _duplicatePolicy,
+          contentUris: paths,
         );
-
         if (mounted) {
-          if (res.accepted) {
+          if (transferId.isNotEmpty) {
             setState(() {
-              _statusBanner = 'Transfer initiated: ${res.transferId}';
+              _statusBanner = 'Transfer initiated: $transferId';
               _sourcePathsController.clear();
+              _selectedFiles.clear();
             });
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                    'Transfer initiated successfully! ID: ${res.transferId}'),
-                backgroundColor: Colors.green.shade700,
-              ),
-            );
             _refreshTransfers();
           } else {
             setState(() {
-              _statusBanner = 'Initiation rejected: ${res.errorMessage}';
+              _statusBanner = 'Initiation rejected by target peer: $targetPeer';
             });
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Send failed: ${res.errorMessage}'),
-                backgroundColor: Colors.red.shade700,
-              ),
-            );
           }
         }
-      } else {
-        // Desktop daemon offline / staged demo transfer
-        final demoId = 'xfer-desk-${DateTime.now().millisecondsSinceEpoch % 10000}';
+      } catch (e) {
         if (mounted) {
           setState(() {
-            _statusBanner = 'Staged transfer ready: $demoId';
+            _statusBanner = 'Android Send rejected / error: $e';
+          });
+        }
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isSending = false;
+          });
+        }
+      }
+      return;
+    }
+
+    if (!_client.isAuthenticated) {
+      if (mounted) {
+        setState(() {
+          _isSending = false;
+          _statusBanner =
+              'Local Node daemon is disconnected. Please start the node to transfer files.';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+                'Local Node daemon is disconnected. Transfer cannot be initiated.'),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+      }
+      return;
+    }
+
+    try {
+      final res = await _client.initiateSend(
+        targetPeerId: targetPeer,
+        sourcePaths: paths,
+        destinationDirectory: _destinationDirController.text.trim(),
+        duplicatePolicy: _duplicatePolicy,
+      );
+
+      if (mounted) {
+        if (res.accepted) {
+          setState(() {
+            _statusBanner = 'Transfer initiated: ${res.transferId}';
             _sourcePathsController.clear();
-            _transfers[demoId] = TransferProgress()
-              ..transferId = demoId
-              ..currentFile = paths.first
-              ..totalBytes = fixnum.Int64(1024 * 1024)
-              ..transferredBytes = fixnum.Int64(0)
-              ..state = TransferState.TRANSFER_STATE_TRANSFERRING;
+            _selectedFiles.clear();
           });
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Desktop Transfer Staged! ID: $demoId'),
-              backgroundColor: const Color(0xFF2563EB),
+              content: Text(
+                  'Transfer initiated successfully! ID: ${res.transferId}'),
+              backgroundColor: Colors.green.shade700,
+            ),
+          );
+          _refreshTransfers();
+        } else {
+          setState(() {
+            _statusBanner = 'Initiation rejected: ${res.errorMessage}';
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Send failed: ${res.errorMessage}'),
+              backgroundColor: Colors.red.shade700,
             ),
           );
         }
@@ -388,10 +486,38 @@ class _FilesScreenState extends State<FilesScreen> {
             ],
           ),
         ),
-        body: TabBarView(
+        body: Column(
           children: [
-            _buildSendTab(theme),
-            _buildHistoryTab(theme, sortedTransfers),
+            if (_refreshError != null)
+              Container(
+                color: Colors.red.shade900,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.error_outline_rounded, color: Colors.white, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _refreshError!,
+                        style: const TextStyle(color: Colors.white, fontSize: 12),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: _refreshTransfers,
+                      style: TextButton.styleFrom(foregroundColor: Colors.white),
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              ),
+            Expanded(
+              child: TabBarView(
+                children: [
+                  _buildSendTab(theme),
+                  _buildHistoryTab(theme, sortedTransfers),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -400,7 +526,7 @@ class _FilesScreenState extends State<FilesScreen> {
 
   void _openRadarPicker() {
     final selectedFiles =
-        _quickMediaFiles.where((f) => f['selected'] == true).toList();
+        _selectedFiles.where((f) => f.selected).toList();
     if (selectedFiles.isEmpty && _sourcePathsController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -411,7 +537,7 @@ class _FilesScreenState extends State<FilesScreen> {
 
     if (selectedFiles.isNotEmpty) {
       _sourcePathsController.text =
-          selectedFiles.map((f) => f['path'] as String).join('\n');
+          selectedFiles.map((f) => f.path).join('\n');
     }
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -449,7 +575,7 @@ class _FilesScreenState extends State<FilesScreen> {
               const SizedBox(height: 8),
               Expanded(
                 child: RadarSonarView(
-                  localDeviceName: 'Pixel 9 (This Phone)',
+                  localDeviceName: 'This PC (Windows)',
                   discoveredPeers: const [
                     RadarPeerInfo(
                       id: 'peer-work-pc',
@@ -458,10 +584,10 @@ class _FilesScreenState extends State<FilesScreen> {
                       isTrusted: true,
                     ),
                     RadarPeerInfo(
-                      id: 'peer-mac-air',
-                      name: "Sarah's Mac",
-                      deviceType: 'laptop',
-                      isTrusted: false,
+                      id: 'peer-desktop-b',
+                      name: 'Peer B (Receiver)',
+                      deviceType: 'desktop',
+                      isTrusted: true,
                     ),
                   ],
                   onPeerSelected: (peer) {
@@ -475,9 +601,9 @@ class _FilesScreenState extends State<FilesScreen> {
                     Navigator.pop(ctx);
                     QrPairingSheet.show(
                       context,
-                      deviceName: 'Pixel 9 (This Phone)',
-                      peerId: 'peer_android_primary',
-                      fingerprint: 'ed25519:7fa8...91b2',
+                      deviceName: 'This PC (Windows)',
+                      peerId: _client.currentState.peerId ?? 'peer_windows_local',
+                      fingerprint: 'ed25519:windows...node',
                       onQrScanned: (payload) {
                         setState(() {
                           _targetPeerController.text = 'peer-scanned-01';
@@ -498,226 +624,313 @@ class _FilesScreenState extends State<FilesScreen> {
   Widget _buildSendTab(ThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
 
-    final filteredFiles = _activeCategory == 'All'
-        ? _quickMediaFiles
-        : _quickMediaFiles
-            .where((f) => f['category'] == _activeCategory)
-            .toList();
-
     final selectedCount =
-        _quickMediaFiles.where((f) => f['selected'] == true).length;
-    final selectedBytes = _quickMediaFiles
-        .where((f) => f['selected'] == true)
-        .fold<int>(0, (sum, f) => sum + (f['bytes'] as int));
+        _selectedFiles.where((f) => f.selected).length;
+    final selectedBytes = _selectedFiles
+        .where((f) => f.selected)
+        .fold<int>(0, (sum, f) => sum + f.sizeBytes);
 
-    return Column(
-      children: [
-        // Top Category Filter Chips (SHAREit inspired)
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
-            border: Border(
-              bottom: BorderSide(
-                color: isDark ? Colors.white10 : Colors.black12,
-              ),
-            ),
-          ),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: ['All', 'Photos', 'Videos', 'Docs', 'Apps', 'Audio']
-                  .map((cat) {
-                final isSelected = _activeCategory == cat;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8.0),
-                  child: FilterChip(
-                    label: Text(cat),
-                    selected: isSelected,
-                    onSelected: (_) => setState(() => _activeCategory = cat),
-                    selectedColor:
-                        const Color(0xFF2563EB).withValues(alpha: 0.18),
-                    checkmarkColor: const Color(0xFF2563EB),
-                    labelStyle: TextStyle(
-                      fontSize: 12,
-                      fontWeight:
-                          isSelected ? FontWeight.bold : FontWeight.w500,
-                      color: isSelected
-                          ? const Color(0xFF2563EB)
-                          : (isDark ? Colors.white70 : Colors.black87),
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-        ),
-
-        // Scrollable Media Selection List & Advanced Options
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 80),
-            children: [
-              // Media Items
-              ...filteredFiles.map((file) {
-                final isSelected = file['selected'] == true;
-                final fileColor = file['color'] as Color;
-                return InteractiveGlassCard(
-                  glowColor: fileColor,
-                  isSelected: isSelected,
-                  borderRadius: BorderRadius.circular(18),
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  onTap: () {
-                    setState(() {
-                      file['selected'] = !isSelected;
-                    });
-                  },
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: fileColor.withValues(alpha: 0.16),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          file['icon'] as IconData,
-                          color: fileColor,
-                          size: 22,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              file['name'] as String,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              '${file['size']} • ${file['category']}',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: isDark ? Colors.white54 : Colors.black54,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Checkbox(
-                        value: isSelected,
-                        activeColor: const Color(0xFF2563EB),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(5),
-                        ),
-                        onChanged: (val) {
-                          setState(() {
-                            file['selected'] = val ?? false;
-                          });
-                        },
-                      ),
-                    ],
-                  ),
-                );
-              }),
-
-              const SizedBox(height: 12),
-
-              // Collapsible Advanced Manual Form (Preserves developer / script controls)
-              ExpansionTile(
-                title: const Text(
-                  'Advanced Manual Paths & Policy',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                ),
-                leading: const Icon(Icons.tune_rounded, size: 20),
+    return DesktopDropzone(
+      onFilesDropped: (dropped) {
+        setState(() {
+          _addPaths(dropped);
+        });
+      },
+      child: Column(
+        children: [
+          // Status Banner (Initiation results, rejection, disconnection)
+          if (_statusBanner != null)
+            Container(
+              width: double.infinity,
+              color: _statusBanner!.contains('initiated')
+                  ? const Color(0xFF10B981)
+                  : (_statusBanner!.contains('rejected') ||
+                          _statusBanner!.contains('disconnected') ||
+                          _statusBanner!.contains('Error')
+                      ? Colors.red.shade800
+                      : Colors.blue.shade800),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: Column(
-                      children: [
-                        TextField(
-                          controller: _targetPeerController,
-                          decoration: const InputDecoration(
-                            labelText: 'Target Peer ID',
-                            hintText: 'e.g. peer_alice or node-uuid',
-                            prefixIcon: Icon(Icons.person_pin_circle_rounded),
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: _sourcePathsController,
-                          maxLines: 2,
-                          decoration: const InputDecoration(
-                            labelText: 'Source Paths (File or Folder)',
-                            hintText: 'Enter absolute file or folder paths',
-                            prefixIcon: Icon(Icons.source_rounded),
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: _destinationDirController,
-                          decoration: const InputDecoration(
-                            labelText: 'Destination Directory (Optional)',
-                            hintText: 'Leave empty for node default',
-                            prefixIcon: Icon(Icons.folder_open_rounded),
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        DropdownButtonFormField<DuplicateDestinationPolicy>(
-                          initialValue: _duplicatePolicy,
-                          decoration: const InputDecoration(
-                            labelText: 'Duplicate Policy',
-                            prefixIcon: Icon(Icons.file_copy_rounded),
-                            border: OutlineInputBorder(),
-                          ),
-                          items: const [
-                            DropdownMenuItem(
-                              value: DuplicateDestinationPolicy
-                                  .DUPLICATE_DESTINATION_POLICY_FAIL_IF_EXISTS,
-                              child: Text('FAIL_IF_EXISTS (Error if file exists)'),
-                            ),
-                            DropdownMenuItem(
-                              value: DuplicateDestinationPolicy
-                                  .DUPLICATE_DESTINATION_POLICY_OVERWRITE,
-                              child: Text('OVERWRITE (Replace existing file)'),
-                            ),
-                            DropdownMenuItem(
-                              value: DuplicateDestinationPolicy
-                                  .DUPLICATE_DESTINATION_POLICY_RENAME_WITH_SUFFIX,
-                              child: Text('RENAME_WITH_SUFFIX (Save as (1))'),
-                            ),
-                          ],
-                          onChanged: (val) {
-                            if (val != null) {
-                              setState(() => _duplicatePolicy = val);
-                            }
-                          },
-                        ),
-                        const SizedBox(height: 12),
-                        FilledButton.icon(
-                          onPressed: _isSending ? null : _initiateSend,
-                          icon: const Icon(Icons.send_rounded, size: 16),
-                          label: const Text('SEND TO EXACT PEER ID'),
-                        ),
-                      ],
+                  Icon(
+                    _statusBanner!.contains('initiated')
+                        ? Icons.check_circle_rounded
+                        : Icons.info_outline_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _statusBanner!,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold),
                     ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded,
+                        color: Colors.white, size: 16),
+                    onPressed: () => setState(() => _statusBanner = null),
                   ),
                 ],
               ),
-            ],
+            ),
+
+          // Real File Action Bar (Windows Desktop & Android File Pickers)
+          Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+              border: Border(
+                bottom: BorderSide(
+                  color: isDark ? Colors.white10 : Colors.black12,
+                ),
+              ),
+            ),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                children: [
+                  FilledButton.tonalIcon(
+                    onPressed: _pickFiles,
+                    icon: const Icon(Icons.file_open_rounded, size: 18),
+                    label: const Text('Add Files...'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.tonalIcon(
+                    onPressed: _pickFolder,
+                    icon: const Icon(Icons.create_new_folder_rounded, size: 18),
+                    label: const Text('Add Folder...'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.tonalIcon(
+                    onPressed: _pickSafFile,
+                    icon: const Icon(Icons.sd_storage_rounded, size: 18),
+                    label: const Text('Pick SAF File'),
+                  ),
+                  if (_selectedFiles.isNotEmpty) ...[
+                    const SizedBox(width: 12),
+                    TextButton.icon(
+                      onPressed: _clearSelectedFiles,
+                      icon: const Icon(Icons.clear_all_rounded, size: 18),
+                      label: const Text('Clear'),
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
-        ),
+
+          // Scrollable Media Selection List & Advanced Options
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 80),
+              children: [
+                if (_selectedFiles.isEmpty)
+                  Container(
+                    margin: const EdgeInsets.symmetric(vertical: 24),
+                    padding: const EdgeInsets.all(32),
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: isDark ? Colors.white12 : Colors.black12,
+                        width: 1.5,
+                      ),
+                      borderRadius: BorderRadius.circular(20),
+                      color: isDark
+                          ? const Color(0xFF1E293B).withValues(alpha: 0.4)
+                          : const Color(0xFFF1F5F9),
+                    ),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.drive_folder_upload_rounded,
+                          size: 48,
+                          color: const Color(0xFF2563EB).withValues(alpha: 0.8),
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'No files selected yet',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Drag & drop files from Windows File Explorer here, or click "Add Files..." above.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark ? Colors.white60 : Colors.black54,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  ..._selectedFiles.map((file) {
+                    final isSelected = file.selected;
+                    final fileColor = file.isDirectory ? Colors.amber : const Color(0xFF2563EB);
+                    return InteractiveGlassCard(
+                      glowColor: fileColor,
+                      isSelected: isSelected,
+                      borderRadius: BorderRadius.circular(18),
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      onTap: () {
+                        setState(() {
+                          file.selected = !isSelected;
+                          _syncController();
+                        });
+                      },
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: fileColor.withValues(alpha: 0.16),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              file.isDirectory
+                                  ? Icons.folder_rounded
+                                  : Icons.insert_drive_file_rounded,
+                              color: fileColor,
+                              size: 22,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  file.name,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  file.isDirectory ? 'Folder' : _formatBytes(file.sizeBytes),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: isDark ? Colors.white54 : Colors.black54,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Checkbox(
+                            value: isSelected,
+                            activeColor: const Color(0xFF2563EB),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                            onChanged: (val) {
+                              setState(() {
+                                file.selected = val ?? false;
+                                _syncController();
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+
+                const SizedBox(height: 12),
+
+                // Collapsible Advanced Manual Form (Preserves developer / script controls)
+                ExpansionTile(
+                  title: const Text(
+                    'Advanced Manual Paths & Policy',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                  leading: const Icon(Icons.tune_rounded, size: 20),
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: Column(
+                        children: [
+                          TextField(
+                            controller: _targetPeerController,
+                            decoration: const InputDecoration(
+                              labelText: 'Target Peer ID',
+                              hintText: 'e.g. peer_alice or node-uuid',
+                              prefixIcon: Icon(Icons.person_pin_circle_rounded),
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _sourcePathsController,
+                            maxLines: 2,
+                            decoration: const InputDecoration(
+                              labelText: 'Source Paths (File or Folder)',
+                              hintText: 'Enter absolute file or folder paths',
+                              prefixIcon: Icon(Icons.source_rounded),
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _destinationDirController,
+                            decoration: const InputDecoration(
+                              labelText: 'Destination Directory (Optional)',
+                              hintText: 'Leave empty for node default',
+                              prefixIcon: Icon(Icons.folder_open_rounded),
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          DropdownButtonFormField<DuplicateDestinationPolicy>(
+                            initialValue: _duplicatePolicy,
+                            decoration: const InputDecoration(
+                              labelText: 'Duplicate Policy',
+                              prefixIcon: Icon(Icons.file_copy_rounded),
+                              border: OutlineInputBorder(),
+                            ),
+                            items: const [
+                              DropdownMenuItem(
+                                value: DuplicateDestinationPolicy
+                                    .DUPLICATE_DESTINATION_POLICY_FAIL_IF_EXISTS,
+                                child: Text('FAIL_IF_EXISTS (Error if file exists)'),
+                              ),
+                              DropdownMenuItem(
+                                value: DuplicateDestinationPolicy
+                                    .DUPLICATE_DESTINATION_POLICY_OVERWRITE,
+                                child: Text('OVERWRITE (Replace existing file)'),
+                              ),
+                              DropdownMenuItem(
+                                value: DuplicateDestinationPolicy
+                                    .DUPLICATE_DESTINATION_POLICY_RENAME_WITH_SUFFIX,
+                                child: Text('RENAME_WITH_SUFFIX (Save as (1))'),
+                              ),
+                            ],
+                            onChanged: (val) {
+                              if (val != null) {
+                                setState(() => _duplicatePolicy = val);
+                              }
+                            },
+                          ),
+                          const SizedBox(height: 12),
+                          FilledButton.icon(
+                            onPressed: _isSending ? null : _initiateSend,
+                            icon: const Icon(Icons.send_rounded, size: 16),
+                            label: const Text('SEND TO EXACT PEER ID'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
 
         // Sticky Bottom Batch Action Pill (AirDrop / Quick Share inspired)
         AnimatedSlide(
@@ -755,12 +968,42 @@ class _FilesScreenState extends State<FilesScreen> {
                       ],
                     ),
                   ),
+                  IconButton(
+                    onPressed: () async {
+                      final policy = await EphemeralPolicyModal.show(
+                        context,
+                        initialPolicy: _currentPolicy,
+                      );
+                      if (policy != null) {
+                        setState(() => _currentPolicy = policy);
+                      }
+                    },
+                    icon: Icon(
+                      Icons.local_fire_department_rounded,
+                      color: _currentPolicy.isEphemeral
+                          ? const Color(0xFFEF4444)
+                          : Colors.white54,
+                    ),
+                    tooltip: _currentPolicy.isEphemeral
+                        ? 'Ephemeral Mode Active (${_currentPolicy.burnAfterRead ? "1-View" : "${_currentPolicy.ttlSeconds}s TTL"})'
+                        : 'Configure Burn-After-Read Ephemeral Policy',
+                  ),
+                  const SizedBox(width: 8),
                   FilledButton.icon(
                     onPressed: selectedCount > 0 ? _openRadarPicker : null,
-                    icon: const Icon(Icons.radar_rounded, size: 18),
-                    label: const Text('Send via Radar (1-Tap)'),
+                    icon: Icon(
+                      _currentPolicy.isEphemeral
+                          ? Icons.local_fire_department_rounded
+                          : Icons.radar_rounded,
+                      size: 18,
+                    ),
+                    label: Text(_currentPolicy.isEphemeral
+                        ? 'Burn Beam (1-Tap)'
+                        : 'Send via Radar (1-Tap)'),
                     style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF2563EB),
+                      backgroundColor: _currentPolicy.isEphemeral
+                          ? const Color(0xFFEF4444)
+                          : const Color(0xFF2563EB),
                       padding:
                           const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                       shape: RoundedRectangleBorder(
@@ -774,11 +1017,33 @@ class _FilesScreenState extends State<FilesScreen> {
           ),
         ),
       ],
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildHistoryTab(ThemeData theme, List<TransferProgress> transfers) {
-    if (transfers.isEmpty) {
+    final journalOps = OperationJournalService.instance.operations;
+
+    final activeJournalOps = journalOps.where((op) => !op.isTerminal).toList();
+    final historyJournalOps = journalOps.where((op) => op.isTerminal).toList();
+
+    final activeTransfers = transfers.where((t) =>
+        t.state == TransferState.TRANSFER_STATE_TRANSFERRING ||
+        t.state == TransferState.TRANSFER_STATE_COMMITTING ||
+        t.state == TransferState.TRANSFER_STATE_VERIFYING ||
+        t.state == TransferState.TRANSFER_STATE_PREPARING ||
+        t.state == TransferState.TRANSFER_STATE_CONNECTING).toList();
+
+    final historyTransfers = transfers.where((t) =>
+        t.state == TransferState.TRANSFER_STATE_COMPLETED ||
+        t.state == TransferState.TRANSFER_STATE_FAILED ||
+        t.state == TransferState.TRANSFER_STATE_CANCELLED ||
+        t.state == TransferState.TRANSFER_STATE_OUTCOME_UNKNOWN).toList();
+
+    final hasActive = activeTransfers.isNotEmpty || activeJournalOps.isNotEmpty;
+    final hasHistory = historyTransfers.isNotEmpty || historyJournalOps.isNotEmpty;
+
+    if (!hasActive && !hasHistory) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -799,45 +1064,131 @@ class _FilesScreenState extends State<FilesScreen> {
       );
     }
 
-    final activeTransfer = transfers.firstWhere(
-      (t) => t.state == TransferState.TRANSFER_STATE_TRANSFERRING,
-      orElse: () => transfers.first,
-    );
-
     return ListView(
       padding: const EdgeInsets.all(16.0),
       children: [
-        // Prominent live speedometer if active
-        if (activeTransfer.state == TransferState.TRANSFER_STATE_TRANSFERRING) ...[
-          TransferSpeedometer(
-            fileName: activeTransfer.currentFile.isEmpty
-                ? 'Batch Transfer'
-                : activeTransfer.currentFile,
-            currentItemIndex: activeTransfer.currentItemIndex + 1,
-            totalItems: activeTransfer.totalItems > 0
-                ? activeTransfer.totalItems
-                : 1,
-            currentFileProgress: 0.65,
-            totalBatchProgress: activeTransfer.totalBytes.toInt() > 0
-                ? (activeTransfer.transferredBytes.toDouble() /
-                    activeTransfer.totalBytes.toDouble())
-                : 0.0,
-            speedMbps: 42.5,
-            etaSeconds: 14,
-            peerName: 'Desktop PC',
-            isSender: true,
-            onCancel: () => _cancelTransfer(activeTransfer.transferId),
+        if (hasActive) ...[
+          Text(
+            'ACTIVE IN-FLIGHT TRANSFERS (${activeTransfers.length + activeJournalOps.length})',
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF2563EB)),
           ),
-          const SizedBox(height: 20),
-          const Text(
-            'Transfer History',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-          ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
+          ...activeTransfers.map((t) => _buildTransferCard(theme, t)),
+          ...activeJournalOps.map((op) => _buildJournalOperationCard(theme, op)),
+          const SizedBox(height: 16),
         ],
-
-        ...transfers.map((t) => _buildTransferCard(theme, t)),
+        if (hasHistory) ...[
+          Text(
+            'TRANSFER JOURNAL & HISTORY (${historyTransfers.length + historyJournalOps.length})',
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey),
+          ),
+          const SizedBox(height: 10),
+          ...historyTransfers.map((t) => _buildTransferCard(theme, t)),
+          ...historyJournalOps.map((op) => _buildJournalOperationCard(theme, op)),
+        ],
       ],
+    );
+  }
+
+  Widget _buildJournalOperationCard(ThemeData theme, JournalOperation op) {
+    Color stateColor;
+    String stateLabel;
+    switch (op.state) {
+      case JournalOperationState.committed:
+        stateColor = const Color(0xFF10B981);
+        stateLabel = 'COMMITTED';
+        break;
+      case JournalOperationState.executing:
+        stateColor = const Color(0xFF2563EB);
+        stateLabel = 'EXECUTING';
+        break;
+      case JournalOperationState.waiting:
+        stateColor = Colors.orange;
+        stateLabel = 'WAITING';
+        break;
+      case JournalOperationState.verifying:
+        stateColor = const Color(0xFF8B5CF6);
+        stateLabel = 'VERIFYING';
+        break;
+      case JournalOperationState.failed:
+        stateColor = const Color(0xFFEF4444);
+        stateLabel = 'FAILED';
+        break;
+      case JournalOperationState.cancelled:
+        stateColor = Colors.grey;
+        stateLabel = 'CANCELLED';
+        break;
+      case JournalOperationState.outcomeUnknown:
+        stateColor = Colors.deepPurple;
+        stateLabel = 'UNCERTAIN';
+        break;
+      default:
+        stateColor = Colors.blue;
+        stateLabel = op.state.name.toUpperCase();
+    }
+
+    final fraction = op.totalBytes > 0
+        ? (op.bytesTransferred / op.totalBytes).clamp(0.0, 1.0)
+        : 0.0;
+
+    return InteractiveGlassCard(
+      glowColor: stateColor,
+      margin: const EdgeInsets.only(bottom: 12),
+      borderRadius: BorderRadius.circular(18),
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  op.summary,
+                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: stateColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: stateColor),
+                ),
+                child: Text(
+                  stateLabel,
+                  style: TextStyle(
+                    color: stateColor,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Peer: ${op.peerId} • ID: ${op.operationId} • Stage: ${op.stage.name.toUpperCase()}',
+            style: const TextStyle(fontSize: 11, color: Colors.grey),
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: op.isTerminal ? (op.state == JournalOperationState.committed ? 1.0 : fraction) : fraction,
+              minHeight: 6,
+              backgroundColor: theme.colorScheme.surfaceContainerHighest,
+              valueColor: AlwaysStoppedAnimation<Color>(stateColor),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '${_formatBytes(op.bytesTransferred)} / ${_formatBytes(op.totalBytes)} (${(fraction * 100).toStringAsFixed(1)}%)',
+            style: theme.textTheme.bodySmall,
+          ),
+        ],
+      ),
     );
   }
 
@@ -1077,6 +1428,34 @@ class _FilesScreenState extends State<FilesScreen> {
                     onPressed: _refreshTransfers,
                     icon: const Icon(Icons.sync_problem_rounded, size: 18),
                     label: const Text('Reconcile Status'),
+                  ),
+                ],
+                if (isCompleted) ...[
+                  const SizedBox(width: 8),
+                  FilledButton.tonalIcon(
+                    onPressed: () {
+                      BurnViewerModal.show(
+                        context,
+                        fileName: t.currentFile.isNotEmpty
+                            ? t.currentFile.split(RegExp(r'[\\/]')).last
+                            : 'Document.pdf',
+                        fileSize: _formatBytes(t.transferredBytes),
+                        previewContent:
+                            'CONFIDENTIAL ENCRYPTED RECORD\nSHA-256 Verified Payload: 8f4a...e12b\nZero-Trust Ephemeral Beam Content\nAuto-shredded upon viewer closure.',
+                        policy: EphemeralPolicy.singleView,
+                        onShred: () {
+                          setState(() {
+                            _transfers.remove(t.transferId);
+                          });
+                        },
+                      );
+                    },
+                    icon: const Icon(
+                      Icons.local_fire_department_rounded,
+                      size: 18,
+                      color: Color(0xFFEF4444),
+                    ),
+                    label: const Text('Burn Viewer'),
                   ),
                 ],
                 if (isCompleted && t.destinationPath.isNotEmpty) ...[
