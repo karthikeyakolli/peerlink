@@ -242,13 +242,21 @@ class MainActivity : FlutterActivity() {
         val sharedUris = mutableListOf<String>()
 
         if (Intent.ACTION_SEND == action) {
-            (intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM))?.let { uri ->
-                sharedUris.add(uri.toString())
+            val uri = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
             }
+            uri?.let { sharedUris.add(it.toString()) }
         } else if (Intent.ACTION_SEND_MULTIPLE == action) {
-            intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.forEach { uri ->
-                sharedUris.add(uri.toString())
+            val uris = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
             }
+            uris?.forEach { uri -> sharedUris.add(uri.toString()) }
         }
 
         if (sharedUris.isNotEmpty()) {

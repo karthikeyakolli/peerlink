@@ -153,13 +153,13 @@ public final class DiscoveredPeerRecord {
      */
     public synchronized boolean pruneExpiredRoutes(long maxAgeMs) {
         long now = System.currentTimeMillis();
-        availableRoutes.removeIf(r -> (now - r.getLastSeenAtUtcMs()) > maxAgeMs);
-        return availableRoutes.isEmpty() || (now - lastSeenAtUtcMs) > maxAgeMs;
+        availableRoutes.removeIf(r -> (now - r.getLastSeenAtUtcMs()) >= maxAgeMs);
+        return availableRoutes.isEmpty() || (now - lastSeenAtUtcMs) >= maxAgeMs;
     }
 
     public boolean isExpired(long maxAgeMs) {
         long now = System.currentTimeMillis();
-        return (now - lastSeenAtUtcMs) > maxAgeMs;
+        return (now - lastSeenAtUtcMs) >= maxAgeMs;
     }
 
     public Map<String, Object> toMap() {

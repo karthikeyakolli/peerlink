@@ -56,7 +56,7 @@ void main() {
     });
 
     test('3-sample sliding window rate smoothing and ETA calculation', () {
-      final startTime = 1000000;
+      const startTime = 1000000;
       final model = TransferProgressModel(
         transferId: 'tx-102',
         remotePeerId: 'peer-2',
@@ -110,7 +110,7 @@ void main() {
     });
 
     test('sliding window ignores microsecond jitter (<50ms)', () {
-      final startTime = 2000000;
+      const startTime = 2000000;
       final model = TransferProgressModel(
         transferId: 'tx-103',
         remotePeerId: 'peer-3',

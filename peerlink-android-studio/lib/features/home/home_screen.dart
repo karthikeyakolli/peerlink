@@ -4,6 +4,7 @@ import 'local_node_card.dart';
 import '../../core/node_ipc_client.dart';
 import '../../core/device_trust_service.dart';
 import '../../platform/android_node_bridge.dart';
+import '../../platform/platform_capabilities.dart';
 import '../../design_system/components/send_receive_hero.dart';
 import '../../design_system/components/media_category_bar.dart';
 import '../../design_system/components/radar_sonar_view.dart';
@@ -251,13 +252,26 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () {
               QuickTextShareModal.show(
                 context,
-                onSendText: (text, targetPeer) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Transmitting text (${text.length} chars) to nearby peer...'),
-                      backgroundColor: const Color(0xFF2563EB),
-                    ),
-                  );
+                onSendText: (text, targetPeer) async {
+                  if (text.isEmpty) return;
+                  if (PlatformCapabilities.isAndroid) {
+                    final clipboardResult = await AndroidNodeBridge.instance.syncClipboard();
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Quick text staged (${text.length} chars). Clipboard sync: ${clipboardResult != null ? "Active" : "Ready"}'),
+                          backgroundColor: const Color(0xFF2563EB),
+                        ),
+                      );
+                    }
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Text snippet prepared (${text.length} chars). Select a peer in Radar to transmit.'),
+                        backgroundColor: const Color(0xFF2563EB),
+                      ),
+                    );
+                  }
                 },
               );
             },

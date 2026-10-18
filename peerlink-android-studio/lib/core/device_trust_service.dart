@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:crypto/crypto.dart';
 import 'dart:convert';
+import 'package:peerlink/platform/platform_capabilities.dart';
+import 'package:peerlink/platform/android_node_bridge.dart';
 
 enum DeviceTrustLevel {
   trustedPeer,
@@ -68,11 +70,20 @@ class DeviceTrustService {
     _devices.removeWhere((d) => d.id == device.id);
     _devices.add(device);
     _devicesController.add(List.unmodifiable(_devices));
+    if (PlatformCapabilities.isAndroid) {
+      AndroidNodeBridge.instance.addTrustedPeer(
+        peerId: device.id,
+        fingerprint: device.fingerprint,
+      );
+    }
   }
 
   void revokeDevice(String peerId) {
     _devices.removeWhere((d) => d.id == peerId);
     _devicesController.add(List.unmodifiable(_devices));
+    if (PlatformCapabilities.isAndroid) {
+      AndroidNodeBridge.instance.revokeTrustedPeer(peerId);
+    }
   }
 
   void updateTrustLevel(String peerId, DeviceTrustLevel newLevel) {

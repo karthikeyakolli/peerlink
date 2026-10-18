@@ -121,7 +121,9 @@ class AndroidNsdAdapter(private val context: Context) : NsdDiscoveryAdapter(true
 
             override fun onDiscoveryStopped(serviceType: String) {}
             override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-                callback.onDiscoveryError(technologyName, "NSD discovery failed with code $errorCode")
+                if (discoveryListener === this) {
+                    callback.onDiscoveryError(technologyName, "NSD discovery failed with code $errorCode")
+                }
             }
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {}
         }
@@ -145,6 +147,11 @@ class AndroidNsdAdapter(private val context: Context) : NsdDiscoveryAdapter(true
 
     fun restartDiscovery() {
         stopDiscovery()
+        try {
+            Thread.sleep(100)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
         lastCallback?.let { startDiscovery(it) }
     }
 }

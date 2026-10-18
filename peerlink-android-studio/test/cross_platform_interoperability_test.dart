@@ -4,11 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:peerlink/core/protocol/peerlink/v1/capability.pb.dart';
 import 'package:peerlink/core/protocol/peerlink/v1/common.pb.dart';
 import 'package:peerlink/core/protocol/peerlink/v1/error.pb.dart';
-import 'package:peerlink/core/protocol/peerlink/v1/identity.pb.dart';
 import 'package:peerlink/core/protocol/peerlink/v1/ipc.pb.dart';
 import 'package:peerlink/core/protocol/peerlink/v1/object_reference.pb.dart';
-import 'package:peerlink/core/protocol/peerlink/v1/session.pb.dart';
-import 'package:peerlink/core/protocol/peerlink/v1/transfer.pb.dart';
 import 'package:protobuf/protobuf.dart';
 
 void main() {

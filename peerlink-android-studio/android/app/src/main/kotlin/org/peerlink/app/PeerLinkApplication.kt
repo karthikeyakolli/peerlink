@@ -23,7 +23,7 @@ import org.peerlink.core.android.*
 import org.peerlink.core.android.discovery.AndroidDiscoveryEngine
 import org.peerlink.core.android.discovery.TransportRouteSelector
 import org.peerlink.core.collaboration.clipboard.ClipboardSyncMode
-import org.peerlink.core.security.InMemoryTrustStore
+import org.peerlink.core.security.PersistentTrustStore
 import org.peerlink.core.transfer.PeerTransferEngine
 import org.peerlink.core.transport.PeerSessionManager
 import org.peerlink.core.transport.StandardTcpTransportProvider
@@ -124,7 +124,8 @@ class PeerLinkApplication : Application() {
 
         // 8. Transport, Session Manager, and Route Selection
         val transportProvider = StandardTcpTransportProvider("0.0.0.0")
-        val trustStore = InMemoryTrustStore()
+        val trustStoreFile = File(filesDir, "security/trust_store.pb").toPath()
+        val trustStore = PersistentTrustStore(trustStoreFile)
         val protocolVersion = ProtocolVersion.newBuilder().setMajor(1).setMinor(0).setPatch(0).build()
         val sessionManager = PeerSessionManager(
             keystoreManager.peerIdentity,

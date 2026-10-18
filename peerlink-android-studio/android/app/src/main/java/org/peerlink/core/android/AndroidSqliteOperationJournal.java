@@ -353,6 +353,30 @@ public class AndroidSqliteOperationJournal extends SQLiteOpenHelper implements O
         return results;
     }
 
+    public synchronized List<Map<String, Object>> listAllOperationsDetailed() {
+        List<Map<String, Object>> list = new ArrayList<>();
+        SQLiteDatabase db = getReadableDatabase();
+        try (Cursor cursor = db.query("operations", null, null, null, null, null, "created_at DESC")) {
+            while (cursor.moveToNext()) {
+                Map<String, Object> map = new HashMap<>();
+                map.put("operationId", cursor.getString(cursor.getColumnIndexOrThrow("operation_id")));
+                map.put("intent", cursor.getString(cursor.getColumnIndexOrThrow("intent")));
+                map.put("actorPeerId", cursor.getString(cursor.getColumnIndexOrThrow("actor_peer_id")));
+                map.put("targetObjectIds", cursor.getString(cursor.getColumnIndexOrThrow("target_object_ids")));
+                map.put("state", cursor.getString(cursor.getColumnIndexOrThrow("state")));
+                map.put("stage", cursor.getString(cursor.getColumnIndexOrThrow("journal_stage")));
+                map.put("idempotencyKey", cursor.getString(cursor.getColumnIndexOrThrow("idempotency_key")));
+                map.put("createdAt", cursor.getLong(cursor.getColumnIndexOrThrow("created_at")));
+                map.put("updatedAt", cursor.getLong(cursor.getColumnIndexOrThrow("updated_at")));
+                map.put("notes", cursor.getString(cursor.getColumnIndexOrThrow("notes")));
+                map.put("totalBytes", cursor.getLong(cursor.getColumnIndexOrThrow("total_bytes")));
+                map.put("transferredBytes", cursor.getLong(cursor.getColumnIndexOrThrow("transferred_bytes")));
+                list.add(map);
+            }
+        }
+        return list;
+    }
+
     private List<OperationRecord> queryOperations(String selection, String[] selectionArgs) {
         List<OperationRecord> list = new ArrayList<>();
         SQLiteDatabase db = getReadableDatabase();

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:peerlink/features/files/files_screen.dart';
-import 'package:peerlink/platform/android_node_bridge.dart';
 
 void main() {
   group('Simplified Sharing UX & Inbound Flow Tests (Phase 9 Feature A & D)', () {

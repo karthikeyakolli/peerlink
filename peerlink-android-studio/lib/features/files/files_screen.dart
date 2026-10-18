@@ -16,7 +16,7 @@ import '../../design_system/components/desktop_dropzone.dart';
 import '../../platform/windows_file_dialog.dart';
 import '../../platform/android_node_bridge.dart';
 import '../../design_system/components/media_category_sheet.dart';
-import '../../core/transfer/transfer_progress_model.dart' show TransferProgressModel, TransferFileItem;
+import '../../core/transfer/transfer_progress_model.dart' show TransferProgressModel;
 
 class SelectedFileInfo {
   final String path;
@@ -62,7 +62,6 @@ class _FilesScreenState extends State<FilesScreen> {
   final Map<String, TransferProgressModel> _activeProgressModels = {};
   EphemeralPolicy _currentPolicy = EphemeralPolicy.permanent;
 
-  String _activeCategory = 'All';
   final List<SelectedFileInfo> _selectedFiles = [];
 
   void _addPaths(List<String> paths) {
@@ -264,6 +263,19 @@ class _FilesScreenState extends State<FilesScreen> {
             initialFileName: fileName,
           );
         });
+        OperationJournalService.instance.recordOperation(
+          JournalOperation(
+            operationId: transferId,
+            type: OperationType.send,
+            state: JournalOperationState.executing,
+            stage: JournalStage.execute,
+            peerId: remotePeer,
+            summary: fileName.isNotEmpty ? fileName : 'Transfer $transferId',
+            bytesTransferred: 0,
+            totalBytes: total > 0 ? total : 0,
+            timestamp: DateTime.now(),
+          ),
+        );
       } else if (type == 'transferProgress') {
         final transferId = event['transferId'] as String? ?? '';
         final percent = (event['percent'] as num?)?.toInt() ?? 0;
@@ -273,6 +285,7 @@ class _FilesScreenState extends State<FilesScreen> {
         if (model != null) {
           model.recordProgress(transferredBytes: transferred, totalBytes: total);
         }
+        OperationJournalService.instance.updateProgress(transferId, transferred, total);
         setState(() {
           if (model != null && model.smoothedRateBytesPerSec != null) {
             _statusBanner =
@@ -292,18 +305,49 @@ class _FilesScreenState extends State<FilesScreen> {
             transferredBytes: model.totalBytes > 0 ? model.totalBytes : 0,
           );
         }
+        final isCancelled = !success && errorMessage.toLowerCase().contains('cancel');
+        OperationJournalService.instance.updateState(
+          transferId,
+          success
+              ? JournalOperationState.committed
+              : (isCancelled ? JournalOperationState.cancelled : JournalOperationState.failed),
+          note: success ? null : errorMessage,
+        );
+        if (success) {
+          OperationJournalService.instance.updateStage(transferId, JournalStage.finalize);
+        }
         setState(() {
           _statusBanner = success
               ? 'Transfer $transferId completed successfully!'
               : 'Transfer $transferId failed: $errorMessage';
         });
       } else if (type == 'incomingTransferOffer') {
+        final transferId = event['transferId'] as String? ?? '';
+        final senderPeer = event['senderPeer'] as String? ?? '';
+        final fileName = event['fileName'] as String? ?? 'file';
+        final totalBytes = (event['totalBytes'] as num?)?.toInt() ?? 0;
+        final itemCount = (event['itemCount'] as num?)?.toInt() ?? 1;
+
+        OperationJournalService.instance.recordOperation(
+          JournalOperation(
+            operationId: transferId,
+            type: OperationType.receive,
+            state: JournalOperationState.waiting,
+            stage: JournalStage.intent,
+            peerId: senderPeer,
+            summary: fileName,
+            bytesTransferred: 0,
+            totalBytes: totalBytes,
+            timestamp: DateTime.now(),
+          ),
+        );
+
         _showIncomingOfferDialog(
-          transferId: event['transferId'] as String? ?? '',
-          senderPeer: event['senderPeer'] as String? ?? '',
-          fileName: event['fileName'] as String? ?? 'file',
-          totalBytes: (event['totalBytes'] as num?)?.toInt() ?? 0,
-          itemCount: (event['itemCount'] as num?)?.toInt() ?? 1,
+          transferId: transferId,
+          senderPeer: senderPeer,
+          fileName: fileName,
+          totalBytes: totalBytes,
+          itemCount: itemCount,
         );
       }
     });
@@ -333,7 +377,7 @@ class _FilesScreenState extends State<FilesScreen> {
           children: [
             Text('From: $senderPeer', style: const TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            Text('File: $fileName' + (itemCount > 1 ? ' (and ${itemCount - 1} other files)' : '')),
+            Text('File: $fileName${itemCount > 1 ? ' (and ${itemCount - 1} other files)' : ''}'),
             Text('Size: ${(totalBytes / 1024).toStringAsFixed(1)} KB'),
             const SizedBox(height: 12),
             const Text('Do you want to accept this transfer and save to your received folder?'),
@@ -343,6 +387,11 @@ class _FilesScreenState extends State<FilesScreen> {
           TextButton(
             onPressed: () {
               Navigator.of(ctx).pop();
+              OperationJournalService.instance.updateState(
+                transferId,
+                JournalOperationState.cancelled,
+                note: 'Declined by recipient',
+              );
               AndroidNodeBridge.instance.respondIncomingTransfer(
                 transferId: transferId,
                 accept: false,
@@ -356,6 +405,14 @@ class _FilesScreenState extends State<FilesScreen> {
           ElevatedButton(
             onPressed: () {
               Navigator.of(ctx).pop();
+              OperationJournalService.instance.updateState(
+                transferId,
+                JournalOperationState.executing,
+              );
+              OperationJournalService.instance.updateStage(
+                transferId,
+                JournalStage.execute,
+              );
               AndroidNodeBridge.instance.respondIncomingTransfer(
                 transferId: transferId,
                 accept: true,

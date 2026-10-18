@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/services.dart';
+import 'platform_capabilities.dart';
 
 enum AndroidNodeStateEnum {
   active,
@@ -571,6 +572,71 @@ class AndroidNodeBridge {
       return res ?? false;
     } catch (e) {
       return false;
+    }
+  }
+
+  Future<bool> addTrustedPeer({
+    required String peerId,
+    required String fingerprint,
+  }) async {
+    try {
+      final res = await _methodChannel.invokeMethod<bool>(
+        'addTrustedPeer',
+        {
+          'peerId': peerId,
+          'fingerprint': fingerprint,
+        },
+      );
+      return res ?? false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> revokeTrustedPeer(String peerId) async {
+    try {
+      final res = await _methodChannel.invokeMethod<bool>(
+        'revokeTrustedPeer',
+        {'peerId': peerId},
+      );
+      return res ?? false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> isPeerTrusted(String peerId) async {
+    try {
+      final res = await _methodChannel.invokeMethod<bool>(
+        'isPeerTrusted',
+        {'peerId': peerId},
+      );
+      return res ?? false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> isPeerRevoked(String peerId) async {
+    try {
+      final res = await _methodChannel.invokeMethod<bool>(
+        'isPeerRevoked',
+        {'peerId': peerId},
+      );
+      return res ?? false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getJournalOperations() async {
+    if (!PlatformCapabilities.isAndroid) return [];
+    try {
+      final res = await _methodChannel.invokeMethod<List<dynamic>>('getJournalOperations');
+      if (res == null) return [];
+      return res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    } catch (e) {
+      return [];
     }
   }
 }

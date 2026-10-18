@@ -22,11 +22,8 @@ void main() {
         methodCalls.add(call);
         switch (call.method) {
           case 'initiateSend':
-            final target = call.arguments['targetPeerId'] as String? ?? '';
             return 'tx_mock_12345';
           case 'respondIncomingTransfer':
-            final transferId = call.arguments['transferId'] as String? ?? '';
-            final accept = call.arguments['accept'] as bool? ?? false;
             return true;
           case 'setReceiverConsentMode':
             return true;

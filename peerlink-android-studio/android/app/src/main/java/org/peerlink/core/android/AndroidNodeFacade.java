@@ -592,7 +592,12 @@ public class AndroidNodeFacade {
                     .resolve("staging_outbound")
                     .resolve(transferId);
             java.nio.file.Files.createDirectories(stagingOutbound);
-            java.nio.file.Path cachedFile = stagingOutbound.resolve(handle.getDisplayName());
+            String rawName = handle.getDisplayName();
+            String safeName = (rawName != null && !rawName.isBlank()) ? new File(rawName).getName() : "item";
+            java.nio.file.Path cachedFile = stagingOutbound.resolve(safeName).normalize();
+            if (!cachedFile.startsWith(stagingOutbound.normalize())) {
+                throw new SecurityException("Path traversal attempt in outbound file name: " + rawName);
+            }
             try (InputStream in = handle.openInputStream();
                  OutputStream out = java.nio.file.Files.newOutputStream(cachedFile)) {
                 in.transferTo(out);

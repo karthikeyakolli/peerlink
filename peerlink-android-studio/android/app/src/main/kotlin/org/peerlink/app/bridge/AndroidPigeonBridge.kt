@@ -8,6 +8,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import org.peerlink.core.android.AndroidNodeFacade
 import org.peerlink.core.android.AndroidNodeState
+import org.peerlink.core.android.AndroidSqliteOperationJournal
 import org.peerlink.core.android.discovery.AndroidDiscoveryEngine
 import org.peerlink.core.android.discovery.DiscoveredPeerRecord
 import org.peerlink.protocol.v1.PeerId
@@ -253,12 +254,6 @@ class AndroidPigeonBridge(
                     result.error("REFRESH_ERROR", e.message, null)
                 }
             }
-            "respondIncomingTransfer" -> {
-                val transferId = call.argument<String>("transferId") ?: ""
-                val accept = call.argument<Boolean>("accept") ?: false
-                val success = nodeFacade.respondIncomingTransfer(transferId, accept)
-                result.success(success)
-            }
             "setReceiverConsentMode" -> {
                 val modeStr = call.argument<String>("mode") ?: "AUTO_ACCEPT_PAIRED_TRUSTED"
                 try {
@@ -267,6 +262,45 @@ class AndroidPigeonBridge(
                     result.success(true)
                 } catch (e: Exception) {
                     result.error("INVALID_MODE", e.message, null)
+                }
+            }
+            "addTrustedPeer" -> {
+                val peerId = call.argument<String>("peerId") ?: ""
+                val fingerprint = call.argument<String>("fingerprint") ?: ""
+                try {
+                    nodeFacade.trustStore.addTrustedPeer(peerId, fingerprint, ByteArray(32))
+                    result.success(true)
+                } catch (e: Exception) {
+                    result.error("TRUST_ERROR", e.message, null)
+                }
+            }
+            "revokeTrustedPeer" -> {
+                val peerId = call.argument<String>("peerId") ?: ""
+                try {
+                    nodeFacade.trustStore.revokeTrust(peerId)
+                    result.success(true)
+                } catch (e: Exception) {
+                    result.error("REVOKE_ERROR", e.message, null)
+                }
+            }
+            "isPeerTrusted" -> {
+                val peerId = call.argument<String>("peerId") ?: ""
+                result.success(nodeFacade.trustStore.isTrusted(peerId))
+            }
+            "isPeerRevoked" -> {
+                val peerId = call.argument<String>("peerId") ?: ""
+                result.success(nodeFacade.trustStore.isRevoked(peerId))
+            }
+            "getJournalOperations" -> {
+                try {
+                    val journal = nodeFacade.operationJournal
+                    if (journal is AndroidSqliteOperationJournal) {
+                        result.success(journal.listAllOperationsDetailed())
+                    } else {
+                        result.success(emptyList<Map<String, Any>>())
+                    }
+                } catch (e: Exception) {
+                    result.error("JOURNAL_ERROR", e.message, null)
                 }
             }
             else -> result.notImplemented()

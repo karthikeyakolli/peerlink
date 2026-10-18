@@ -359,4 +359,31 @@ class AndroidSqliteJournalInstrumentedTest {
             restartedJournal.close()
         }
     }
+
+    @Test
+    fun testListAllOperationsDetailedReturnsAuthoritativeRecords() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val journal = AndroidSqliteOperationJournal(context, "test_detailed_${System.currentTimeMillis()}.db")
+        try {
+            val opId = "op_detailed_001"
+            val rec = OperationRecord.create(opId, OperationIntent.SEND, "peer_target_alpha", listOf("report.pdf"), "idemp_det_001")
+            journal.recordOperation(rec)
+            journal.setOperationMetadata(opId, "/staging/report.tmp", "/dest/report.pdf", "sha256_mock", 8192L)
+            journal.updateTransferredBytes(opId, 4096L)
+            journal.updateState(opId, OperationState.EXECUTING)
+
+            val detailed = journal.listAllOperationsDetailed()
+            assertNotNull(detailed)
+            assertTrue("Must contain registered operation", detailed.any { it["operationId"] == opId })
+
+            val op = detailed.first { it["operationId"] == opId }
+            assertEquals("SEND", op["intent"])
+            assertEquals("EXECUTING", op["state"])
+            assertEquals("peer_target_alpha", op["actorPeerId"])
+            assertEquals(8192L, op["totalBytes"])
+            assertEquals(4096L, op["transferredBytes"])
+        } finally {
+            journal.close()
+        }
+    }
 }
