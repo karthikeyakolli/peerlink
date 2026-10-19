@@ -51,6 +51,7 @@ public final class PeerTransferEngine {
     private final Map<String, TransferManifest> activeManifests = new ConcurrentHashMap<>();
     private final Map<String, List<Path>> activeSourcePaths = new ConcurrentHashMap<>();
     private final Map<String, Path> activeDestinations = new ConcurrentHashMap<>();
+    private final Map<String, String> ackedChunkHashes = new ConcurrentHashMap<>();
 
     private volatile int maxChunkRetries = 3;
     private volatile boolean computeChunkHashes = true;
@@ -436,9 +437,22 @@ public final class PeerTransferEngine {
         // Duplicate and Conflicting chunk handling
         Set<Long> ackedChunks = sessionJournal.getAckedChunks(transferId, itemIndex);
         if (ackedChunks.contains(chunkIndex)) {
+            String chunkKey = transferId + ":" + itemIndex + ":" + chunkIndex;
+            String computed = FileManifestBuilder.calculateSha256Hex(data);
+            String existingHash = ackedChunkHashes.get(chunkKey);
+            if (existingHash != null && !existingHash.equalsIgnoreCase(computed)) {
+                return TransferChunkAck.newBuilder()
+                        .setTransferId(transferId)
+                        .setItemIndex(itemIndex)
+                        .setChunkIndex(chunkIndex)
+                        .setSuccess(false)
+                        .setRetryRequested(false)
+                        .setErrorMessage("Conflicting chunk data for already acknowledged chunk")
+                        .build();
+            }
+
             // If hash is present, check for conflicting data
             if (chunk.getChunkSha256() != null && !chunk.getChunkSha256().isBlank()) {
-                String computed = FileManifestBuilder.calculateSha256Hex(data);
                 if (!computed.equalsIgnoreCase(chunk.getChunkSha256())) {
                     return TransferChunkAck.newBuilder()
                             .setTransferId(transferId)
@@ -479,6 +493,12 @@ public final class PeerTransferEngine {
 
             sessionJournal.updateChunkMetadata(
                     transferId, itemIndex, chunkIndex, offset, data.length, chunk.getChunkSha256(), ChunkStatus.CHUNK_STATUS_ACKED);
+
+            String chunkKey = transferId + ":" + itemIndex + ":" + chunkIndex;
+            String hashToRecord = (chunk.getChunkSha256() != null && !chunk.getChunkSha256().isBlank())
+                    ? chunk.getChunkSha256()
+                    : FileManifestBuilder.calculateSha256Hex(data);
+            ackedChunkHashes.put(chunkKey, hashToRecord);
 
             if (tracker != null) {
                 tracker.addBytes(data.length);

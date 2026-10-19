@@ -3,6 +3,7 @@ import '../../core/node_ipc_client.dart';
 import '../../core/operation_journal_service.dart';
 import '../../design_system/components/glass_container.dart';
 import '../../design_system/components/interactive_glass_card.dart';
+import '../../platform/platform_capabilities.dart';
 
 class ActivityScreen extends StatefulWidget {
   const ActivityScreen({super.key});
@@ -19,6 +20,18 @@ class _ActivityScreenState extends State<ActivityScreen> {
       _refreshErrorMessage = null;
     });
     try {
+      if (PlatformCapabilities.isAndroid) {
+        await OperationJournalService.instance.reloadAuthoritativeJournal();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Authoritative journal refreshed from native storage.'),
+              duration: Duration(seconds: 1),
+            ),
+          );
+        }
+        return;
+      }
       if (NodeIpcClient.instance.isAuthenticated) {
         await NodeIpcClient.instance.listTransfers();
       }
@@ -128,8 +141,9 @@ class _ActivityScreenState extends State<ActivityScreen> {
 
   Widget _buildActiveTab(ThemeData theme, List<JournalOperation> activeOps) {
     if (activeOps.isEmpty) {
+      final isAndroid = PlatformCapabilities.isAndroid;
       final ipcState = NodeIpcClient.instance.currentState;
-      final isConnected = ipcState.status == IpcConnectionStatus.connected;
+      final isConnected = isAndroid || (ipcState.status == IpcConnectionStatus.connected);
 
       return Center(
         child: Padding(
@@ -161,7 +175,9 @@ class _ActivityScreenState extends State<ActivityScreen> {
                 const SizedBox(height: 8),
                 Text(
                   isConnected
-                      ? 'Local Node Core daemon is operational and waiting for incoming or outgoing transfer requests.'
+                      ? (isAndroid
+                          ? 'Embedded Native Node runtime is operational and ready for transfers.'
+                          : 'Local Node Core daemon is operational and waiting for incoming or outgoing transfer requests.')
                       : 'Local Node Core daemon is disconnected. Transfers will stage locally until daemon connects.',
                   textAlign: TextAlign.center,
                   style: const TextStyle(color: Colors.grey, fontSize: 12),
@@ -173,7 +189,9 @@ class _ActivityScreenState extends State<ActivityScreen> {
                   alignment: WrapAlignment.center,
                   children: [
                     _buildHealthTag(
-                      isConnected ? 'NODE: CONNECTED' : 'NODE: DISCONNECTED',
+                      isAndroid
+                          ? 'NODE: EMBEDDED'
+                          : (isConnected ? 'NODE: CONNECTED' : 'NODE: DISCONNECTED'),
                       isConnected ? const Color(0xFF10B981) : Colors.grey,
                     ),
                     _buildHealthTag('AUDIT LOG: MONITORED', const Color(0xFF2563EB)),

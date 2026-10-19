@@ -116,6 +116,64 @@ class MultipathTransferSchedulerTest {
         assertTrue(lane1Count.get() >= 30, "Lane 1 should have taken over and delivered remaining chunks");
     }
 
+    @Test
+    @DisplayName("Requeued chunk is rescued even if peer worker found queue temporarily empty")
+    void requeuedChunkRescuedWhenPeerWorkerIdle() throws Exception {
+        int totalChunks = 2;
+        AtomicInteger fastCount = new AtomicInteger(0);
+        AtomicInteger slowCount = new AtomicInteger(0);
+        AtomicBoolean slowFailed = new AtomicBoolean(false);
+
+        // Fast lane finishes chunk 0 in 5ms. At 5ms, chunk 1 is in-flight on slow lane, so workQueue is empty!
+        MultipathLane fastLane = new MockMultipathLane("fast-lane", 5, false, fastCount::incrementAndGet);
+
+        // Slow lane takes 50ms, then fails and requeues chunk 1!
+        MultipathLane slowLane = new MultipathLane() {
+            @Override
+            public String getLaneId() {
+                return "slow-lane";
+            }
+
+            @Override
+            public boolean isHealthy() {
+                return !slowFailed.get();
+            }
+
+            @Override
+            public CompletableFuture<Void> sendChunk(int chunkIndex) {
+                slowCount.incrementAndGet();
+                CompletableFuture<Void> f = new CompletableFuture<>();
+                CompletableFuture.runAsync(() -> {
+                    try { Thread.sleep(60); } catch (InterruptedException ignored) {}
+                    slowFailed.set(true);
+                    f.completeExceptionally(new IOException("Interface failure"));
+                });
+                return f;
+            }
+        };
+
+        MultipathTransferScheduler scheduler = new MultipathTransferScheduler(List.of(fastLane, slowLane));
+        // Must complete within 5 seconds without hanging!
+        MultipathTransferResult result = scheduler.dispatchChunks(totalChunks).get(3, TimeUnit.SECONDS);
+
+        assertTrue(result.isSuccess(), "Transfer must succeed by rescuing chunk 1 via fast-lane");
+        assertEquals(totalChunks, result.completedChunks());
+        assertEquals(2, fastCount.get(), "Fast lane must have processed both chunk 0 and the rescued chunk 1");
+    }
+
+    @Test
+    @DisplayName("When all lanes fail, future completes with failure immediately without hanging")
+    void allLanesFailTerminatesWithoutHanging() throws Exception {
+        MultipathLane lane1 = new MockMultipathLane("lane-1", 10, true, null);
+        MultipathLane lane2 = new MockMultipathLane("lane-2", 10, true, null);
+
+        MultipathTransferScheduler scheduler = new MultipathTransferScheduler(List.of(lane1, lane2));
+        MultipathTransferResult result = scheduler.dispatchChunks(10).get(3, TimeUnit.SECONDS);
+
+        assertFalse(result.isSuccess(), "Transfer should fail when all lanes are unhealthy");
+        assertTrue(result.failureReason().contains("disconnected") || result.failureReason().contains("No remaining chunks"));
+    }
+
     private static class MockMultipathLane implements MultipathLane {
         private final String laneId;
         private final int simulatedDelayMs;

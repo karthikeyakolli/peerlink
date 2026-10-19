@@ -1,0 +1,1381 @@
+package org.peerlink.core.transfer;
+
+import com.google.protobuf.ByteString;
+import org.peerlink.core.operation.JournalStage;
+import org.peerlink.core.operation.OperationIntent;
+import org.peerlink.core.operation.OperationJournal;
+import org.peerlink.core.operation.OperationRecord;
+import org.peerlink.core.operation.OperationState;
+import org.peerlink.protocol.v1.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
+
+/**
+ * Resumable, recoverable, and fault-tolerant transfer engine for PeerLink.
+ *
+ * <p>Phase 07 Capabilities:
+ * <ul>
+ *   <li>Chunking with optional per-chunk SHA-256 validation</li>
+ *   <li>Failed chunk retries up to N attempts</li>
+ *   <li>Pause and Resume with selective retransmission of un-ACKed chunks</li>
+ *   <li>Source mutation detection mid-transfer</li>
+ *   <li>Crash recovery and operation reconciliation via durable manifests and receipts</li>
+ *   <li>Strict OUTCOME_UNKNOWN handling: if final ACK is lost after remote commit, query operation ID
+ *       and NEVER blindly replay committing or destructive actions</li>
+ *   <li>Dynamic bandwidth throttling via token-bucket rate limiter</li>
+ *   <li>Multi-file transactional staging and atomic commit/rollback</li>
+ * </ul>
+ */
+public final class PeerTransferEngine {
+    private static final Logger log = LoggerFactory.getLogger(PeerTransferEngine.class);
+
+    private final OperationJournal journal;
+    private final TransferSessionJournal sessionJournal;
+    private final StagingDirectoryManager stagingManager;
+    private final TransferPreflight preflight;
+    private final DestinationConflictResolver conflictResolver;
+    private final FileManifestBuilder manifestBuilder;
+    private final BandwidthLimiter bandwidthLimiter;
+    private final TransferQueueManager queueManager;
+
+    private final Map<String, TransferProgressTracker> activeTransfers = new ConcurrentHashMap<>();
+    private final Map<String, TransferManifest> activeManifests = new ConcurrentHashMap<>();
+    private final Map<String, List<Path>> activeSourcePaths = new ConcurrentHashMap<>();
+    private final Map<String, Path> activeDestinations = new ConcurrentHashMap<>();
+
+    private volatile int maxChunkRetries = 3;
+    private volatile boolean computeChunkHashes = true;
+
+    public PeerTransferEngine(
+            OperationJournal journal,
+            Path stagingRoot) {
+        this(journal, new InMemoryTransferSessionJournal(), new StagingDirectoryManager(stagingRoot),
+                new TransferPreflight(), new DestinationConflictResolver(), new BandwidthLimiter(),
+                new TransferQueueManager());
+    }
+
+    public PeerTransferEngine(
+            OperationJournal journal,
+            TransferSessionJournal sessionJournal,
+            Path stagingRoot) {
+        this(journal, sessionJournal, new StagingDirectoryManager(stagingRoot),
+                new TransferPreflight(), new DestinationConflictResolver(), new BandwidthLimiter(),
+                new TransferQueueManager());
+    }
+
+    public PeerTransferEngine(
+            OperationJournal journal,
+            StagingDirectoryManager stagingManager,
+            TransferPreflight preflight,
+            DestinationConflictResolver conflictResolver) {
+        this(journal, new InMemoryTransferSessionJournal(), stagingManager, preflight, conflictResolver,
+                new BandwidthLimiter(), new TransferQueueManager());
+    }
+
+    public PeerTransferEngine(
+            OperationJournal journal,
+            TransferSessionJournal sessionJournal,
+            StagingDirectoryManager stagingManager,
+            TransferPreflight preflight,
+            DestinationConflictResolver conflictResolver,
+            BandwidthLimiter bandwidthLimiter,
+            TransferQueueManager queueManager) {
+        this.journal = journal;
+        this.sessionJournal = sessionJournal;
+        this.stagingManager = stagingManager;
+        this.preflight = preflight;
+        this.conflictResolver = conflictResolver;
+        this.manifestBuilder = new FileManifestBuilder();
+        this.bandwidthLimiter = bandwidthLimiter;
+        this.queueManager = queueManager;
+    }
+
+    public void setBandwidthLimit(long bytesPerSecond) {
+        bandwidthLimiter.setRateLimit(bytesPerSecond);
+    }
+
+    public BandwidthLimiter getBandwidthLimiter() {
+        return bandwidthLimiter;
+    }
+
+    public TransferQueueManager getQueueManager() {
+        return queueManager;
+    }
+
+    public TransferSessionJournal getSessionJournal() {
+        return sessionJournal;
+    }
+
+    public void setMaxChunkRetries(int maxRetries) {
+        this.maxChunkRetries = Math.max(0, maxRetries);
+    }
+
+    public void setComputeChunkHashes(boolean computeChunkHashes) {
+        this.computeChunkHashes = computeChunkHashes;
+    }
+
+    /**
+     * Prepare a new outgoing transfer session (Sender side).
+     */
+    public TransferManifest prepareSend(
+            String senderPeerId,
+            String receiverPeerId,
+            List<Path> sourcePaths,
+            DuplicateDestinationPolicy duplicatePolicy) throws IOException {
+
+        String transferId = "xfer_" + UUID.randomUUID().toString().replace("-", "");
+        String operationId = "op_send_" + UUID.randomUUID().toString().replace("-", "");
+
+        TransferManifest manifest = manifestBuilder.buildManifest(
+                transferId,
+                operationId,
+                senderPeerId,
+                receiverPeerId,
+                sourcePaths,
+                duplicatePolicy);
+
+        long now = System.currentTimeMillis();
+
+        // 1. Authoritative Operation Journal
+        OperationRecord record = new OperationRecord(
+                operationId,
+                OperationIntent.SEND,
+                senderPeerId,
+                manifest.getItemsList().stream().map(TransferItem::getRelativePath).toList(),
+                OperationState.CREATED,
+                "idemp_" + transferId,
+                now,
+                now
+        );
+        journal.recordOperation(record);
+        journal.recordJournalStage(operationId, JournalStage.INTENT);
+
+        // 2. Transfer Session Journal
+        TransferSessionRecord session = new TransferSessionRecord(
+                transferId,
+                operationId,
+                senderPeerId,
+                receiverPeerId,
+                TransferState.TRANSFER_STATE_PREPARING,
+                manifest.getTotalBytes(),
+                manifest.getItemsCount(),
+                now
+        );
+        session.setManifest(manifest);
+        sessionJournal.recordSession(session);
+
+        activeManifests.put(transferId, manifest);
+        activeSourcePaths.put(transferId, new ArrayList<>(sourcePaths));
+        return manifest;
+    }
+
+    /**
+     * Process an incoming TransferOffer (Receiver side).
+     */
+    public TransferResponse handleIncomingOffer(TransferOffer offer, Path destinationDir) {
+        TransferManifest manifest = offer.getManifest();
+        String transferId = manifest.getTransferId();
+        String opId = manifest.getOperationId().getValue();
+
+        log.info("Evaluating incoming transfer offer: transferId={}, opId={}, items={}, totalBytes={}",
+                transferId, opId, manifest.getItemsCount(), manifest.getTotalBytes());
+
+        // Validate Manifest thoroughly before any disk, staging, or journal resource allocation
+        String validationError = validateManifest(manifest);
+        if (validationError != null) {
+            log.warn("Rejected malformed transfer offer [{}]: {}", transferId, validationError);
+            return TransferResponse.newBuilder()
+                    .setTransferId(transferId)
+                    .setAccepted(false)
+                    .setRejectionReason(validationError)
+                    .setError(ErrorDetail.newBuilder()
+                            .setCode(ErrorCode.ERROR_CODE_INTERNAL_ERROR)
+                            .setHumanSummary(validationError)
+                            .build())
+                    .build();
+        }
+
+        long now = System.currentTimeMillis();
+
+        // 1. Record incoming operation in operation journal
+        OperationRecord opRecord = new OperationRecord(
+                opId,
+                OperationIntent.SEND,
+                manifest.getSenderPeerId().getValue(),
+                manifest.getItemsList().stream().map(TransferItem::getRelativePath).toList(),
+                OperationState.CREATED,
+                "idemp_recv_" + transferId,
+                now,
+                now
+        );
+        journal.recordOperation(opRecord);
+        journal.recordJournalStage(opId, JournalStage.INTENT);
+
+        // 2. Transfer Session Journal
+        TransferSessionRecord session = new TransferSessionRecord(
+                transferId,
+                opId,
+                manifest.getSenderPeerId().getValue(),
+                manifest.getReceiverPeerId().getValue(),
+                TransferState.TRANSFER_STATE_PREPARING,
+                manifest.getTotalBytes(),
+                manifest.getItemsCount(),
+                now
+        );
+        session.setManifest(manifest);
+        sessionJournal.recordSession(session);
+
+        // 3. Resource Preflight Check
+        try {
+            preflight.checkDestination(destinationDir, manifest);
+            journal.updateState(opId, OperationState.VALIDATED);
+        } catch (PreflightException e) {
+            log.error("Transfer offer rejected due to preflight failure: {}", e.getMessage());
+            journal.updateState(opId, OperationState.FAILED);
+            journal.appendNote(opId, "Preflight failed: " + e.getMessage());
+            session.setState(TransferState.TRANSFER_STATE_FAILED);
+            session.setFailureReason("Preflight failed: " + e.getMessage());
+            return TransferResponse.newBuilder()
+                    .setTransferId(transferId)
+                    .setAccepted(false)
+                    .setRejectionReason(e.getMessage())
+                    .setError(ErrorDetail.newBuilder()
+                            .setCode(ErrorCode.ERROR_CODE_RESOURCE_EXHAUSTED)
+                            .setHumanSummary(e.getMessage())
+                            .build())
+                    .build();
+        }
+
+        // 4. Prepare clean staging directory
+        try {
+            stagingManager.prepareStagingDir(transferId);
+        } catch (IOException e) {
+            log.error("Failed to prepare staging directory for transfer {}: {}", transferId, e.getMessage());
+            journal.updateState(opId, OperationState.FAILED);
+            session.setState(TransferState.TRANSFER_STATE_FAILED);
+            return TransferResponse.newBuilder()
+                    .setTransferId(transferId)
+                    .setAccepted(false)
+                    .setRejectionReason("Cannot create staging directory: " + e.getMessage())
+                    .build();
+        }
+
+        journal.updateState(opId, OperationState.AUTHORIZED);
+        session.setState(TransferState.TRANSFER_STATE_CONNECTING);
+        activeManifests.put(transferId, manifest);
+        activeDestinations.put(transferId, destinationDir);
+
+        return TransferResponse.newBuilder()
+                .setTransferId(transferId)
+                .setAccepted(true)
+                .build();
+    }
+
+    /**
+     * Validates an incoming transfer manifest for protocol and safety compliance.
+     * Rejects traversal, reserved names, negative sizes, mismatched totals, and collisions.
+     */
+    public static String validateManifest(TransferManifest manifest) {
+        if (manifest == null) {
+            return "Manifest cannot be null";
+        }
+        if (manifest.getTransferId() == null || manifest.getTransferId().isBlank()) {
+            return "Transfer ID cannot be null or blank";
+        }
+        if (manifest.getTransferId().length() > 128) {
+            return "Transfer ID exceeds max length of 128";
+        }
+        if (manifest.getChunkSizeBytes() < 1024 || manifest.getChunkSizeBytes() > 16 * 1024 * 1024) {
+            return "Chunk size bytes must be between 1KB and 16MB: " + manifest.getChunkSizeBytes();
+        }
+        if (manifest.getItemsCount() <= 0) {
+            return "Manifest must contain at least one item";
+        }
+        if (manifest.getItemsCount() > 100_000) {
+            return "Manifest item count exceeds maximum permitted (100,000)";
+        }
+
+        long calculatedTotal = 0;
+        List<String> paths = new ArrayList<>(manifest.getItemsCount());
+
+        for (int i = 0; i < manifest.getItemsCount(); i++) {
+            TransferItem item = manifest.getItems(i);
+            try {
+                String validated = org.peerlink.core.filesystem.PathSafetyValidator.validateRelativePath(item.getRelativePath());
+                paths.add(validated);
+            } catch (Exception e) {
+                return "Item " + i + " has invalid relative path: " + e.getMessage();
+            }
+
+            long size = item.getFileSizeBytes();
+            if (size < 0) {
+                return "Item " + i + " has negative file size: " + size;
+            }
+            if (item.getIsDirectory()) {
+                if (size != 0) {
+                    return "Directory item " + i + " must have declared size 0";
+                }
+            } else {
+                calculatedTotal += size;
+            }
+        }
+
+        if (manifest.getTotalBytes() != calculatedTotal) {
+            return String.format("Manifest totalBytes mismatch: declared %d bytes, but item sizes sum to %d bytes",
+                    manifest.getTotalBytes(), calculatedTotal);
+        }
+
+        try {
+            org.peerlink.core.filesystem.PathSafetyValidator.validateNoCollisions(paths);
+        } catch (Exception e) {
+            return "Colliding item paths in manifest: " + e.getMessage();
+        }
+
+        return null;
+    }
+
+    /**
+     * Receive and store a transfer chunk into isolated staging (Receiver side).
+     * Validates lengths, indices, bounds, size overruns, and duplicate/conflicting chunks.
+     */
+    public TransferChunkAck handleIncomingChunk(TransferChunk chunk) throws IOException {
+        String transferId = chunk.getTransferId();
+        TransferManifest manifest = activeManifests.get(transferId);
+        if (manifest == null) {
+            Optional<TransferSessionRecord> sessionOpt = sessionJournal.getSession(transferId);
+            if (sessionOpt.isPresent()) {
+                manifest = sessionOpt.get().getManifest();
+            }
+        }
+        if (manifest == null) {
+            return TransferChunkAck.newBuilder()
+                    .setTransferId(transferId)
+                    .setItemIndex(chunk.getItemIndex())
+                    .setChunkIndex(chunk.getChunkIndex())
+                    .setSuccess(false)
+                    .setRetryRequested(false)
+                    .setErrorMessage("Unknown or expired transfer session: " + transferId)
+                    .build();
+        }
+
+        int itemIndex = chunk.getItemIndex();
+        if (itemIndex < 0 || itemIndex >= manifest.getItemsCount()) {
+            return TransferChunkAck.newBuilder()
+                    .setTransferId(transferId)
+                    .setItemIndex(itemIndex)
+                    .setChunkIndex(chunk.getChunkIndex())
+                    .setSuccess(false)
+                    .setRetryRequested(false)
+                    .setErrorMessage("Item index out of bounds: " + itemIndex)
+                    .build();
+        }
+
+        TransferItem item = manifest.getItems(itemIndex);
+        if (item.getIsDirectory()) {
+            return TransferChunkAck.newBuilder()
+                    .setTransferId(transferId)
+                    .setItemIndex(itemIndex)
+                    .setChunkIndex(chunk.getChunkIndex())
+                    .setSuccess(false)
+                    .setRetryRequested(false)
+                    .setErrorMessage("Cannot send chunk data for a directory item")
+                    .build();
+        }
+
+        long chunkIndex = chunk.getChunkIndex();
+        if (chunkIndex < 0) {
+            return TransferChunkAck.newBuilder()
+                    .setTransferId(transferId)
+                    .setItemIndex(itemIndex)
+                    .setChunkIndex(chunkIndex)
+                    .setSuccess(false)
+                    .setRetryRequested(false)
+                    .setErrorMessage("Chunk index cannot be negative: " + chunkIndex)
+                    .build();
+        }
+
+        long offset = chunk.getOffsetBytes();
+        if (offset < 0) {
+            return TransferChunkAck.newBuilder()
+                    .setTransferId(transferId)
+                    .setItemIndex(itemIndex)
+                    .setChunkIndex(chunkIndex)
+                    .setSuccess(false)
+                    .setRetryRequested(false)
+                    .setErrorMessage("Chunk offset cannot be negative: " + offset)
+                    .build();
+        }
+
+        byte[] data = chunk.getData().toByteArray();
+        long declaredFileSize = item.getFileSizeBytes();
+
+        // Enforce size overrun prevention
+        if (offset + data.length > declaredFileSize) {
+            String err = String.format("Size overrun: offset %d + chunk length %d exceeds declared file size %d",
+                    offset, data.length, declaredFileSize);
+            log.warn(err);
+            return TransferChunkAck.newBuilder()
+                    .setTransferId(transferId)
+                    .setItemIndex(itemIndex)
+                    .setChunkIndex(chunkIndex)
+                    .setSuccess(false)
+                    .setRetryRequested(false)
+                    .setErrorMessage(err)
+                    .build();
+        }
+
+        // Duplicate and Conflicting chunk handling
+        Set<Long> ackedChunks = sessionJournal.getAckedChunks(transferId, itemIndex);
+        if (ackedChunks.contains(chunkIndex)) {
+            // If hash is present, check for conflicting data
+            if (chunk.getChunkSha256() != null && !chunk.getChunkSha256().isBlank()) {
+                String computed = FileManifestBuilder.calculateSha256Hex(data);
+                if (!computed.equalsIgnoreCase(chunk.getChunkSha256())) {
+                    return TransferChunkAck.newBuilder()
+                            .setTransferId(transferId)
+                            .setItemIndex(itemIndex)
+                            .setChunkIndex(chunkIndex)
+                            .setSuccess(false)
+                            .setRetryRequested(true)
+                            .setErrorMessage("Conflicting chunk digest on retransmitted chunk")
+                            .build();
+                }
+            }
+            // Idempotent duplicate ACK for already acknowledged chunk
+            return TransferChunkAck.newBuilder()
+                    .setTransferId(transferId)
+                    .setItemIndex(itemIndex)
+                    .setChunkIndex(chunkIndex)
+                    .setBytesReceived(data.length)
+                    .setSuccess(true)
+                    .setRetryRequested(false)
+                    .build();
+        }
+
+        TransferProgressTracker tracker = activeTransfers.get(transferId);
+        if (tracker != null && tracker.isCancelled()) {
+            throw new IllegalStateException("Transfer was cancelled: " + tracker.getCancelReason());
+        }
+
+        try {
+            stagingManager.writeChunk(
+                    transferId,
+                    itemIndex,
+                    chunkIndex,
+                    offset,
+                    data,
+                    chunk.getChunkSha256(),
+                    declaredFileSize
+            );
+
+            sessionJournal.updateChunkMetadata(
+                    transferId, itemIndex, chunkIndex, offset, data.length, chunk.getChunkSha256(), ChunkStatus.CHUNK_STATUS_ACKED);
+
+            if (tracker != null) {
+                tracker.addBytes(data.length);
+            }
+
+            return TransferChunkAck.newBuilder()
+                    .setTransferId(transferId)
+                    .setItemIndex(itemIndex)
+                    .setChunkIndex(chunkIndex)
+                    .setBytesReceived(data.length)
+                    .setSuccess(true)
+                    .setRetryRequested(false)
+                    .build();
+
+        } catch (CorruptChunkException e) {
+            log.warn("Corrupt chunk detected: transfer={}, item={}, chunk={}",
+                    transferId, itemIndex, chunkIndex);
+
+            sessionJournal.updateChunkStatus(
+                    transferId, itemIndex, chunkIndex, ChunkStatus.CHUNK_STATUS_FAILED);
+
+            return TransferChunkAck.newBuilder()
+                    .setTransferId(transferId)
+                    .setItemIndex(itemIndex)
+                    .setChunkIndex(chunkIndex)
+                    .setBytesReceived(0)
+                    .setSuccess(false)
+                    .setRetryRequested(true)
+                    .setErrorMessage(e.getMessage())
+                    .build();
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid chunk rejected: transfer={}, item={}, chunk={}: {}",
+                    transferId, itemIndex, chunkIndex, e.getMessage());
+            return TransferChunkAck.newBuilder()
+                    .setTransferId(transferId)
+                    .setItemIndex(itemIndex)
+                    .setChunkIndex(chunkIndex)
+                    .setBytesReceived(0)
+                    .setSuccess(false)
+                    .setRetryRequested(false)
+                    .setErrorMessage(e.getMessage())
+                    .build();
+        } catch (Exception e) {
+            log.error("Storage / SQLite persistence failure for chunk [{}:{}:{}]: {}",
+                    transferId, itemIndex, chunkIndex, e.getMessage());
+            try {
+                sessionJournal.updateChunkStatus(
+                        transferId, itemIndex, chunkIndex, ChunkStatus.CHUNK_STATUS_FAILED);
+            } catch (Exception ignored) {}
+
+            return TransferChunkAck.newBuilder()
+                    .setTransferId(transferId)
+                    .setItemIndex(itemIndex)
+                    .setChunkIndex(chunkIndex)
+                    .setBytesReceived(0)
+                    .setSuccess(false)
+                    .setRetryRequested(true)
+                    .setErrorMessage("Storage persistence failure: " + e.getMessage())
+                    .build();
+        }
+    }
+
+    /**
+     * Handle incoming Resume Offer from sender (Receiver side).
+     * Inspects existing staged partial files and session journal to report ACKed chunks.
+     */
+    public TransferResumeState handleResumeOffer(TransferResumeOffer offer, Path destinationDir) {
+        String transferId = offer.getTransferId();
+        log.info("Handling resume offer for transfer: {}", transferId);
+
+        Optional<TransferSessionRecord> sessionOpt = sessionJournal.getSession(transferId);
+        TransferManifest manifest = activeManifests.get(transferId);
+        if (manifest == null && sessionOpt.isPresent()) {
+            manifest = sessionOpt.get().getManifest();
+        }
+        if (manifest == null && offer.hasManifest()) {
+            manifest = offer.getManifest();
+        }
+
+        if (manifest == null) {
+            return TransferResumeState.newBuilder()
+                    .setTransferId(transferId)
+                    .setCanResume(false)
+                    .setMessage("Unknown transfer session for resume")
+                    .build();
+        }
+
+        TransferResumeState.Builder stateBuilder = TransferResumeState.newBuilder()
+                .setTransferId(transferId)
+                .setOperationId(offer.getOperationId())
+                .setCanResume(true);
+
+        long totalStagedBytes = 0;
+
+        for (int i = 0; i < manifest.getItemsCount(); i++) {
+            TransferItem item = manifest.getItems(i);
+            if (item.getIsDirectory()) continue;
+
+            Set<Long> acked = sessionJournal.getAckedChunks(transferId, i);
+            long stagedSize = stagingManager.getStagedFileSize(transferId, i);
+            if (stagedSize > 0) {
+                totalStagedBytes += stagedSize;
+            }
+
+            for (Long chunkIdx : acked) {
+                stateBuilder.addAckedChunkIndices(chunkIdx);
+            }
+        }
+
+        stateBuilder.setBytesAlreadyStaged(totalStagedBytes);
+        stateBuilder.setCurrentState(TransferState.TRANSFER_STATE_TRANSFERRING);
+
+        // Ensure active manifests and destinations are wired for resumption
+        activeManifests.put(transferId, manifest);
+        activeDestinations.put(transferId, destinationDir);
+
+        sessionJournal.updateSessionState(transferId, TransferState.TRANSFER_STATE_TRANSFERRING);
+        journal.updateState(offer.getOperationId().getValue(), OperationState.EXECUTING);
+
+        return stateBuilder.build();
+    }
+
+    /**
+     * Pause an in-flight transfer cleanly (Sender or Receiver side).
+     */
+    public void pauseTransfer(String transferId, String reason) {
+        TransferProgressTracker tracker = activeTransfers.get(transferId);
+        if (tracker != null) {
+            tracker.pause(reason);
+        }
+
+        sessionJournal.updateSessionState(transferId, TransferState.TRANSFER_STATE_PAUSED);
+        TransferManifest manifest = activeManifests.get(transferId);
+        if (manifest != null) {
+            String opId = manifest.getOperationId().getValue();
+            journal.updateState(opId, OperationState.WAITING);
+            journal.appendNote(opId, "Paused: " + reason);
+        }
+        log.info("Transfer {} paused: {}", transferId, reason);
+    }
+
+    /**
+     * Handle Operation Status Query (Reconciliation / OUTCOME_UNKNOWN handling).
+     *
+     * <p>CRITICAL INVARIANT:
+     * If final ACK was lost after commit, receiver returns is_committed=true with the original receipt.
+     * Sender marks local state committed and NEVER blindly repeats destructive/committing actions!
+     */
+    public TransferOperationStatusResponse handleOperationStatusQuery(TransferOperationStatusQuery query) {
+        String opId = query.getOperationId().getValue();
+        String transferId = query.getTransferId();
+
+        log.info("Handling operation status query: opId={}, transferId={}", opId, transferId);
+
+        Optional<TransferSessionRecord> sessionOpt = sessionJournal.getSessionByOperationId(opId);
+        if (sessionOpt.isEmpty() && !transferId.isBlank()) {
+            sessionOpt = sessionJournal.getSession(transferId);
+        }
+
+        TransferOperationStatusResponse.Builder builder = TransferOperationStatusResponse.newBuilder()
+                .setOperationId(query.getOperationId())
+                .setTransferId(transferId);
+
+        if (sessionOpt.isPresent()) {
+            TransferSessionRecord session = sessionOpt.get();
+            if (session.getState() == TransferState.TRANSFER_STATE_COMPLETED && session.getReceipt() != null) {
+                return builder.setState(TransferState.TRANSFER_STATE_COMPLETED)
+                        .setIsCommitted(true)
+                        .setReceipt(session.getReceipt())
+                        .build();
+            } else if (session.getState() == TransferState.TRANSFER_STATE_FAILED) {
+                return builder.setState(TransferState.TRANSFER_STATE_FAILED)
+                        .setIsCommitted(false)
+                        .setErrorMessage(session.getFailureReason() != null ? session.getFailureReason() : "Operation failed")
+                        .build();
+            } else if (session.getState() == TransferState.TRANSFER_STATE_CANCELLED) {
+                return builder.setState(TransferState.TRANSFER_STATE_CANCELLED)
+                        .setIsCommitted(false)
+                        .setErrorMessage("Operation was cancelled")
+                        .build();
+            }
+        }
+
+        // Check authoritative operation journal
+        Optional<OperationRecord> opRec = journal.getOperation(opId);
+        if (opRec.isPresent()) {
+            OperationRecord rec = opRec.get();
+            boolean committed = (rec.getState() == OperationState.COMMITTED);
+            builder.setState(committed ? TransferState.TRANSFER_STATE_COMPLETED : TransferState.TRANSFER_STATE_TRANSFERRING);
+            builder.setIsCommitted(committed);
+            return builder.build();
+        }
+
+        return builder.setState(TransferState.TRANSFER_STATE_FAILED)
+                .setIsCommitted(false)
+                .setErrorMessage("Operation ID not found")
+                .build();
+    }
+
+    /**
+     * Verify all received items against manifest SHA-256 hashes (Receiver side).
+     * Multi-file transaction semantics: ALL items must pass verification.
+     * If any item fails, staging is cleaned up and entire operation fails.
+     */
+    public TransferVerifyResult verifyReceivedTransfer(String transferId, TransferManifest manifest) {
+        String opId = manifest.getOperationId().getValue();
+        journal.recordJournalStage(opId, JournalStage.VERIFY);
+
+        TransferProgressTracker tracker = activeTransfers.get(transferId);
+        if (tracker != null) {
+            tracker.updateState(TransferState.TRANSFER_STATE_VERIFYING);
+        }
+        sessionJournal.updateSessionState(transferId, TransferState.TRANSFER_STATE_VERIFYING);
+
+        for (int i = 0; i < manifest.getItemsCount(); i++) {
+            TransferItem item = manifest.getItems(i);
+            if (item.getIsDirectory()) continue;
+
+            try {
+                stagingManager.verifyStagedItem(transferId, i, item.getSha256Hex(), item.getRelativePath());
+            } catch (HashMismatchException e) {
+                log.error("Integrity verification failed for item {}: {}", item.getRelativePath(), e.getMessage());
+                journal.updateState(opId, OperationState.FAILED);
+                journal.appendNote(opId, "Integrity check failed: " + e.getMessage());
+                sessionJournal.updateSessionState(transferId, TransferState.TRANSFER_STATE_FAILED);
+
+                if (tracker != null) tracker.fail(e.getMessage());
+                // Atomic multi-file rollback: cleanup staging completely
+                stagingManager.cleanupStaging(transferId);
+
+                return TransferVerifyResult.newBuilder()
+                        .setTransferId(transferId)
+                        .setItemIndex(i)
+                        .setVerified(false)
+                        .setExpectedSha256(e.getExpectedHash())
+                        .setComputedSha256(e.getComputedHash())
+                        .setDetails(e.getMessage())
+                        .build();
+            } catch (IOException e) {
+                log.error("Failed to read staged file during verification: {}", e.getMessage(), e);
+                journal.updateState(opId, OperationState.FAILED);
+                sessionJournal.updateSessionState(transferId, TransferState.TRANSFER_STATE_FAILED);
+                if (tracker != null) tracker.fail(e.getMessage());
+                stagingManager.cleanupStaging(transferId);
+                return TransferVerifyResult.newBuilder()
+                        .setTransferId(transferId)
+                        .setItemIndex(i)
+                        .setVerified(false)
+                        .setDetails("Staging read error: " + e.getMessage())
+                        .build();
+            }
+        }
+
+        return TransferVerifyResult.newBuilder()
+                .setTransferId(transferId)
+                .setVerified(true)
+                .setDetails("All items passed SHA-256 cryptographic verification")
+                .build();
+    }
+
+    /**
+     * Commit verified files from staging to final destination directory (Receiver side).
+     * Stores durable completion receipt for crash recovery and lost-ACK queries.
+     */
+    public TransferCompletedReceipt commitReceivedTransfer(
+            String transferId,
+            TransferManifest manifest,
+            Path destinationRoot) throws IOException {
+
+        String opId = manifest.getOperationId().getValue();
+        journal.recordJournalStage(opId, JournalStage.COMMIT);
+
+        TransferProgressTracker tracker = activeTransfers.get(transferId);
+        if (tracker != null) {
+            tracker.updateState(TransferState.TRANSFER_STATE_COMMITTING);
+        }
+        sessionJournal.updateSessionState(transferId, TransferState.TRANSFER_STATE_COMMITTING);
+
+        List<ItemCommitResult> itemResults = new ArrayList<>();
+        long totalCommitted = 0;
+        Exception commitError = null;
+
+        for (int i = 0; i < manifest.getItemsCount(); i++) {
+            TransferItem item = manifest.getItems(i);
+            Path finalDest = null;
+            try {
+                finalDest = conflictResolver.resolveDestination(
+                        destinationRoot, item.getRelativePath(), manifest.getDuplicatePolicy());
+
+                if (item.getIsDirectory()) {
+                    Files.createDirectories(finalDest);
+                    itemResults.add(new ItemCommitResult(i, item.getRelativePath(), finalDest, true, null));
+                } else {
+                    stagingManager.commitItem(transferId, i, finalDest);
+                    totalCommitted += item.getFileSizeBytes();
+                    itemResults.add(new ItemCommitResult(i, item.getRelativePath(), finalDest, true, null));
+                }
+            } catch (Exception e) {
+                log.error("Commit failed on item [{}] ({}): {}", i, item.getRelativePath(), e.getMessage());
+                commitError = e;
+                itemResults.add(new ItemCommitResult(i, item.getRelativePath(), finalDest, false, e.getMessage()));
+                break;
+            }
+        }
+
+        boolean allSucceeded = (commitError == null && itemResults.size() == manifest.getItemsCount());
+        BatchCommitResult batchResult = new BatchCommitResult(
+                transferId, opId, allSucceeded, itemResults, totalCommitted, manifest.getItemsCount());
+
+        if (!allSucceeded) {
+            log.error("Multi-file batch commit partially failed: {} of {} items committed",
+                    batchResult.getCommittedCount(), manifest.getItemsCount());
+
+            journal.updateState(opId, OperationState.FAILED);
+            journal.appendNote(opId, "Partial commit failure: " + (commitError != null ? commitError.getMessage() : "Incomplete batch"));
+            sessionJournal.updateSessionState(transferId, TransferState.TRANSFER_STATE_FAILED);
+
+            if (tracker != null) {
+                tracker.fail("Partial commit failure: " + (commitError != null ? commitError.getMessage() : "Incomplete batch"));
+            }
+
+            throw new BatchCommitException("Multi-file commit failed partway through batch", batchResult, commitError);
+        }
+
+        // Cleanup staging
+        stagingManager.cleanupStaging(transferId);
+
+        // Update journals to final COMMITTED state
+        journal.updateState(opId, OperationState.COMMITTED);
+        journal.recordJournalStage(opId, JournalStage.FINALIZE);
+
+        TransferCompletedReceipt receipt = TransferCompletedReceipt.newBuilder()
+                .setTransferId(transferId)
+                .setOperationId(manifest.getOperationId())
+                .setCompletionTimestampUtcMs(System.currentTimeMillis())
+                .setTotalBytesTransferred(totalCommitted)
+                .setSuccess(true)
+                .setFinalDestinationPath(destinationRoot.toAbsolutePath().toString())
+                .build();
+
+        sessionJournal.recordReceipt(transferId, receipt);
+
+        if (tracker != null) {
+            tracker.setDestinationPath(destinationRoot.toAbsolutePath().toString());
+            tracker.complete();
+        }
+
+        return receipt;
+    }
+
+    /**
+     * Cancel an ongoing transfer session.
+     */
+    public void cancelTransfer(String transferId, String reason) {
+        TransferProgressTracker tracker = activeTransfers.get(transferId);
+        if (tracker != null) {
+            tracker.cancel(reason);
+        }
+
+        sessionJournal.updateSessionState(transferId, TransferState.TRANSFER_STATE_CANCELLED);
+        TransferManifest manifest = activeManifests.get(transferId);
+        if (manifest != null) {
+            String opId = manifest.getOperationId().getValue();
+            try {
+                journal.updateState(opId, OperationState.CANCELLED);
+                journal.appendNote(opId, "Cancelled: " + reason);
+            } catch (Exception e) {
+                log.warn("Could not mark operation {} cancelled in journal: {}", opId, e.getMessage());
+            }
+        }
+
+        stagingManager.cleanupStaging(transferId);
+        log.info("Transfer {} cancelled: {}", transferId, reason);
+    }
+
+    /**
+     * Executes a real end-to-end file transfer over an established, authenticated PeerSession.
+     * The sender reads and transmits protocol messages across the session/transport without invoking
+     * receiver-side handlers directly.
+     */
+    public TransferCompletedReceipt sendTransferOverSession(
+            org.peerlink.core.transport.PeerSession session,
+            TransferManifest manifest,
+            List<Path> sourcePaths,
+            Consumer<TransferProgress> progressCallback) throws Exception {
+
+        String transferId = manifest.getTransferId();
+        TransferProgressTracker tracker = new TransferProgressTracker(
+                transferId, manifest.getTotalBytes(), manifest.getItemsCount(), progressCallback);
+        activeTransfers.put(transferId, tracker);
+
+        try {
+            TransferSessionCoordinator coordinator;
+            if (session.getPayloadHandler() instanceof TransferSessionCoordinator existing) {
+                coordinator = existing;
+            } else {
+                coordinator = new TransferSessionCoordinator(session);
+            }
+            TransferSessionSender sender = new TransferSessionSender(session, coordinator, bandwidthLimiter, maxChunkRetries, tracker);
+            return sender.send(manifest, sourcePaths, progressCallback);
+        } finally {
+            activeTransfers.remove(transferId);
+        }
+    }
+
+    public TransferCompletedReceipt resumeTransferOverSession(
+            org.peerlink.core.transport.PeerSession session,
+            TransferManifest manifest,
+            List<Path> sourcePaths,
+            Consumer<TransferProgress> progressCallback) throws Exception {
+
+        String transferId = manifest.getTransferId();
+        TransferProgressTracker tracker = new TransferProgressTracker(
+                transferId, manifest.getTotalBytes(), manifest.getItemsCount(), progressCallback);
+        activeTransfers.put(transferId, tracker);
+
+        try {
+            TransferSessionCoordinator coordinator;
+            if (session.getPayloadHandler() instanceof TransferSessionCoordinator existing) {
+                coordinator = existing;
+            } else {
+                coordinator = new TransferSessionCoordinator(session);
+            }
+            TransferSessionSender sender = new TransferSessionSender(session, coordinator, bandwidthLimiter, maxChunkRetries, tracker);
+            return sender.sendResume(manifest, sourcePaths, progressCallback);
+        } finally {
+            activeTransfers.remove(transferId);
+        }
+    }
+
+    /**
+     * Factory for receiver-side transfer handler bound to a destination root and trust store.
+     */
+    public TransferSessionReceiver createSessionReceiver(Path destinationRoot, org.peerlink.core.security.TrustStore trustStore) {
+        return new TransferSessionReceiver(this, destinationRoot, trustStore);
+    }
+
+    public TransferSessionReceiver createSessionReceiver(Path destinationRoot, org.peerlink.core.security.TrustStore trustStore, TransferSessionReceiver.ReceiverConsentMode consentMode) {
+        return new TransferSessionReceiver(this, destinationRoot, trustStore, consentMode);
+    }
+
+    public TransferManifest getActiveManifest(String transferId) {
+        return activeManifests.get(transferId);
+    }
+
+    /**
+     * Legacy in-process transfer simulation.
+     * @deprecated Use {@link #sendTransferOverSession} with an established {@link org.peerlink.core.transport.PeerSession} in production.
+     */
+    @Deprecated
+    public TransferCompletedReceipt executeTransfer(
+            List<Path> sourcePaths,
+            Path destinationRoot,
+            DuplicateDestinationPolicy duplicatePolicy,
+            String senderPeerId,
+            String receiverPeerId,
+            Consumer<TransferProgress> progressCallback) throws Exception {
+
+        TransferManifest manifest = prepareSend(senderPeerId, receiverPeerId, sourcePaths, duplicatePolicy);
+        return executeTransferWithManifest(manifest, sourcePaths, destinationRoot, progressCallback, null);
+    }
+
+    /**
+     * Legacy in-process transfer simulation given an existing prepared or resumed manifest.
+     * @deprecated Use {@link #sendTransferOverSession} with an established {@link org.peerlink.core.transport.PeerSession} in production.
+     */
+    @Deprecated
+    public TransferCompletedReceipt executeTransferWithManifest(
+            TransferManifest manifest,
+            List<Path> sourcePaths,
+            Path destinationRoot,
+            Consumer<TransferProgress> progressCallback,
+            Set<Long> alreadyAckedChunks) throws Exception {
+
+        String transferId = manifest.getTransferId();
+        String opId = manifest.getOperationId().getValue();
+
+        TransferProgressTracker tracker = new TransferProgressTracker(
+                transferId, manifest.getTotalBytes(), manifest.getItemsCount(), progressCallback);
+        activeTransfers.put(transferId, tracker);
+        tracker.start();
+
+        try {
+            // 1. Offer & Preflight on receiver (if fresh transfer)
+            if (alreadyAckedChunks == null) {
+                TransferOffer offer = TransferOffer.newBuilder()
+                        .setManifest(manifest)
+                        .setTimestampUtcMs(System.currentTimeMillis())
+                        .build();
+
+                TransferResponse response = handleIncomingOffer(offer, destinationRoot);
+                if (!response.getAccepted()) {
+                    tracker.fail("Transfer offer rejected: " + response.getRejectionReason());
+                    throw new PreflightException(
+                            PreflightException.PreflightErrorCode.DESTINATION_UNAVAILABLE,
+                            "Transfer offer rejected: " + response.getRejectionReason());
+                }
+            }
+
+            // 2. Transferring Chunks
+            tracker.updateState(TransferState.TRANSFER_STATE_TRANSFERRING);
+            sessionJournal.updateSessionState(transferId, TransferState.TRANSFER_STATE_TRANSFERRING);
+            journal.updateState(opId, OperationState.EXECUTING);
+            journal.recordJournalStage(opId, JournalStage.EXECUTE);
+
+            int chunkSizeBytes = manifest.getChunkSizeBytes();
+            byte[] buffer = new byte[chunkSizeBytes];
+
+            Set<Long> ackedSet = (alreadyAckedChunks != null) ? alreadyAckedChunks : Collections.emptySet();
+
+            for (int i = 0; i < manifest.getItemsCount(); i++) {
+                if (tracker.isCancelled()) {
+                    throw new IllegalStateException("Transfer cancelled during transmission: " + tracker.getCancelReason());
+                }
+                if (tracker.isPaused()) {
+                    log.info("Transfer {} is paused; exiting chunk loop cleanly", transferId);
+                    return null;
+                }
+
+                TransferItem item = manifest.getItems(i);
+                tracker.setCurrentItem(i, item.getRelativePath());
+
+                if (item.getIsDirectory()) {
+                    continue;
+                }
+
+                Path sourceFile = findSourceFileForRelativePath(sourcePaths, item.getRelativePath());
+
+                // Detect source mutation before/during transmission
+                validateSourceFile(sourceFile, item);
+
+                long fileSize = item.getFileSizeBytes();
+                long offset = 0;
+                long chunkIndex = 0;
+
+                if (fileSize == 0) {
+                    if (!ackedSet.contains(0L)) {
+                        sendChunkWithRetry(transferId, i, 0, 0, new byte[0], true, item.getSha256Hex());
+                    }
+                } else {
+                    try (InputStream in = Files.newInputStream(sourceFile)) {
+                        int read;
+                        while ((read = in.read(buffer)) != -1) {
+                            if (tracker.isCancelled()) {
+                                throw new IllegalStateException("Transfer cancelled: " + tracker.getCancelReason());
+                            }
+                            if (tracker.isPaused()) {
+                                log.info("Transfer {} is paused; exiting chunk loop cleanly", transferId);
+                                return null;
+                            }
+
+                            // Check source mutation during file read
+                            validateSourceFile(sourceFile, item);
+
+                            if (!ackedSet.contains(chunkIndex)) {
+                                byte[] chunkData = Arrays.copyOf(buffer, read);
+
+                                // Bandwidth throttling
+                                bandwidthLimiter.consume(read);
+
+                                boolean isLast = (offset + read >= fileSize);
+                                String chunkSha = computeChunkHashes ? FileManifestBuilder.calculateSha256Hex(chunkData) : "";
+
+                                sendChunkWithRetry(transferId, i, chunkIndex, offset, chunkData, isLast, chunkSha);
+                            }
+
+                            offset += read;
+                            chunkIndex++;
+                        }
+                    }
+                }
+            }
+
+            // 3. Verification
+            tracker.updateState(TransferState.TRANSFER_STATE_RECEIVED);
+            TransferVerifyResult verifyResult = verifyReceivedTransfer(transferId, manifest);
+            if (!verifyResult.getVerified()) {
+                throw new HashMismatchException(
+                        "Item " + verifyResult.getItemIndex(),
+                        verifyResult.getExpectedSha256(),
+                        verifyResult.getComputedSha256());
+            }
+
+            // 4. Atomic Commit
+            TransferCompletedReceipt receipt = commitReceivedTransfer(transferId, manifest, destinationRoot);
+            log.info("Transfer {} completed successfully: {} bytes committed to {}",
+                    transferId, receipt.getTotalBytesTransferred(), receipt.getFinalDestinationPath());
+            return receipt;
+
+        } catch (Exception e) {
+            log.error("Transfer {} encountered error: {}", transferId, e.getMessage());
+            if (!tracker.isPaused()) {
+                tracker.fail(e.getMessage());
+                sessionJournal.updateSessionState(transferId, TransferState.TRANSFER_STATE_FAILED);
+                stagingManager.cleanupStaging(transferId);
+            }
+            throw e;
+        } finally {
+            if (!tracker.isPaused()) {
+                activeTransfers.remove(transferId);
+                activeManifests.remove(transferId);
+                activeSourcePaths.remove(transferId);
+                activeDestinations.remove(transferId);
+            }
+        }
+    }
+
+    private void sendChunkWithRetry(
+            String transferId,
+            int itemIndex,
+            long chunkIndex,
+            long offsetBytes,
+            byte[] chunkData,
+            boolean isLastChunk,
+            String chunkSha256) throws Exception {
+
+        int attempts = 0;
+        while (attempts <= maxChunkRetries) {
+            attempts++;
+            TransferChunk chunk = TransferChunk.newBuilder()
+                    .setTransferId(transferId)
+                    .setItemIndex(itemIndex)
+                    .setChunkIndex(chunkIndex)
+                    .setOffsetBytes(offsetBytes)
+                    .setData(ByteString.copyFrom(chunkData))
+                    .setIsLastChunk(isLastChunk)
+                    .setChunkSha256(chunkSha256)
+                    .build();
+
+            TransferChunkAck ack = handleIncomingChunk(chunk);
+            if (ack.getSuccess()) {
+                return;
+            }
+
+            log.warn("Chunk failed: item={}, chunk={}, attempt={}/{}, err={}",
+                    itemIndex, chunkIndex, attempts, maxChunkRetries + 1, ack.getErrorMessage());
+
+            if (attempts > maxChunkRetries) {
+                throw new IOException("Failed to send chunk [" + itemIndex + ":" + chunkIndex + "] after "
+                        + attempts + " attempts: " + ack.getErrorMessage());
+            }
+        }
+    }
+
+    /**
+     * Detects if source file mutated (size or modified timestamp changed) mid-transfer.
+     */
+    private void validateSourceFile(Path sourceFile, TransferItem expectedItem) throws SourceMutationException {
+        if (!Files.exists(sourceFile)) {
+            throw new SourceMutationException(expectedItem.getRelativePath(), "Source file was deleted during transfer");
+        }
+
+        try {
+            long currentSize = Files.size(sourceFile);
+            if (currentSize != expectedItem.getFileSizeBytes()) {
+                throw new SourceMutationException(expectedItem.getRelativePath(),
+                        "Size changed from " + expectedItem.getFileSizeBytes() + " to " + currentSize + " bytes");
+            }
+
+            FileTime modifiedTime = Files.getLastModifiedTime(sourceFile);
+            if (modifiedTime.toMillis() != expectedItem.getModifiedTimeUtcMs()) {
+                throw new SourceMutationException(expectedItem.getRelativePath(),
+                        "Modification timestamp changed from " + expectedItem.getModifiedTimeUtcMs() + " to " + modifiedTime.toMillis());
+            }
+        } catch (IOException e) {
+            throw new SourceMutationException(expectedItem.getRelativePath(), "Cannot read file attributes: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Resume a paused or interrupted transfer session.
+     * Retransmits ONLY missing/un-ACKed chunks!
+     *
+     * @return Resulting TransferCompletedReceipt upon successful completion
+     */
+    public TransferCompletedReceipt resumeTransfer(
+            String transferId,
+            Path destinationDir,
+            Consumer<TransferProgress> progressCallback) throws Exception {
+
+        TransferManifest manifest = activeManifests.get(transferId);
+        List<Path> sourcePaths = activeSourcePaths.get(transferId);
+
+        if (manifest == null || sourcePaths == null) {
+            Optional<TransferSessionRecord> sessionOpt = sessionJournal.getSession(transferId);
+            if (sessionOpt.isPresent()) {
+                manifest = sessionOpt.get().getManifest();
+            }
+            if (manifest == null) {
+                throw new IllegalStateException("Cannot resume transfer: manifest not found for " + transferId);
+            }
+        }
+
+        // 1. Create Resume Offer
+        TransferResumeOffer offer = TransferResumeOffer.newBuilder()
+                .setTransferId(transferId)
+                .setOperationId(manifest.getOperationId())
+                .setManifest(manifest)
+                .setResumeTimestampUtcMs(System.currentTimeMillis())
+                .build();
+
+        // 2. Query receiver for current staging state & ACKed chunks
+        TransferResumeState resumeState = handleResumeOffer(offer, destinationDir);
+        if (!resumeState.getCanResume()) {
+            throw new IllegalStateException("Receiver rejected resume offer: " + resumeState.getMessage());
+        }
+
+        Set<Long> ackedChunks = new HashSet<>(resumeState.getAckedChunkIndicesList());
+        log.info("Resuming transfer {}: receiver already has {} acked chunks", transferId, ackedChunks.size());
+
+        // 3. Continue transmission transmitting ONLY missing chunks
+        activeManifests.put(transferId, manifest);
+        if (sourcePaths != null) {
+            activeSourcePaths.put(transferId, sourcePaths);
+        }
+
+        return executeTransferWithManifest(manifest, activeSourcePaths.get(transferId), destinationDir, progressCallback, ackedChunks);
+    }
+
+    /**
+     * Reconcile an operation whose final ACK was lost after commit.
+     * Marks sender operation as COMMITTED without re-committing or duplicating files!
+     */
+    public TransferCompletedReceipt reconcileLostAck(
+            String operationId,
+            String transferId,
+            java.util.function.Function<TransferOperationStatusQuery, TransferOperationStatusResponse> remoteQueryRpc) {
+        log.info("Reconciling operation status for lost ACK: opId={}, transferId={}", operationId, transferId);
+
+        TransferOperationStatusQuery query = TransferOperationStatusQuery.newBuilder()
+                .setOperationId(OperationId.newBuilder().setValue(operationId).build())
+                .setTransferId(transferId)
+                .build();
+
+        TransferOperationStatusResponse response = remoteQueryRpc.apply(query);
+
+        if (response.getIsCommitted() && response.hasReceipt()) {
+            TransferCompletedReceipt receipt = response.getReceipt();
+            journal.updateState(operationId, OperationState.COMMITTED);
+            sessionJournal.recordReceipt(transferId, receipt);
+            log.info("Reconciled operation {} as COMMITTED using remote receipt", operationId);
+            return receipt;
+        } else {
+            throw new IllegalStateException("Cannot reconcile operation " + operationId + ": remote reports is_committed=false");
+        }
+    }
+
+    public TransferCompletedReceipt reconcileLostAck(String operationId, String transferId) {
+        return reconcileLostAck(operationId, transferId, this::handleOperationStatusQuery);
+    }
+
+    private Path findSourceFileForRelativePath(List<Path> sourcePaths, String relativePath) {
+        for (Path root : sourcePaths) {
+            Path normalized = root.toAbsolutePath().normalize();
+            if (Files.isRegularFile(normalized)) {
+                if (normalized.getFileName().toString().equals(relativePath)) {
+                    return normalized;
+                }
+            } else if (Files.isDirectory(normalized)) {
+                String dirName = normalized.getFileName().toString();
+                if (relativePath.startsWith(dirName + "/") || relativePath.equals(dirName)) {
+                    String sub = relativePath.substring(dirName.length());
+                    if (sub.startsWith("/")) sub = sub.substring(1);
+                    Path candidate = normalized.resolve(sub);
+                    if (Files.exists(candidate)) {
+                        return candidate;
+                    }
+                }
+            }
+        }
+        throw new IllegalArgumentException("Cannot locate source file for relative path: " + relativePath);
+    }
+
+    public TransferProgressTracker getActiveTransferTracker(String transferId) {
+        return activeTransfers.get(transferId);
+    }
+
+    public StagingDirectoryManager getStagingManager() {
+        return stagingManager;
+    }
+
+    public record StartupReconciliationReport(
+            int examinedSessions,
+            int recoveredCompleted,
+            int pausedForResume,
+            int markedFailed,
+            int uncertainPartials,
+            List<String> diagnostics
+    ) {
+        public String summary() {
+            return String.format("examined=%d recoveredCompleted=%d pausedForResume=%d markedFailed=%d uncertainPartials=%d",
+                    examinedSessions, recoveredCompleted, pausedForResume, markedFailed, uncertainPartials);
+        }
+    }
+
+    /**
+     * Reconciles SQLite transfer journal state with staged and committed filesystem content at startup.
+     * Prevents blind replay of destructive or uncertain commits.
+     */
+    public StartupReconciliationReport reconcileAtStartup(Path defaultDestinationDir) {
+        List<TransferSessionRecord> incomplete = sessionJournal.getIncompleteSessions();
+        int examined = incomplete.size();
+        int recoveredCompleted = 0;
+        int pausedForResume = 0;
+        int markedFailed = 0;
+        int uncertainPartials = 0;
+        List<String> diagnostics = new ArrayList<>();
+
+        for (TransferSessionRecord record : incomplete) {
+            String transferId = record.getTransferId();
+            String opId = record.getOperationId();
+            TransferState state = record.getState();
+            TransferManifest manifest = record.getManifest();
+
+            if (manifest == null) {
+                record.setState(TransferState.TRANSFER_STATE_FAILED);
+                record.setFailureReason("Missing manifest metadata during crash recovery");
+                sessionJournal.updateSessionState(transferId, TransferState.TRANSFER_STATE_FAILED);
+                markedFailed++;
+                diagnostics.add(transferId + ": Missing manifest, marked FAILED");
+                continue;
+            }
+
+            if (state == TransferState.TRANSFER_STATE_COMMITTING || state == TransferState.TRANSFER_STATE_VERIFYING) {
+                boolean allCommitted = true;
+                boolean anyCommitted = false;
+                for (TransferItem item : manifest.getItemsList()) {
+                    if (item.getIsDirectory()) continue;
+                    Path destFile = defaultDestinationDir != null ? defaultDestinationDir.resolve(item.getRelativePath()) : null;
+                    if (destFile != null && Files.exists(destFile)) {
+                        anyCommitted = true;
+                        try {
+                            String sha = FileManifestBuilder.calculateSha256Hex(destFile);
+                            if (!sha.equalsIgnoreCase(item.getSha256Hex())) {
+                                allCommitted = false;
+                            }
+                        } catch (Exception e) {
+                            allCommitted = false;
+                        }
+                    } else {
+                        allCommitted = false;
+                    }
+                }
+
+                if (allCommitted && anyCommitted) {
+                    record.setState(TransferState.TRANSFER_STATE_COMPLETED);
+                    sessionJournal.updateSessionState(transferId, TransferState.TRANSFER_STATE_COMPLETED);
+                    journal.updateState(opId, OperationState.COMMITTED);
+                    recoveredCompleted++;
+                    diagnostics.add(transferId + ": Verified committed in destination, marked COMPLETED");
+                } else if (anyCommitted) {
+                    record.setState(TransferState.TRANSFER_STATE_FAILED);
+                    record.setFailureReason("RECOVERY_PARTIAL_COMMIT_UNCERTAIN: partial destination write detected");
+                    sessionJournal.updateSessionState(transferId, TransferState.TRANSFER_STATE_FAILED);
+                    journal.updateState(opId, OperationState.OUTCOME_UNKNOWN);
+                    uncertainPartials++;
+                    diagnostics.add(transferId + ": Partial commit detected, marked OUTCOME_UNKNOWN");
+                } else {
+                    record.setState(TransferState.TRANSFER_STATE_PAUSED);
+                    sessionJournal.updateSessionState(transferId, TransferState.TRANSFER_STATE_PAUSED);
+                    pausedForResume++;
+                    diagnostics.add(transferId + ": Interrupted before commit, staged parts retained for resume");
+                }
+            } else if (state == TransferState.TRANSFER_STATE_TRANSFERRING || state == TransferState.TRANSFER_STATE_PREPARING) {
+                boolean hasStaging = false;
+                for (int i = 0; i < manifest.getItemsCount(); i++) {
+                    if (manifest.getItems(i).getIsDirectory()) continue;
+                    if (stagingManager.hasStagedPart(transferId, i)) {
+                        hasStaging = true;
+                        long fileSize = stagingManager.getStagedFileSize(transferId, i);
+                        Set<Long> acked = sessionJournal.getAckedChunks(transferId, i);
+                        long maxAckOffset = (long) acked.size() * manifest.getChunkSizeBytes();
+                        if (fileSize > maxAckOffset) {
+                            try {
+                                stagingManager.truncateStagedFile(transferId, i, maxAckOffset);
+                            } catch (Exception ignored) {}
+                        }
+                    }
+                }
+
+                if (hasStaging) {
+                    record.setState(TransferState.TRANSFER_STATE_PAUSED);
+                    record.setFailureReason("Recovered after node restart; ready for resume");
+                    sessionJournal.updateSessionState(transferId, TransferState.TRANSFER_STATE_PAUSED);
+                    pausedForResume++;
+                    diagnostics.add(transferId + ": Staged chunks validated, marked PAUSED for resume");
+                } else {
+                    record.setState(TransferState.TRANSFER_STATE_FAILED);
+                    record.setFailureReason("No staging files found after restart");
+                    sessionJournal.updateSessionState(transferId, TransferState.TRANSFER_STATE_FAILED);
+                    markedFailed++;
+                    diagnostics.add(transferId + ": Staging missing, marked FAILED");
+                }
+            }
+        }
+
+        return new StartupReconciliationReport(
+                examined, recoveredCompleted, pausedForResume, markedFailed, uncertainPartials, diagnostics);
+    }
+}

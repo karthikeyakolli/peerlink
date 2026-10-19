@@ -1,27 +1,15 @@
-$RepoRoot = Split-Path -Parent $PSScriptRoot
-$src1 = Join-Path $RepoRoot "peerlink-android-studio\lib\design_system\components\interactive_glass_card.dart"
-$src2 = Join-Path $RepoRoot "peerlink-android-studio\lib\design_system\components\glass_container.dart"
-$src3 = Join-Path $RepoRoot "peerlink-android-studio\lib\design_system\components\instant_beam_deck.dart"
-$src4 = Join-Path $RepoRoot "peerlink-android-studio\lib\design_system\components\ephemeral_policy_modal.dart"
-$src5 = Join-Path $RepoRoot "peerlink-android-studio\lib\design_system\components\burn_viewer_modal.dart"
+# sync_glass_components.ps1
+# Delegates to authoritative cross-platform synchronization engine
+$ErrorActionPreference = 'Stop'
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$SyncScript = Join-Path $ScriptDir "sync_cross_platform.py"
 
-$targets = @(
-    "windows\app\flutter\lib\design_system\components",
-    "linux\app\flutter\lib\design_system\components",
-    "macos\app\flutter\lib\design_system\components",
-    "android\app\flutter\lib\design_system\components",
-    "shared-source\canonical\flutter\lib\design_system\components"
-)
+Write-Host "Delegating to authoritative cross-platform synchronizer (sync_cross_platform.py)..." -ForegroundColor Cyan
+& python $SyncScript --apply
 
-foreach ($t in $targets) {
-    $dir = Join-Path $RepoRoot $t
-    if (-not (Test-Path $dir)) {
-        New-Item -ItemType Directory -Path $dir -Force | Out-Null
-    }
-    Copy-Item $src1 $dir -Force
-    Copy-Item $src2 $dir -Force
-    Copy-Item $src3 $dir -Force
-    Copy-Item $src4 $dir -Force
-    Copy-Item $src5 $dir -Force
-    Write-Host "Synced components to: $t"
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Synchronization failed with exit code $LASTEXITCODE"
+    exit $LASTEXITCODE
 }
+
+Write-Host "All components synchronized successfully." -ForegroundColor Green

@@ -168,9 +168,9 @@ Set-Content -Path (Join-Path $DiagDest "DiagnosticsCollector.java") -Value $Diag
 # 15. Flutter Common UI
 $FlutterDest = Join-Path $Canonical "flutter"
 New-Item -ItemType Directory -Path $FlutterDest -Force | Out-Null
-Copy-Item -Recurse -Force "apps/peerlink-app/lib" $FlutterDest/
-Copy-Item -Recurse -Force "apps/peerlink-app/test" $FlutterDest/
-Copy-Item -Force "apps/peerlink-app/pubspec.yaml" $FlutterDest/
-Copy-Item -Force "apps/peerlink-app/analysis_options.yaml" $FlutterDest/
+Copy-Item -Recurse -Force "peerlink-android-studio/lib" $FlutterDest/
+Copy-Item -Recurse -Force "peerlink-android-studio/test" $FlutterDest/
+Copy-Item -Force "peerlink-android-studio/pubspec.yaml" $FlutterDest/
+Copy-Item -Force "peerlink-android-studio/analysis_options.yaml" $FlutterDest/
 
 Write-Host "Canonical shared source populated successfully." -ForegroundColor Green

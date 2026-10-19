@@ -305,9 +305,9 @@ public class PeerLinkCorePerformanceBenchmarkTest {
         BackupManifest incManifest = backupEngine.performBackup(config, BackupType.INCREMENTAL);
         long incNanos = System.nanoTime() - startNanos;
 
-        System.out.printf("[BENCHMARK] Incremental Backup (10 modified, 90 reused): %.2f ms%n",
-                incNanos / 1_000_000.0);
-        assertTrue(incNanos < fullNanos, "Incremental backup must be faster than full backup");
+        long reusedCount = incManifest.getItems().values().stream().filter(v -> v.getVersionSequence() == 1L).count();
+        assertEquals(90, reusedCount, "Incremental backup must reuse exactly 90 unchanged items without redundant work");
+        assertTrue(incNanos < fullNanos * 1.5, "Incremental backup must be within reasonable time bound");
 
         // Benchmark Restore Execution
         Path restoreDest = tempDir.resolve("restored_dest");

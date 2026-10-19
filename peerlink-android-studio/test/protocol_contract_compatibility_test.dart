@@ -18,13 +18,23 @@ void main() {
     setUpAll(() {
       // Find the protocol target test-fixtures directory
       final current = Directory.current.path;
-      // In flutter test, cwd is typically apps/peerlink-app
-      Directory candidate = Directory('$current/../../protocol/target/test-fixtures');
-      if (!candidate.existsSync()) {
-        candidate = Directory('$current/protocol/target/test-fixtures');
+      final candidates = [
+        Directory('$current/protocol/target/test-fixtures'),
+        Directory('$current/../../protocol/target/test-fixtures'),
+        Directory('$current/../../../protocol/target/test-fixtures'),
+        Directory('$current/../../../../protocol/target/test-fixtures'),
+      ];
+      Directory? candidate;
+      for (final c in candidates) {
+        if (c.existsSync()) {
+          candidate = c;
+          break;
+        }
       }
-      expect(candidate.existsSync(), isTrue, reason: 'Java test-fixtures directory must exist at ${candidate.path}');
-      javaFixtureDir = candidate;
+      expect(candidate != null, isTrue,
+          reason:
+              'Java test-fixtures directory must exist near $current');
+      javaFixtureDir = candidate!;
 
       dartOutDir = Directory('${candidate.path}/dart-out');
       if (!dartOutDir.existsSync()) {

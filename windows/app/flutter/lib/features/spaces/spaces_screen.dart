@@ -65,7 +65,7 @@ class _SpacesScreenState extends State<SpacesScreen> {
                     style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
                 DropdownButtonFormField<SyncMode>(
-                  value: selectedMode,
+                  initialValue: selectedMode,
                   decoration: const InputDecoration(border: OutlineInputBorder()),
                   items: const [
                     DropdownMenuItem(
@@ -455,7 +455,7 @@ class _SpacesScreenState extends State<SpacesScreen> {
                 Navigator.pop(ctx);
                 final snap = await SyncBackupService.instance
                     .createSnapshot(name: name, folderPath: path);
-                if (context.mounted) {
+                if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(

@@ -9,32 +9,51 @@ import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.documentfile.provider.DocumentFile
 import org.peerlink.core.android.AndroidStorageAbstraction
-import java.io.FileNotFoundException
-import java.io.IOException
-import java.io.InputStream
-import java.io.OutputStream
+import java.io.*
 
 /**
  * Storage Access Framework (SAF), ContentResolver, and MediaStore bridge
  * implementing AndroidStorageAbstraction.ContentResolverBridge.
+ * Seamlessly handles SAF content:// URIs, file:// URIs, and raw filesystem paths.
  */
 class SafStorageProvider(private val context: Context) : AndroidStorageAbstraction.ContentResolverBridge {
 
     private val contentResolver: ContentResolver = context.contentResolver
 
+    private fun parseFile(uriString: String): File? {
+        val uri = Uri.parse(uriString)
+        if (uri.scheme == null) return File(uriString)
+        if (uri.scheme == "file") {
+            return uri.path?.let { File(it) } ?: File(uriString.removePrefix("file://"))
+        }
+        return null
+    }
+
     override fun openInputStream(uriString: String): InputStream {
+        val file = parseFile(uriString)
+        if (file != null) {
+            if (!file.exists()) throw FileNotFoundException("File not found: $uriString")
+            return FileInputStream(file)
+        }
         val uri = Uri.parse(uriString)
         return contentResolver.openInputStream(uri)
             ?: throw FileNotFoundException("Could not open input stream for SAF uri: $uriString")
     }
 
     override fun openOutputStream(uriString: String): OutputStream {
+        val file = parseFile(uriString)
+        if (file != null) {
+            return FileOutputStream(file)
+        }
         val uri = Uri.parse(uriString)
         return contentResolver.openOutputStream(uri)
             ?: throw FileNotFoundException("Could not open output stream for SAF uri: $uriString")
     }
 
     override fun delete(uriString: String): Boolean {
+        val file = parseFile(uriString)
+        if (file != null) return file.delete()
+
         return try {
             val uri = Uri.parse(uriString)
             DocumentsContract.deleteDocument(contentResolver, uri)
@@ -48,6 +67,9 @@ class SafStorageProvider(private val context: Context) : AndroidStorageAbstracti
     }
 
     override fun exists(uriString: String): Boolean {
+        val file = parseFile(uriString)
+        if (file != null) return file.exists()
+
         return try {
             val uri = Uri.parse(uriString)
             contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -59,6 +81,9 @@ class SafStorageProvider(private val context: Context) : AndroidStorageAbstracti
     }
 
     override fun getLength(uriString: String): Long {
+        val file = parseFile(uriString)
+        if (file != null) return file.length()
+
         val uri = Uri.parse(uriString)
         try {
             contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
@@ -74,6 +99,9 @@ class SafStorageProvider(private val context: Context) : AndroidStorageAbstracti
     }
 
     override fun getDisplayName(uriString: String): String {
+        val file = parseFile(uriString)
+        if (file != null) return file.name
+
         val uri = Uri.parse(uriString)
         try {
             contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
@@ -89,6 +117,9 @@ class SafStorageProvider(private val context: Context) : AndroidStorageAbstracti
     }
 
     override fun getLastModified(uriString: String): Long {
+        val file = parseFile(uriString)
+        if (file != null) return file.lastModified()
+
         val uri = Uri.parse(uriString)
         try {
             contentResolver.query(uri, arrayOf(DocumentsContract.Document.COLUMN_LAST_MODIFIED), null, null, null)?.use { cursor ->
@@ -104,6 +135,9 @@ class SafStorageProvider(private val context: Context) : AndroidStorageAbstracti
     }
 
     override fun isDirectory(uriString: String): Boolean {
+        val file = parseFile(uriString)
+        if (file != null) return file.isDirectory
+
         val uri = Uri.parse(uriString)
         return try {
             val doc = DocumentFile.fromTreeUri(context, uri)
@@ -114,17 +148,26 @@ class SafStorageProvider(private val context: Context) : AndroidStorageAbstracti
     }
 
     override fun listChildren(treeUriString: String): List<String> {
+        val file = parseFile(treeUriString)
+        if (file != null) {
+            val children = file.listFiles() ?: return emptyList()
+            return children.map { it.absolutePath }
+        }
+
         val results = mutableListOf<String>()
         val uri = Uri.parse(treeUriString)
         val dir = DocumentFile.fromTreeUri(context, uri) ?: return emptyList()
 
-        for (file in dir.listFiles()) {
-            results.add(file.uri.toString())
+        for (child in dir.listFiles()) {
+            results.add(child.uri.toString())
         }
         return results
     }
 
     override fun checkReadPermission(uriString: String): Boolean {
+        val file = parseFile(uriString)
+        if (file != null) return file.canRead() || file.exists()
+
         val uri = Uri.parse(uriString)
         return context.checkCallingOrSelfUriPermission(
             uri,
@@ -133,6 +176,9 @@ class SafStorageProvider(private val context: Context) : AndroidStorageAbstracti
     }
 
     override fun checkWritePermission(uriString: String): Boolean {
+        val file = parseFile(uriString)
+        if (file != null) return file.canWrite() || (file.parentFile?.canWrite() ?: false)
+
         val uri = Uri.parse(uriString)
         return context.checkCallingOrSelfUriPermission(
             uri,
@@ -140,9 +186,6 @@ class SafStorageProvider(private val context: Context) : AndroidStorageAbstracti
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
     }
 
-    /**
-     * Persists URI permissions so PeerLink can access user-selected folders across device reboots.
-     */
     fun takePersistablePermission(treeUri: Uri) {
         val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         contentResolver.takePersistableUriPermission(treeUri, takeFlags)

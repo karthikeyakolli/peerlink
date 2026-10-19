@@ -190,6 +190,10 @@ class AndroidNodeBridge {
       onListen: () {
         _subscribeDiscoveryEvents();
       },
+      onCancel: () {
+        _discoveryEventsSub?.cancel();
+        _discoveryEventsSub = null;
+      },
     );
     return _discoveredPeersController!.stream;
   }
@@ -278,6 +282,10 @@ class AndroidNodeBridge {
   }
 
   void resetForTesting() {
+    _discoveryEventsSub?.cancel();
+    _discoveryEventsSub = null;
+    _discoveredPeersController?.close();
+    _discoveredPeersController = null;
     _nativeEventsSub?.cancel();
     _nativeEventsSub = null;
     _eventsController?.close();

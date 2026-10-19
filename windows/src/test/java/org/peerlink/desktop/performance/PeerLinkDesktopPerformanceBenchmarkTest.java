@@ -237,6 +237,14 @@ public class PeerLinkDesktopPerformanceBenchmarkTest {
         org.peerlink.core.identity.PairingCoordinator alicePairing = new org.peerlink.core.identity.PairingCoordinator(aliceIdentity, aliceTrust);
         org.peerlink.core.identity.PairingCoordinator bobPairing = new org.peerlink.core.identity.PairingCoordinator(bobIdentity, bobTrust);
 
+        // Warm up JIT compiler and cryptography providers before measuring
+        for (int w = 0; w < 20; w++) {
+            var offer = alicePairing.initiatePairing(org.peerlink.protocol.v1.PairingMethod.PAIRING_METHOD_NUMERIC_CODE, 60_000);
+            var verification = bobPairing.respondToOffer(offer, offer.getPairingCode(), aliceIdentity.getFingerprint());
+            var result = alicePairing.completePairing(verification);
+            assertEquals(org.peerlink.protocol.v1.PairingState.PAIRING_STATE_CONFIRMED, result.getState());
+        }
+
         int iterations = 100;
         long start = System.nanoTime();
         for (int i = 0; i < iterations; i++) {

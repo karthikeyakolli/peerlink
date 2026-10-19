@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../core/device_trust_service.dart';
 import '../../core/node_ipc_client.dart';
-import '../../core/sync_backup_service.dart';
 import '../../design_system/components/glass_container.dart';
 import '../../design_system/components/interactive_glass_card.dart';
+import '../../platform/platform_capabilities.dart';
+import '../../platform/android_node_bridge.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -15,6 +17,37 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   int _selectedLimitBps = 0; // 0 = unlimited
   bool _isRestarting = false;
+  NodeLifecycleStateEnum _androidLifecycle = NodeLifecycleStateEnum.ready;
+  StreamSubscription<NodeLifecycleStateEnum>? _androidLifecycleSub;
+
+  bool get _isAndroid => PlatformCapabilities.isAndroid;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_isAndroid) {
+      _loadAndroidNodeState();
+      _androidLifecycleSub =
+          AndroidNodeBridge.instance.lifecycleStream.listen((state) {
+        if (mounted) setState(() => _androidLifecycle = state);
+      });
+    }
+  }
+
+  Future<void> _loadAndroidNodeState() async {
+    try {
+      final state = await AndroidNodeBridge.instance.getLifecycleState();
+      if (mounted) {
+        setState(() => _androidLifecycle = state);
+      }
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _androidLifecycleSub?.cancel();
+    super.dispose();
+  }
 
   final Map<int, String> _bandwidthOptions = {
     0: 'Unlimited (Maximum Line Speed)',
@@ -25,6 +58,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
   };
 
   Future<void> _applyBandwidthLimit() async {
+    if (_isAndroid) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_selectedLimitBps == 0
+                ? 'Unlimited line speed active on Android.'
+                : 'Bandwidth throttling is enforced on Desktop daemon only. Android utilizes adaptive OS transmission rate.'),
+            backgroundColor: const Color(0xFF2563EB),
+          ),
+        );
+      }
+      return;
+    }
+
     final client = NodeIpcClient.instance;
     if (!client.isAuthenticated) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -62,6 +109,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _restartDaemon() async {
     setState(() => _isRestarting = true);
+
+    if (_isAndroid) {
+      try {
+        final state = await AndroidNodeBridge.instance.startNode();
+        if (mounted) {
+          setState(() {
+            _androidLifecycle = state;
+            _isRestarting = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Android native node active (${state.name.toUpperCase()}).'),
+              backgroundColor: const Color(0xFF10B981),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() => _isRestarting = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Restart error: $e'), backgroundColor: Colors.red),
+          );
+        }
+      }
+      return;
+    }
+
     final client = NodeIpcClient.instance;
 
     if (!client.isAuthenticated) {
@@ -112,7 +186,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
         initialData: NodeIpcClient.instance.currentState,
         builder: (context, snapshot) {
           final ipc = snapshot.data ?? NodeIpcClient.instance.currentState;
-          final isConnected = ipc.status == IpcConnectionStatus.connected;
+          final isConnected = _isAndroid
+              ? _androidLifecycle.isOperational
+              : (ipc.status == IpcConnectionStatus.connected);
+          final statusSubtitle = _isAndroid
+              ? (isConnected
+                  ? 'EMBEDDED RUNTIME ACTIVE (${_androidLifecycle.name.toUpperCase()})'
+                  : 'EMBEDDED NODE STOPPED')
+              : (isConnected ? 'AUTHORITATIVE RUNTIME ACTIVE' : 'DAEMON OFFLINE');
+          final portText =
+              _isAndroid ? 'IN-PROCESS' : (isConnected ? '50051 TLS' : 'N/A');
+          final versionText =
+              _isAndroid ? '1.0.0-android' : (ipc.nodeVersion ?? '1.0.0');
+          final heartbeatsText = _isAndroid
+              ? (isConnected ? 'ACTIVE' : '0')
+              : '${ipc.activeHeartbeatCount}';
 
           return ListView(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
@@ -198,41 +286,50 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: (isConnected ? const Color(0xFF10B981) : Colors.amber)
-                                    .withValues(alpha: 0.16),
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(
-                                isConnected ? Icons.verified_user_rounded : Icons.sensors_off_rounded,
-                                color: isConnected ? const Color(0xFF10B981) : Colors.amber,
-                                size: 22,
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Local Node Daemon Status',
-                                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                        Expanded(
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: (isConnected ? const Color(0xFF10B981) : Colors.amber)
+                                      .withValues(alpha: 0.16),
+                                  shape: BoxShape.circle,
                                 ),
-                                Text(
-                                  isConnected ? 'AUTHORITATIVE RUNTIME ACTIVE' : 'DAEMON OFFLINE',
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                    color: isConnected ? const Color(0xFF10B981) : Colors.amber,
-                                  ),
+                                child: Icon(
+                                  isConnected ? Icons.verified_user_rounded : Icons.sensors_off_rounded,
+                                  color: isConnected ? const Color(0xFF10B981) : Colors.amber,
+                                  size: 22,
                                 ),
-                              ],
-                            ),
-                          ],
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      _isAndroid
+                                          ? 'Local Node Daemon Status (Embedded)'
+                                          : 'Local Node Daemon Status',
+                                      style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    Text(
+                                      statusSubtitle,
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: isConnected ? const Color(0xFF10B981) : Colors.amber,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
+                        const SizedBox(width: 8),
                         FilledButton.tonalIcon(
                           onPressed: _isRestarting ? null : _restartDaemon,
                           icon: _isRestarting
@@ -257,9 +354,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceAround,
                         children: [
-                          _buildMetricColumn('PORT', isConnected ? '50051 TLS' : 'N/A', theme),
-                          _buildMetricColumn('VERSION', ipc.nodeVersion ?? '1.0.0', theme),
-                          _buildMetricColumn('HEARTBEATS', '${ipc.activeHeartbeatCount}', theme),
+                          _buildMetricColumn('PORT', portText, theme),
+                          _buildMetricColumn('VERSION', versionText, theme),
+                          _buildMetricColumn('HEARTBEATS', heartbeatsText, theme),
                           _buildMetricColumn('TRUST STORE', '${DeviceTrustService.instance.devices.length} Peers', theme),
                         ],
                       ),
@@ -290,12 +387,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'Enforce a strict throttling ceiling on outbound and inbound data transfer. Applied directly to the daemon socket engine.',
+                      _isAndroid
+                          ? 'Transfer bandwidth throttling ceiling is enforced on Desktop daemon sockets. On Android, transfers use dynamic OS-managed Wi-Fi / Wi-Fi Direct line speed.'
+                          : 'Enforce a strict throttling ceiling on outbound and inbound data transfer. Applied directly to the daemon socket engine.',
                       style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
                     ),
                     const SizedBox(height: 14),
                     DropdownButtonFormField<int>(
-                      value: _selectedLimitBps,
+                      initialValue: _selectedLimitBps,
                       decoration: const InputDecoration(
                         border: OutlineInputBorder(),
                         contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),

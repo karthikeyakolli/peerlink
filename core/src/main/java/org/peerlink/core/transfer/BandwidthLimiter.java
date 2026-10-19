@@ -33,6 +33,7 @@ public final class BandwidthLimiter {
         this.maxBytesPerSecond = Math.max(0, bytesPerSecond);
         this.availableTokens = this.maxBytesPerSecond;
         this.lastReplenishTimeMs = System.currentTimeMillis();
+        notifyAll();
         log.info("Bandwidth limit set to {} bytes/second", this.maxBytesPerSecond);
     }
 
@@ -46,6 +47,7 @@ public final class BandwidthLimiter {
 
     /**
      * Consume a number of bytes, blocking until enough bandwidth capacity is available.
+     * Handles byte requests larger than the bucket capacity without infinite looping.
      *
      * @param bytes Number of bytes to consume
      * @throws InterruptedException if interrupted while waiting for tokens
@@ -55,19 +57,25 @@ public final class BandwidthLimiter {
             return;
         }
 
-        while (true) {
+        int remaining = bytes;
+        while (remaining > 0) {
+            if (maxBytesPerSecond <= 0) {
+                return; // limit removed dynamically
+            }
             replenishTokens();
-            if (availableTokens >= bytes) {
-                availableTokens -= bytes;
-                return;
+            if (availableTokens > 0) {
+                long take = Math.min((long) remaining, availableTokens);
+                availableTokens -= take;
+                remaining -= (int) take;
+                if (remaining == 0) {
+                    return;
+                }
             }
 
-            // Calculate wait time needed for required tokens
-            long missingTokens = bytes - availableTokens;
-            long waitMillis = (long) Math.ceil((missingTokens * 1000.0) / maxBytesPerSecond);
-            if (waitMillis > 0) {
-                wait(Math.min(waitMillis, 1000));
-            }
+            // Calculate wait time needed for next slice of tokens
+            long needed = Math.min((long) remaining, maxBytesPerSecond);
+            long waitMillis = Math.max(1, (long) Math.ceil((needed * 1000.0) / maxBytesPerSecond));
+            wait(Math.min(waitMillis, 1000));
         }
     }
 

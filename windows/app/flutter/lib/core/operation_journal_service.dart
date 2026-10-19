@@ -1,4 +1,6 @@
 import 'dart:async';
+import '../platform/android_node_bridge.dart';
+import '../platform/platform_capabilities.dart';
 import 'node_ipc_client.dart';
 
 enum OperationType { send, receive, sync, backup }
@@ -12,7 +14,12 @@ enum JournalOperationState {
   failed,
   cancelled,
   outcomeUnknown,
-  recoveryRequired,
+  recoveryRequired;
+
+  bool get isTerminal =>
+      this == JournalOperationState.committed ||
+      this == JournalOperationState.failed ||
+      this == JournalOperationState.cancelled;
 }
 
 enum JournalStage {
@@ -127,6 +134,9 @@ class OperationJournalService {
   void recordOperation(JournalOperation op) {
     final idx = _operations.indexWhere((o) => o.operationId == op.operationId);
     if (idx != -1) {
+      if (_operations[idx].isTerminal && !op.isTerminal) {
+        return;
+      }
       _operations[idx] = op;
     } else {
       _operations.add(op);
@@ -138,6 +148,9 @@ class OperationJournalService {
     final idx = _operations.indexWhere((o) => o.operationId == operationId);
     if (idx != -1) {
       final current = _operations[idx];
+      if (current.isTerminal && !newState.isTerminal) {
+        return;
+      }
       _operations[idx] = current.copyWith(
         state: newState,
         errorNote: note ?? current.errorNote,
@@ -157,6 +170,9 @@ class OperationJournalService {
   void updateProgress(String operationId, int bytesTransferred, int totalBytes) {
     final idx = _operations.indexWhere((o) => o.operationId == operationId);
     if (idx != -1) {
+      if (_operations[idx].isTerminal) {
+        return;
+      }
       _operations[idx] = _operations[idx].copyWith(
         bytesTransferred: bytesTransferred,
         totalBytes: totalBytes,
@@ -169,7 +185,7 @@ class OperationJournalService {
   /// NEVER blindly resubmits destructive payloads without verifying receipt.
   Future<DiagnosticResult> runDiagnosticsAndReconcile(String operationId) async {
     final idx = _operations.indexWhere((o) => o.operationId == operationId);
-    if (idx == null || idx == -1) {
+    if (idx == -1) {
       return const DiagnosticResult(
         success: false,
         message: 'Operation not found in journal.',
@@ -192,7 +208,7 @@ class OperationJournalService {
             errorNote: 'Reconciled via node diagnostic query: Content verified intact.',
           );
           _notify();
-          return DiagnosticResult(
+          return const DiagnosticResult(
             success: true,
             message: 'Diagnostics completed: Node verified commit integrity. Operation marked COMMITTED.',
             nodeConnected: true,
@@ -239,6 +255,107 @@ class OperationJournalService {
   void resetForTesting() {
     _operations.clear();
     _notify();
+  }
+
+  void notify() {
+    _notify();
+  }
+
+  Future<void> reloadAuthoritativeJournal() async {
+    if (PlatformCapabilities.isAndroid) {
+      final rawOps = await AndroidNodeBridge.instance.getJournalOperations();
+      for (final raw in rawOps) {
+        final opId = raw['operationId'] as String? ?? '';
+        if (opId.isEmpty) continue;
+        final intent = (raw['intent'] as String? ?? '').toUpperCase();
+        final stateStr = (raw['state'] as String? ?? '').toUpperCase();
+        final stageStr = (raw['stage'] as String? ?? '').toUpperCase();
+        final totalBytes = (raw['totalBytes'] as num?)?.toInt() ?? 0;
+        final xferBytes = (raw['transferredBytes'] as num?)?.toInt() ?? 0;
+        final createdAtMs = (raw['createdAt'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
+        final notes = raw['notes'] as String?;
+        final peerId = raw['actorPeerId'] as String? ?? 'peer_unknown';
+        final targetObjects = raw['targetObjectIds'] as String? ?? '';
+
+        final type = (intent.contains('SEND') || intent.contains('OUTBOUND'))
+            ? OperationType.send
+            : (intent.contains('SYNC') ? OperationType.sync : OperationType.receive);
+
+        JournalOperationState state;
+        switch (stateStr) {
+          case 'COMMITTED':
+            state = JournalOperationState.committed;
+            break;
+          case 'FAILED':
+            state = JournalOperationState.failed;
+            break;
+          case 'CANCELLED':
+            state = JournalOperationState.cancelled;
+            break;
+          case 'OUTCOME_UNKNOWN':
+            state = JournalOperationState.outcomeUnknown;
+            break;
+          case 'RECOVERY_REQUIRED':
+            state = JournalOperationState.recoveryRequired;
+            break;
+          case 'EXECUTING':
+            state = JournalOperationState.executing;
+            break;
+          case 'WAITING':
+            state = JournalOperationState.waiting;
+            break;
+          case 'VERIFYING':
+            state = JournalOperationState.verifying;
+            break;
+          default:
+            state = JournalOperationState.created;
+        }
+
+        JournalStage stage;
+        switch (stageStr) {
+          case 'FINALIZE':
+            stage = JournalStage.finalize;
+            break;
+          case 'COMMIT':
+            stage = JournalStage.commit;
+            break;
+          case 'VERIFY':
+            stage = JournalStage.verify;
+            break;
+          case 'EXECUTE':
+            stage = JournalStage.execute;
+            break;
+          default:
+            stage = JournalStage.intent;
+        }
+
+        final parsedOp = JournalOperation(
+          operationId: opId,
+          type: type,
+          state: state,
+          stage: stage,
+          peerId: peerId,
+          summary: targetObjects.isNotEmpty ? targetObjects : (notes ?? 'Native transfer $opId'),
+          bytesTransferred: xferBytes,
+          totalBytes: totalBytes,
+          timestamp: DateTime.fromMillisecondsSinceEpoch(createdAtMs),
+          errorNote: notes,
+        );
+
+        final idx = _operations.indexWhere((o) => o.operationId == opId);
+        if (idx != -1) {
+          _operations[idx] = parsedOp;
+        } else {
+          _operations.add(parsedOp);
+        }
+      }
+      _notify();
+    } else if (NodeIpcClient.instance.isAuthenticated) {
+      await NodeIpcClient.instance.listTransfers();
+      _notify();
+    } else {
+      _notify();
+    }
   }
 
   void _notify() {

@@ -61,6 +61,7 @@ public class AndroidNodeFacade {
             org.peerlink.core.transfer.TransferSessionReceiver.ReceiverConsentMode.AUTO_ACCEPT_PAIRED_TRUSTED;
     private volatile org.peerlink.core.transfer.TransferSessionReceiver currentReceiver;
     private final List<IncomingOfferListener> incomingOfferListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private org.peerlink.core.transport.PeerSessionManager.SessionLifecycleListener inboundSessionLifecycleListener;
 
     private final ConcurrentMap<String, String> activePairingSessions = new ConcurrentHashMap<>();
     private final List<TransferEventListener> transferListeners = new ArrayList<>();
@@ -202,7 +203,10 @@ public class AndroidNodeFacade {
         }
 
         if (sessionManager != null && transferEngine != null && destinationRoot != null) {
-            sessionManager.addSessionLifecycleListener(new org.peerlink.core.transport.PeerSessionManager.SessionLifecycleListener() {
+            if (inboundSessionLifecycleListener != null) {
+                sessionManager.removeSessionLifecycleListener(inboundSessionLifecycleListener);
+            }
+            inboundSessionLifecycleListener = new org.peerlink.core.transport.PeerSessionManager.SessionLifecycleListener() {
                 @Override
                 public void onSessionEstablished(org.peerlink.core.transport.PeerSession session) {
                     log.info("Inbound PeerSession established with remote peer: {}", session.getRemotePeer().getPeerId().getValue());
@@ -257,7 +261,8 @@ public class AndroidNodeFacade {
                         setLifecycleState(NodeLifecycleState.READY, "Peer disconnected; node ready");
                     }
                 }
-            });
+            };
+            sessionManager.addSessionLifecycleListener(inboundSessionLifecycleListener);
         }
 
         setLifecycleState(NodeLifecycleState.DISCOVERING, "Starting discovery adapters");
@@ -299,6 +304,10 @@ public class AndroidNodeFacade {
         isStarted = false;
         pauseAllActiveTransfers("Node stopping");
         discoveryEngine.stopAll();
+        if (sessionManager != null && inboundSessionLifecycleListener != null) {
+            sessionManager.removeSessionLifecycleListener(inboundSessionLifecycleListener);
+            inboundSessionLifecycleListener = null;
+        }
         if (transportProvider != null && transportProvider.getListeningPort() > 0) {
             transportProvider.stopListening();
         }

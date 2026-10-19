@@ -11,13 +11,38 @@ import java.net.InetAddress
 /**
  * Android platform NsdManager implementation bridging to NsdDiscoveryAdapter.
  */
-class AndroidNsdAdapter(context: Context) : NsdDiscoveryAdapter(true) {
+class AndroidNsdAdapter(private val context: Context) : NsdDiscoveryAdapter(true) {
 
     private val nsdManager: NsdManager? = context.getSystemService(Context.NSD_SERVICE) as? NsdManager
     private var registrationListener: NsdManager.RegistrationListener? = null
     private var discoveryListener: NsdManager.DiscoveryListener? = null
+    private var lastCallback: DiscoveryCallback? = null
+
+    /**
+     * Optional permission checker hook for testing permission grant/denial/revocation.
+     */
+    var permissionChecker: ((Context) -> Boolean)? = null
+
+    /**
+     * Verifies whether the runtime has local network access permissions.
+     * Android 17 (API 37+) introduces android.permission.ACCESS_LOCAL_NETWORK for configurations
+     * targeting API 37 or higher. Configurations targeting API < 37 remain backward-compatible under INTERNET.
+     */
+    fun hasLocalNetworkPermission(): Boolean {
+        permissionChecker?.let { return it(context) }
+        if (android.os.Build.VERSION.SDK_INT >= 37 && context.applicationInfo.targetSdkVersion >= 37) {
+            val localNet = context.checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK")
+            if (localNet != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                return false
+            }
+        }
+        return true
+    }
 
     override fun startAdvertising(localPeerId: PeerId, displayName: String, port: Int) {
+        if (!hasLocalNetworkPermission()) {
+            return
+        }
         super.startAdvertising(localPeerId, displayName, port)
         if (nsdManager == null) return
 
@@ -52,6 +77,11 @@ class AndroidNsdAdapter(context: Context) : NsdDiscoveryAdapter(true) {
     }
 
     override fun startDiscovery(callback: DiscoveryCallback) {
+        lastCallback = callback
+        if (!hasLocalNetworkPermission()) {
+            callback.onDiscoveryError(technologyName, "PERMISSION_DENIED: Local network access permission is required")
+            return
+        }
         super.startDiscovery(callback)
         if (nsdManager == null) return
 
@@ -91,7 +121,9 @@ class AndroidNsdAdapter(context: Context) : NsdDiscoveryAdapter(true) {
 
             override fun onDiscoveryStopped(serviceType: String) {}
             override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-                callback.onDiscoveryError(technologyName, "NSD discovery failed with code $errorCode")
+                if (discoveryListener === this) {
+                    callback.onDiscoveryError(technologyName, "NSD discovery failed with code $errorCode")
+                }
             }
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {}
         }
@@ -111,5 +143,15 @@ class AndroidNsdAdapter(context: Context) : NsdDiscoveryAdapter(true) {
             } catch (ignored: Exception) {}
             discoveryListener = null
         }
+    }
+
+    fun restartDiscovery() {
+        stopDiscovery()
+        try {
+            Thread.sleep(100)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+        lastCallback?.let { startDiscovery(it) }
     }
 }

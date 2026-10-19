@@ -52,10 +52,12 @@ public final class MultipathTransferScheduler {
         }
 
         AtomicInteger completedCount = new AtomicInteger(0);
+        AtomicInteger inFlightCount = new AtomicInteger(0);
         AtomicBoolean isCompleted = new AtomicBoolean(false);
+        Object lock = new Object();
 
         for (MultipathLane lane : lanes) {
-            startLaneWorker(lane, workQueue, completedCount, totalChunks, startTime, isCompleted, overallFuture);
+            startLaneWorker(lane, workQueue, inFlightCount, completedCount, totalChunks, startTime, isCompleted, overallFuture, lock);
         }
 
         return overallFuture;
@@ -64,50 +66,92 @@ public final class MultipathTransferScheduler {
     private void startLaneWorker(
             MultipathLane lane,
             ConcurrentLinkedDeque<Integer> workQueue,
+            AtomicInteger inFlightCount,
             AtomicInteger completedCount,
             int totalChunks,
             long startTime,
             AtomicBoolean isCompleted,
-            CompletableFuture<MultipathTransferResult> overallFuture) {
+            CompletableFuture<MultipathTransferResult> overallFuture,
+            Object lock) {
 
         CompletableFuture.runAsync(() -> {
-            while (!isCompleted.get()) {
-                if (!lane.isHealthy()) {
-                    log.warn("Multipath lane [{}] is marked unhealthy, terminating worker", lane.getLaneId());
-                    checkLivenessAndFailover(workQueue, completedCount, totalChunks, startTime, isCompleted, overallFuture);
-                    break;
-                }
-
-                Integer chunk = workQueue.pollFirst();
-                if (chunk == null) {
-                    // Queue empty, wait or terminate if all chunks complete
-                    if (completedCount.get() >= totalChunks && isCompleted.compareAndSet(false, true)) {
-                        long elapsed = System.currentTimeMillis() - startTime;
-                        int active = (int) lanes.stream().filter(MultipathLane::isHealthy).count();
-                        overallFuture.complete(MultipathTransferResult.success(completedCount.get(), active, elapsed));
-                    }
-                    break;
-                }
-
-                try {
-                    // Transmit chunk across lane
-                    lane.sendChunk(chunk).join();
-                    int finished = completedCount.incrementAndGet();
-
-                    if (finished >= totalChunks && isCompleted.compareAndSet(false, true)) {
-                        long elapsed = System.currentTimeMillis() - startTime;
-                        int active = (int) lanes.stream().filter(MultipathLane::isHealthy).count();
-                        overallFuture.complete(MultipathTransferResult.success(finished, active, elapsed));
+            try {
+                while (!isCompleted.get()) {
+                    if (!lane.isHealthy()) {
+                        log.warn("Multipath lane [{}] is marked unhealthy, terminating worker", lane.getLaneId());
                         break;
                     }
-                } catch (Throwable t) {
-                    log.warn("Lane [{}] failed sending chunk {}: {}. Re-queueing chunk for peer lanes.",
-                            lane.getLaneId(), chunk, t.getMessage());
-                    // Put chunk back at head of queue for immediate rescue by surviving lanes
-                    workQueue.addFirst(chunk);
 
+                    Integer chunk;
+                    synchronized (lock) {
+                        chunk = workQueue.pollFirst();
+                        if (chunk == null) {
+                            if (completedCount.get() >= totalChunks) {
+                                if (isCompleted.compareAndSet(false, true)) {
+                                    long elapsed = System.currentTimeMillis() - startTime;
+                                    int active = (int) lanes.stream().filter(MultipathLane::isHealthy).count();
+                                    overallFuture.complete(MultipathTransferResult.success(completedCount.get(), active, elapsed));
+                                }
+                                lock.notifyAll();
+                                break;
+                            }
+
+                            if (inFlightCount.get() == 0 && workQueue.isEmpty()) {
+                                if (isCompleted.compareAndSet(false, true)) {
+                                    long elapsed = System.currentTimeMillis() - startTime;
+                                    overallFuture.complete(MultipathTransferResult.failed(
+                                            completedCount.get(), 0, elapsed, "No remaining chunks or active workers to complete transfer"));
+                                }
+                                lock.notifyAll();
+                                break;
+                            }
+
+                            try {
+                                lock.wait(500);
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                break;
+                            }
+                            continue;
+                        } else {
+                            inFlightCount.incrementAndGet();
+                        }
+                    }
+
+                    boolean success = false;
+                    try {
+                        lane.sendChunk(chunk).join();
+                        success = true;
+                    } catch (Throwable t) {
+                        log.warn("Lane [{}] failed sending chunk {}: {}. Re-queueing chunk for peer lanes.",
+                                lane.getLaneId(), chunk, t.getMessage());
+                    }
+
+                    synchronized (lock) {
+                        inFlightCount.decrementAndGet();
+                        if (success) {
+                            int finished = completedCount.incrementAndGet();
+                            if (finished >= totalChunks) {
+                                if (isCompleted.compareAndSet(false, true)) {
+                                    long elapsed = System.currentTimeMillis() - startTime;
+                                    int active = (int) lanes.stream().filter(MultipathLane::isHealthy).count();
+                                    overallFuture.complete(MultipathTransferResult.success(finished, active, elapsed));
+                                }
+                                lock.notifyAll();
+                                break;
+                            }
+                        } else {
+                            // Put chunk back at head of queue for immediate rescue by surviving lanes
+                            workQueue.addFirst(chunk);
+                            lock.notifyAll();
+                            break; // this lane failed, stop this lane's worker
+                        }
+                    }
+                }
+            } finally {
+                synchronized (lock) {
+                    lock.notifyAll();
                     checkLivenessAndFailover(workQueue, completedCount, totalChunks, startTime, isCompleted, overallFuture);
-                    break;
                 }
             }
         });
@@ -122,7 +166,7 @@ public final class MultipathTransferScheduler {
             CompletableFuture<MultipathTransferResult> overallFuture) {
 
         long healthyLanes = lanes.stream().filter(MultipathLane::isHealthy).count();
-        if (healthyLanes == 0 && !workQueue.isEmpty()) {
+        if (healthyLanes == 0 && completedCount.get() < totalChunks) {
             if (isCompleted.compareAndSet(false, true)) {
                 long elapsed = System.currentTimeMillis() - startTime;
                 overallFuture.complete(MultipathTransferResult.failed(

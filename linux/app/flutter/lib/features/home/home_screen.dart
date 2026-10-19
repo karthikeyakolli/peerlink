@@ -1,7 +1,10 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'local_node_card.dart';
 import '../../core/node_ipc_client.dart';
 import '../../core/device_trust_service.dart';
+import '../../platform/android_node_bridge.dart';
+import '../../platform/platform_capabilities.dart';
 import '../../design_system/components/send_receive_hero.dart';
 import '../../design_system/components/media_category_bar.dart';
 import '../../design_system/components/radar_sonar_view.dart';
@@ -108,28 +111,66 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 8),
               Expanded(
-                child: RadarSonarView(
-                  localDeviceName: 'Desktop PC',
-                  discoveredPeers: devices.map((d) => RadarPeerInfo(
-                    id: d.id,
-                    name: d.name,
-                    deviceType: d.deviceType,
-                    isTrusted: d.trustLevel == DeviceTrustLevel.trustedPeer,
-                  )).toList(),
-                  onPeerSelected: (peer) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Selected peer: ${peer.name}'),
-                        backgroundColor: const Color(0xFF059669),
-                      ),
-                    );
-                  },
-                  onQrScanPressed: () {
-                    QrPairingSheet.show(
-                      context,
-                      deviceName: 'Desktop PC',
-                      peerId: NodeIpcClient.instance.currentState.peerId ?? 'peer_desktop_primary',
-                      fingerprint: localFingerprint,
+                child: StreamBuilder<List<DiscoveredPeer>>(
+                  stream: AndroidNodeBridge.instance.discoveredPeersStream,
+                  initialData: AndroidNodeBridge.instance.activeDiscoveredPeers,
+                  builder: (context, snapshot) {
+                    final livePeers = snapshot.data ?? [];
+                    final List<RadarPeerInfo> peerInfos;
+                    if (Platform.isAndroid) {
+                      peerInfos = livePeers.map((p) {
+                        final isTrusted = DeviceTrustService.instance.devices
+                            .any((d) => d.id == p.peerId);
+                        return RadarPeerInfo(
+                          id: p.peerId,
+                          name: p.name.isNotEmpty ? p.name : p.peerId,
+                          deviceType: p.technology.contains('WIFI_DIRECT') ? 'phone' : 'desktop',
+                          isTrusted: isTrusted,
+                          ip: p.host,
+                          technology: p.technology,
+                          routeCount: p.routes.isNotEmpty ? p.routes.length : 1,
+                        );
+                      }).toList();
+                    } else {
+                      peerInfos = devices.map((d) => RadarPeerInfo(
+                        id: d.id,
+                        name: d.name,
+                        deviceType: d.deviceType,
+                        isTrusted: d.trustLevel == DeviceTrustLevel.trustedPeer,
+                        ip: '127.0.0.1',
+                        technology: 'Configured',
+                        routeCount: 1,
+                      )).toList();
+                    }
+
+                    return RadarSonarView(
+                      localDeviceName: Platform.isAndroid ? 'Android Peer' : 'Desktop PC',
+                      discoveredPeers: peerInfos,
+                      onAddManualEndpoint: (ip, port, name) async {
+                        final peerId = 'manual_${ip.replaceAll('.', '_')}';
+                        await AndroidNodeBridge.instance.addManualPeer(
+                          peerId: peerId,
+                          name: name,
+                          host: ip,
+                          port: port,
+                        );
+                      },
+                      onPeerSelected: (peer) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Selected peer: ${peer.name} (${peer.ip})'),
+                            backgroundColor: const Color(0xFF059669),
+                          ),
+                        );
+                      },
+                      onQrScanPressed: () {
+                        QrPairingSheet.show(
+                          context,
+                          deviceName: Platform.isAndroid ? 'Android Peer' : 'Desktop PC',
+                          peerId: NodeIpcClient.instance.currentState.peerId ?? 'peer_desktop_primary',
+                          fingerprint: localFingerprint,
+                        );
+                      },
                     );
                   },
                 ),
@@ -211,13 +252,26 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () {
               QuickTextShareModal.show(
                 context,
-                onSendText: (text, targetPeer) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Transmitting text (${text.length} chars) to nearby peer...'),
-                      backgroundColor: const Color(0xFF2563EB),
-                    ),
-                  );
+                onSendText: (text, targetPeer) async {
+                  if (text.isEmpty) return;
+                  if (PlatformCapabilities.isAndroid) {
+                    final clipboardResult = await AndroidNodeBridge.instance.syncClipboard();
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Quick text staged (${text.length} chars). Clipboard sync: ${clipboardResult != null ? "Active" : "Ready"}'),
+                          backgroundColor: const Color(0xFF2563EB),
+                        ),
+                      );
+                    }
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Text snippet prepared (${text.length} chars). Select a peer in Radar to transmit.'),
+                        backgroundColor: const Color(0xFF2563EB),
+                      ),
+                    );
+                  }
                 },
               );
             },

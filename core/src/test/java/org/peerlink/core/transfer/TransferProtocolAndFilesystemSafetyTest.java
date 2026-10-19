@@ -403,6 +403,46 @@ public class TransferProtocolAndFilesystemSafetyTest {
         assertEquals(OperationState.FAILED, rec.get().getState());
     }
 
+    @Test
+    @DisplayName("DestinationConflictResolver safely handles single-segment paths without parent")
+    void testDestinationConflictResolverHandlesNoParentPath() throws Exception {
+        DestinationConflictResolver resolver = new DestinationConflictResolver();
+        Path testFile = destDir.resolve("direct_child.txt");
+        Files.writeString(testFile, "hello");
+
+        // Resolve relative destination with RENAME_WITH_SUFFIX when target already exists
+        Path resolved = resolver.resolveDestination(
+                destDir,
+                "direct_child.txt",
+                DuplicateDestinationPolicy.DUPLICATE_DESTINATION_POLICY_RENAME_WITH_SUFFIX
+        );
+
+        assertNotNull(resolved);
+        assertTrue(resolved.getFileName().toString().startsWith("direct_child (1)"));
+    }
+
+    @Test
+    @DisplayName("FileManifestBuilder safely generates manifest and display name for root and relative paths")
+    void testFileManifestBuilderHandlesRootAndRelativePaths() throws Exception {
+        FileManifestBuilder builder = new FileManifestBuilder();
+        Path singleFile = tempDir.resolve("sample.bin");
+        Files.write(singleFile, new byte[]{1, 2, 3});
+
+        TransferManifest manifest = builder.buildManifest(
+                "tx_manifest_safe",
+                "op_manifest_safe",
+                "sender_peer",
+                "receiver_peer",
+                List.of(singleFile),
+                DuplicateDestinationPolicy.DUPLICATE_DESTINATION_POLICY_RENAME_WITH_SUFFIX
+        );
+
+        assertNotNull(manifest);
+        assertEquals("sample.bin", manifest.getDisplayName());
+        assertEquals(1, manifest.getItemsCount());
+        assertEquals("sample.bin", manifest.getItems(0).getRelativePath());
+    }
+
     // =========================================================================
     // Minimal Test Journal
     // =========================================================================

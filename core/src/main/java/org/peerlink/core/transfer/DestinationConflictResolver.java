@@ -56,7 +56,8 @@ public final class DestinationConflictResolver {
 
     private Path generateSuffixedPath(Path original) {
         Path parent = original.getParent();
-        String fileName = original.getFileName().toString();
+        Path fileNamePath = original.getFileName();
+        String fileName = fileNamePath != null ? fileNamePath.toString() : "file";
 
         String baseName;
         String extension;
@@ -73,7 +74,7 @@ public final class DestinationConflictResolver {
         Path candidate;
         do {
             String candidateName = String.format("%s (%d)%s", baseName, suffix, extension);
-            candidate = parent.resolve(candidateName);
+            candidate = parent != null ? parent.resolve(candidateName) : Path.of(candidateName);
             suffix++;
         } while (Files.exists(candidate));
 

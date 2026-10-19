@@ -14,10 +14,19 @@
         android:name="android.permission.NEARBY_WIFI_DEVICES"
         android:usesPermissionFlags="neverForLocation" />
 
+    <!-- Android 17+ (API 37+) Local Network Access for LAN P2P Socket Transfers -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+
     <!-- Location required only for Wi-Fi Direct / NSD discovery on Android 12 and below -->
     <uses-permission
         android:name="android.permission.ACCESS_FINE_LOCATION"
         android:maxSdkVersion="32" />
+
+    <!-- Camera for Authenticated QR Pairing (Phase 3) -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
 
     <!-- Notifications & Foreground Execution -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -85,6 +94,11 @@
             android:name="org.peerlink.app.service.PeerLinkForegroundService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Notification Action Receiver for Inbound Transfers -->
+        <receiver
+            android:name="org.peerlink.app.notification.InboundTransferActionReceiver"
+            android:exported="false" />
 
         <meta-data
             android:name="flutterEmbedding"

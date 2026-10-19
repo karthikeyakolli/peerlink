@@ -1,2 +1,3 @@
-# PeerLink Windows App Assets
-Contains native platform application icons and branding resources for the Windows desktop client.
+# PeerLink Assets
+
+This directory contains application icons and visual assets bundled with the mobile application.

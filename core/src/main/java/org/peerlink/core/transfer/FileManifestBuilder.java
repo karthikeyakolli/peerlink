@@ -81,11 +81,11 @@ public final class FileManifestBuilder {
             }
 
             if (Files.isRegularFile(normalized)) {
-                TransferItem item = buildFileItem(normalized, normalized.getFileName().toString());
+                TransferItem item = buildFileItem(normalized, getSafeName(normalized));
                 items.add(item);
                 totalBytes += item.getFileSizeBytes();
             } else if (Files.isDirectory(normalized)) {
-                String rootDirName = normalized.getFileName().toString();
+                String rootDirName = getSafeName(normalized);
                 List<TransferItem> dirItems = scanDirectory(normalized, rootDirName);
                 items.addAll(dirItems);
                 for (TransferItem item : dirItems) {
@@ -96,9 +96,10 @@ public final class FileManifestBuilder {
             }
         }
 
+        String firstPathName = getSafeName(sourcePaths.get(0));
         String displayName = sourcePaths.size() == 1
-                ? sourcePaths.get(0).getFileName().toString()
-                : sourcePaths.get(0).getFileName().toString() + " (+" + (items.size() - 1) + " items)";
+                ? firstPathName
+                : firstPathName + " (+" + (items.size() - 1) + " items)";
 
         // Validate that no relative paths collide or contain path traversals
         org.peerlink.core.filesystem.PathSafetyValidator.validateNoCollisions(
@@ -204,6 +205,25 @@ public final class FileManifestBuilder {
             throw new IllegalStateException("SHA-256 algorithm not available", e);
         }
         return toHexString(digest.digest(data));
+    }
+
+    private static String getSafeName(Path path) {
+        if (path == null) {
+            return "root";
+        }
+        Path fileName = path.getFileName();
+        if (fileName != null && !fileName.toString().trim().isEmpty()) {
+            return fileName.toString().trim();
+        }
+        String normalizedStr = path.toString().replace('\\', '/');
+        while (normalizedStr.endsWith("/")) {
+            normalizedStr = normalizedStr.substring(0, normalizedStr.length() - 1);
+        }
+        int slash = normalizedStr.lastIndexOf('/');
+        if (slash >= 0 && slash < normalizedStr.length() - 1) {
+            return normalizedStr.substring(slash + 1);
+        }
+        return normalizedStr.isEmpty() ? "root" : normalizedStr.replace(":", "");
     }
 
     private static String toHexString(byte[] hash) {

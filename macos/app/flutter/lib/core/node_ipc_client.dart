@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:fixnum/fixnum.dart' as fixnum;
 import 'package:grpc/grpc.dart';
 import 'app_constants.dart';
@@ -77,6 +78,10 @@ class NodeIpcClient {
   StreamSubscription<NodeEvent>? _eventSubscription;
   Timer? _reconnectTimer;
   bool _manualDisconnect = false;
+  int _reconnectAttempts = 0;
+  static const int maxReconnectAttempts = 10;
+  static const int initialReconnectDelayMs = 1500;
+  static const int maxReconnectDelayMs = 30000;
 
   final _stateController = StreamController<IpcConnectionState>.broadcast();
   final _transferProgressController = StreamController<TransferProgress>.broadcast();
@@ -177,6 +182,7 @@ class NodeIpcClient {
       // 2. Start server-streaming event subscription
       _startEventSubscription();
 
+      _reconnectAttempts = 0;
       return true;
     } catch (e) {
       _updateState(_currentState.copyWith(
@@ -294,8 +300,18 @@ class NodeIpcClient {
     if (_manualDisconnect || _currentState.status == IpcConnectionStatus.incompatibleVersion) {
       return;
     }
+    if (_reconnectAttempts >= maxReconnectAttempts) {
+      _updateState(_currentState.copyWith(
+        status: IpcConnectionStatus.error,
+        errorMessage: 'Maximum reconnection attempts ($maxReconnectAttempts) reached',
+      ));
+      return;
+    }
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(const Duration(milliseconds: 1500), () async {
+    final delayMs = (initialReconnectDelayMs * (1 << math.min(_reconnectAttempts, 5)))
+        .clamp(initialReconnectDelayMs, maxReconnectDelayMs);
+    _reconnectAttempts++;
+    _reconnectTimer = Timer(Duration(milliseconds: delayMs), () async {
       if (_manualDisconnect) return;
       if (_cachedHost != null && _cachedPort != null && _cachedToken != null) {
         await connectAndAuthenticate(
@@ -310,6 +326,7 @@ class NodeIpcClient {
 
   Future<void> disconnect() async {
     _manualDisconnect = true;
+    _reconnectAttempts = 0;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     await _eventSubscription?.cancel();

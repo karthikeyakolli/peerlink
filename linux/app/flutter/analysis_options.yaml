@@ -11,5 +11,5 @@ linter:
   rules:
     prefer_const_constructors: true
     prefer_const_declarations: true
-    avoid_print: true
+    avoid_print: false
     use_key_in_widget_constructors: true

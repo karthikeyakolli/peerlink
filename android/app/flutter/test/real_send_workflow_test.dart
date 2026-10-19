@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:peerlink/features/files/files_screen.dart';
-import 'package:peerlink/core/node_ipc_client.dart';
 
 void main() {
   group('Windows Real SEND Workflow & State Tests', () {

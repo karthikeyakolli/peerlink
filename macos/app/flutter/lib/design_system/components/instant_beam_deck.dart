@@ -210,12 +210,12 @@ class _InstantBeamDeckState extends State<InstantBeamDeck>
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  Text(
+                  const Text(
                     'Select',
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
-                      color: const Color(0xFF2563EB),
+                      color: Color(0xFF2563EB),
                     ),
                   ),
                   const SizedBox(width: 2),

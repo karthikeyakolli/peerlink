@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'dart:io';
-import 'package:fixnum/fixnum.dart' as fixnum;
 import 'package:flutter/material.dart';
 import '../../core/node_ipc_client.dart';
 import '../../core/operation_journal_service.dart';
 import '../../core/protocol/peerlink/v1/transfer.pb.dart';
+import '../../core/device_trust_service.dart';
+import '../../core/pairing_invitation.dart';
 import '../../design_system/components/radar_sonar_view.dart';
-import '../../design_system/components/transfer_speedometer.dart';
 import '../../design_system/components/qr_pairing_sheet.dart';
 import '../../design_system/components/glass_container.dart';
 import '../../design_system/components/interactive_glass_card.dart';
@@ -15,6 +15,8 @@ import '../../design_system/components/burn_viewer_modal.dart';
 import '../../design_system/components/desktop_dropzone.dart';
 import '../../platform/windows_file_dialog.dart';
 import '../../platform/android_node_bridge.dart';
+import '../../design_system/components/media_category_sheet.dart';
+import '../../core/transfer/transfer_progress_model.dart' show TransferProgressModel;
 
 class SelectedFileInfo {
   final String path;
@@ -54,10 +56,12 @@ class _FilesScreenState extends State<FilesScreen> {
   String? _statusBanner;
   String? _refreshError;
   StreamSubscription<TransferProgress>? _progressSub;
+  StreamSubscription<dynamic>? _androidBridgeSub;
+  StreamSubscription<dynamic>? _incomingIntentSub;
   final Map<String, TransferProgress> _transfers = {};
+  final Map<String, TransferProgressModel> _activeProgressModels = {};
   EphemeralPolicy _currentPolicy = EphemeralPolicy.permanent;
 
-  String _activeCategory = 'All';
   final List<SelectedFileInfo> _selectedFiles = [];
 
   void _addPaths(List<String> paths) {
@@ -142,6 +146,76 @@ class _FilesScreenState extends State<FilesScreen> {
     });
   }
 
+  void _openMediaCategorySheet() {
+    final selectionItems = _selectedFiles.map((f) => MediaItemInfo(
+      pathOrUri: f.path,
+      name: f.name,
+      sizeBytes: f.sizeBytes,
+      category: _categoryForFileName(f.name),
+    )).toList();
+
+    MediaCategorySheet.show(
+      context: context,
+      currentSelection: selectionItems,
+      onItemRemoved: (item) {
+        setState(() {
+          _selectedFiles.removeWhere((f) => f.path == item.pathOrUri);
+          _syncController();
+        });
+      },
+      onClearAll: _clearSelectedFiles,
+      onCategorySelected: (cat) async {
+        String categoryKey = 'all';
+        switch (cat) {
+          case MediaCategory.photos:
+            categoryKey = 'photos';
+            break;
+          case MediaCategory.videos:
+            categoryKey = 'videos';
+            break;
+          case MediaCategory.audio:
+            categoryKey = 'audio';
+            break;
+          case MediaCategory.documents:
+            categoryKey = 'documents';
+            break;
+          case MediaCategory.archives:
+            categoryKey = 'archives';
+            break;
+          case MediaCategory.allFiles:
+            categoryKey = 'all';
+            break;
+        }
+        final uris = await AndroidNodeBridge.instance.pickContentUris(category: categoryKey);
+        if (uris.isNotEmpty && mounted) {
+          setState(() {
+            _addPaths(uris);
+          });
+        }
+      },
+    );
+  }
+
+  MediaCategory _categoryForFileName(String name) {
+    final ext = name.toLowerCase().split('.').last;
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'bmp'].contains(ext)) {
+      return MediaCategory.photos;
+    }
+    if (['mp4', 'mkv', 'webm', 'mov', 'avi', '3gp'].contains(ext)) {
+      return MediaCategory.videos;
+    }
+    if (['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a'].contains(ext)) {
+      return MediaCategory.audio;
+    }
+    if (['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt'].contains(ext)) {
+      return MediaCategory.documents;
+    }
+    if (['zip', 'tar', 'gz', '7z', 'rar', 'bz2'].contains(ext)) {
+      return MediaCategory.archives;
+    }
+    return MediaCategory.allFiles;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -158,11 +232,207 @@ class _FilesScreenState extends State<FilesScreen> {
         }
       }
     });
+
+    _incomingIntentSub = AndroidNodeBridge.instance.incomingTransferIntentStream.listen((intentData) {
+      if (!mounted) return;
+      final transferId = intentData['transferId'] as String? ?? '';
+      final peerId = intentData['peerId'] as String? ?? '';
+      final peerName = intentData['peerName'] as String? ?? peerId;
+      _showIncomingOfferDialog(
+        transferId: transferId,
+        senderPeer: peerName.isNotEmpty ? peerName : peerId,
+        fileName: 'Incoming Shared Files',
+        totalBytes: 0,
+        itemCount: 1,
+      );
+    });
+
+    _androidBridgeSub = AndroidNodeBridge.instance.events.listen((event) {
+      if (!mounted) return;
+      final type = event['type'] as String?;
+      if (type == 'transferStarted') {
+        final transferId = event['transferId'] as String? ?? '';
+        final remotePeer = event['remotePeer'] as String? ?? '';
+        final fileName = event['fileName'] as String? ?? '';
+        final total = (event['totalBytes'] as num?)?.toInt() ?? -1;
+        setState(() {
+          _activeProgressModels[transferId] = TransferProgressModel(
+            transferId: transferId,
+            remotePeerId: remotePeer,
+            initialTotalBytes: total,
+            initialFileName: fileName,
+          );
+        });
+        OperationJournalService.instance.recordOperation(
+          JournalOperation(
+            operationId: transferId,
+            type: OperationType.send,
+            state: JournalOperationState.executing,
+            stage: JournalStage.execute,
+            peerId: remotePeer,
+            summary: fileName.isNotEmpty ? fileName : 'Transfer $transferId',
+            bytesTransferred: 0,
+            totalBytes: total > 0 ? total : 0,
+            timestamp: DateTime.now(),
+          ),
+        );
+      } else if (type == 'transferProgress') {
+        final transferId = event['transferId'] as String? ?? '';
+        final percent = (event['percent'] as num?)?.toInt() ?? 0;
+        final transferred = (event['transferredBytes'] as num?)?.toInt() ?? 0;
+        final total = (event['totalBytes'] as num?)?.toInt() ?? 0;
+        final model = _activeProgressModels[transferId];
+        if (model != null) {
+          model.recordProgress(transferredBytes: transferred, totalBytes: total);
+        }
+        OperationJournalService.instance.updateProgress(transferId, transferred, total);
+        setState(() {
+          if (model != null && model.smoothedRateBytesPerSec != null) {
+            _statusBanner =
+                'Transferring $transferId: ${model.formattedProgress} • ${model.formattedRate} • ${model.formattedEta}';
+          } else {
+            _statusBanner =
+                'Transferring $transferId: $percent% (${(transferred / 1024).toStringAsFixed(1)} / ${(total / 1024).toStringAsFixed(1)} KB)';
+          }
+        });
+      } else if (type == 'transferCompleted') {
+        final transferId = event['transferId'] as String? ?? '';
+        final success = event['success'] == true;
+        final errorMessage = event['errorMessage'] as String? ?? '';
+        final model = _activeProgressModels[transferId];
+        if (model != null) {
+          model.recordProgress(
+            transferredBytes: model.totalBytes > 0 ? model.totalBytes : 0,
+          );
+        }
+        final isCancelled = !success && errorMessage.toLowerCase().contains('cancel');
+        OperationJournalService.instance.updateState(
+          transferId,
+          success
+              ? JournalOperationState.committed
+              : (isCancelled ? JournalOperationState.cancelled : JournalOperationState.failed),
+          note: success ? null : errorMessage,
+        );
+        if (success) {
+          OperationJournalService.instance.updateStage(transferId, JournalStage.finalize);
+        }
+        setState(() {
+          _statusBanner = success
+              ? 'Transfer $transferId completed successfully!'
+              : 'Transfer $transferId failed: $errorMessage';
+        });
+      } else if (type == 'incomingTransferOffer') {
+        final transferId = event['transferId'] as String? ?? '';
+        final senderPeer = event['senderPeer'] as String? ?? '';
+        final fileName = event['fileName'] as String? ?? 'file';
+        final totalBytes = (event['totalBytes'] as num?)?.toInt() ?? 0;
+        final itemCount = (event['itemCount'] as num?)?.toInt() ?? 1;
+
+        OperationJournalService.instance.recordOperation(
+          JournalOperation(
+            operationId: transferId,
+            type: OperationType.receive,
+            state: JournalOperationState.waiting,
+            stage: JournalStage.intent,
+            peerId: senderPeer,
+            summary: fileName,
+            bytesTransferred: 0,
+            totalBytes: totalBytes,
+            timestamp: DateTime.now(),
+          ),
+        );
+
+        _showIncomingOfferDialog(
+          transferId: transferId,
+          senderPeer: senderPeer,
+          fileName: fileName,
+          totalBytes: totalBytes,
+          itemCount: itemCount,
+        );
+      }
+    });
+  }
+
+  void _showIncomingOfferDialog({
+    required String transferId,
+    required String senderPeer,
+    required String fileName,
+    required int totalBytes,
+    required int itemCount,
+  }) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.download, color: Colors.blueAccent),
+            SizedBox(width: 8),
+            Text('Incoming File Transfer'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('From: $senderPeer', style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text('File: $fileName${itemCount > 1 ? ' (and ${itemCount - 1} other files)' : ''}'),
+            Text('Size: ${(totalBytes / 1024).toStringAsFixed(1)} KB'),
+            const SizedBox(height: 12),
+            const Text('Do you want to accept this transfer and save to your received folder?'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              OperationJournalService.instance.updateState(
+                transferId,
+                JournalOperationState.cancelled,
+                note: 'Declined by recipient',
+              );
+              AndroidNodeBridge.instance.respondIncomingTransfer(
+                transferId: transferId,
+                accept: false,
+              );
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Declined transfer $transferId')),
+              );
+            },
+            child: const Text('Decline', style: TextStyle(color: Colors.red)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              OperationJournalService.instance.updateState(
+                transferId,
+                JournalOperationState.executing,
+              );
+              OperationJournalService.instance.updateStage(
+                transferId,
+                JournalStage.execute,
+              );
+              AndroidNodeBridge.instance.respondIncomingTransfer(
+                transferId: transferId,
+                accept: true,
+              );
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Accepted transfer $transferId')),
+              );
+            },
+            child: const Text('Accept'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   void dispose() {
     _progressSub?.cancel();
+    _androidBridgeSub?.cancel();
+    _incomingIntentSub?.cancel();
     _targetPeerController.dispose();
     _sourcePathsController.dispose();
     _destinationDirController.dispose();
@@ -220,7 +490,7 @@ class _FilesScreenState extends State<FilesScreen> {
       _statusBanner = null;
     });
 
-    if (paths.any((p) => p.startsWith('content://'))) {
+    if (Platform.isAndroid || paths.any((p) => p.startsWith('content://'))) {
       try {
         final transferId = await AndroidNodeBridge.instance.initiateSend(
           targetPeerId: targetPeer,
@@ -240,12 +510,14 @@ class _FilesScreenState extends State<FilesScreen> {
             });
           }
         }
+        return;
       } catch (e) {
         if (mounted) {
           setState(() {
-            _statusBanner = 'Android Send rejected / error: $e';
+            _statusBanner = 'Android Send error: $e';
           });
         }
+        return;
       } finally {
         if (mounted) {
           setState(() {
@@ -253,7 +525,6 @@ class _FilesScreenState extends State<FilesScreen> {
           });
         }
       }
-      return;
     }
 
     if (!_client.isAuthenticated) {
@@ -574,41 +845,76 @@ class _FilesScreenState extends State<FilesScreen> {
               ),
               const SizedBox(height: 8),
               Expanded(
-                child: RadarSonarView(
-                  localDeviceName: 'This PC (Windows)',
-                  discoveredPeers: const [
-                    RadarPeerInfo(
-                      id: 'peer-work-pc',
-                      name: 'Work PC',
-                      deviceType: 'desktop',
-                      isTrusted: true,
-                    ),
-                    RadarPeerInfo(
-                      id: 'peer-desktop-b',
-                      name: 'Peer B (Receiver)',
-                      deviceType: 'desktop',
-                      isTrusted: true,
-                    ),
-                  ],
-                  onPeerSelected: (peer) {
-                    Navigator.pop(ctx);
-                    setState(() {
-                      _targetPeerController.text = peer.id;
-                    });
-                    _initiateSend();
-                  },
-                  onQrScanPressed: () {
-                    Navigator.pop(ctx);
-                    QrPairingSheet.show(
-                      context,
-                      deviceName: 'This PC (Windows)',
-                      peerId: _client.currentState.peerId ?? 'peer_windows_local',
-                      fingerprint: 'ed25519:windows...node',
-                      onQrScanned: (payload) {
+                child: StreamBuilder<List<DiscoveredPeer>>(
+                  stream: AndroidNodeBridge.instance.discoveredPeersStream,
+                  initialData: AndroidNodeBridge.instance.activeDiscoveredPeers,
+                  builder: (context, snapshot) {
+                    final livePeers = snapshot.data ?? [];
+                    final List<RadarPeerInfo> peerInfos;
+                    if (Platform.isAndroid) {
+                      peerInfos = livePeers.map((p) {
+                        final isTrusted = DeviceTrustService.instance.devices
+                            .any((d) => d.id == p.peerId);
+                        return RadarPeerInfo(
+                          id: p.peerId,
+                          name: p.name.isNotEmpty ? p.name : p.peerId,
+                          deviceType: p.technology.contains('WIFI_DIRECT') ? 'phone' : 'desktop',
+                          isTrusted: isTrusted,
+                          ip: p.host,
+                          technology: p.technology,
+                          routeCount: p.routes.isNotEmpty ? p.routes.length : 1,
+                        );
+                      }).toList();
+                    } else {
+                      peerInfos = DeviceTrustService.instance.devices.map((d) => RadarPeerInfo(
+                        id: d.id,
+                        name: d.name,
+                        deviceType: d.deviceType,
+                        isTrusted: d.trustLevel == DeviceTrustLevel.trustedPeer,
+                        ip: '127.0.0.1',
+                        technology: 'Configured',
+                        routeCount: 1,
+                      )).toList();
+                    }
+
+                    return RadarSonarView(
+                      localDeviceName: Platform.isAndroid ? 'Android Peer' : 'This PC',
+                      discoveredPeers: peerInfos,
+                      onAddManualEndpoint: (ip, port, name) async {
+                        final peerId = 'manual_${ip.replaceAll('.', '_')}';
+                        await AndroidNodeBridge.instance.addManualPeer(
+                          peerId: peerId,
+                          name: name,
+                          host: ip,
+                          port: port,
+                        );
+                      },
+                      onPeerSelected: (peer) {
+                        Navigator.pop(ctx);
                         setState(() {
-                          _targetPeerController.text = 'peer-scanned-01';
+                          _targetPeerController.text = peer.id;
                         });
                         _initiateSend();
+                      },
+                      onQrScanPressed: () {
+                        Navigator.pop(ctx);
+                        QrPairingSheet.show(
+                          context,
+                          deviceName: Platform.isAndroid ? 'Android Peer' : 'This PC',
+                          peerId: _client.currentState.peerId ?? 'peer_node_local',
+                          fingerprint: 'ed25519:peerlink...node',
+                          onQrScanned: (payload) {
+                            String scannedId = payload;
+                            try {
+                              final invitation = PairingInvitation.parse(payload);
+                              scannedId = invitation.peerId;
+                            } catch (_) {}
+                            setState(() {
+                              _targetPeerController.text = scannedId;
+                            });
+                            _initiateSend();
+                          },
+                        );
                       },
                     );
                   },
@@ -701,15 +1007,25 @@ class _FilesScreenState extends State<FilesScreen> {
                   ),
                   const SizedBox(width: 8),
                   FilledButton.tonalIcon(
-                    onPressed: _pickFolder,
-                    icon: const Icon(Icons.create_new_folder_rounded, size: 18),
-                    label: const Text('Add Folder...'),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton.tonalIcon(
                     onPressed: _pickSafFile,
                     icon: const Icon(Icons.sd_storage_rounded, size: 18),
                     label: const Text('Pick SAF File'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    onPressed: _openMediaCategorySheet,
+                    icon: const Icon(Icons.category_rounded, size: 18),
+                    label: const Text('Categories...'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF8B5CF6),
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.tonalIcon(
+                    onPressed: _pickFolder,
+                    icon: const Icon(Icons.create_new_folder_rounded, size: 18),
+                    label: const Text('Add Folder...'),
                   ),
                   if (_selectedFiles.isNotEmpty) ...[
                     const SizedBox(width: 12),
@@ -722,6 +1038,74 @@ class _FilesScreenState extends State<FilesScreen> {
                 ],
               ),
             ),
+          ),
+
+          // Discovered Recipients Quick-Send Shelf (Feature A: 2-tap sharing)
+          StreamBuilder<List<DiscoveredPeer>>(
+            stream: AndroidNodeBridge.instance.discoveredPeersStream,
+            initialData: AndroidNodeBridge.instance.activeDiscoveredPeers,
+            builder: (context, snapshot) {
+              final peers = snapshot.data ?? [];
+              if (peers.isEmpty) return const SizedBox.shrink();
+              return Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                  border: Border(
+                    bottom: BorderSide(
+                      color: isDark ? Colors.white10 : Colors.black12,
+                    ),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Nearby Recipients (Tap to Send)',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
+                    ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      height: 48,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: peers.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 8),
+                        itemBuilder: (context, index) {
+                          final p = peers[index];
+                          final isTrusted = DeviceTrustService.instance.devices.any((d) => d.id == p.peerId);
+                          return ActionChip(
+                            avatar: CircleAvatar(
+                              radius: 12,
+                              backgroundColor: isTrusted ? const Color(0xFF10B981) : const Color(0xFF2563EB),
+                              child: Icon(
+                                p.technology.contains('WIFI_DIRECT') ? Icons.phone_android_rounded : Icons.laptop_rounded,
+                                size: 14,
+                                color: Colors.white,
+                              ),
+                            ),
+                            label: Text(p.name.isNotEmpty ? p.name : p.peerId),
+                            onPressed: () {
+                              setState(() {
+                                _targetPeerController.text = p.peerId;
+                              });
+                              if (_selectedFiles.any((f) => f.selected)) {
+                                _initiateSend();
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Recipient set to ${p.name.isNotEmpty ? p.name : p.peerId}. Choose files to send!')),
+                                );
+                              }
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
 
           // Scrollable Media Selection List & Advanced Options
@@ -833,6 +1217,16 @@ class _FilesScreenState extends State<FilesScreen> {
                             onChanged: (val) {
                               setState(() {
                                 file.selected = val ?? false;
+                                _syncController();
+                              });
+                            },
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close_rounded, size: 18),
+                            tooltip: 'Remove file',
+                            onPressed: () {
+                              setState(() {
+                                _selectedFiles.remove(file);
                                 _syncController();
                               });
                             },
@@ -1272,31 +1666,43 @@ class _FilesScreenState extends State<FilesScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  '${_formatBytes(transferredBytes)} / ${_formatBytes(totalBytes)} (${(fraction * 100).toStringAsFixed(1)}%)',
-                  style: theme.textTheme.bodySmall,
-                ),
-                Text(
-                  isTerminated
-                      ? (isCompleted
-                          ? 'Verified SHA-256 âœ“'
-                          : (isOutcomeUnknown
-                              ? 'Outcome Unconfirmed'
-                              : 'Terminated'))
-                      : (isPaused
-                          ? 'Paused'
-                          : _formatSpeed(t.speedBps.toDouble())),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: isCompleted
-                        ? Colors.green
-                        : (isPaused ? Colors.amber.shade900 : null),
-                  ),
-                ),
-              ],
+            Builder(
+              builder: (context) {
+                final model = _activeProgressModels[t.transferId];
+                final displayRate = (model != null && model.smoothedRateBytesPerSec != null)
+                    ? model.formattedRate
+                    : _formatSpeed(t.speedBps.toDouble());
+                final displayEta = (model != null && model.estimatedRemainingTime != null)
+                    ? ' • ${model.formattedEta}'
+                    : '';
+
+                return Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '${_formatBytes(transferredBytes)} / ${_formatBytes(totalBytes)} (${(fraction * 100).toStringAsFixed(1)}%)',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                    Text(
+                      isTerminated
+                          ? (isCompleted
+                              ? 'Verified SHA-256 ✓'
+                              : (isOutcomeUnknown
+                                  ? 'Outcome Unconfirmed'
+                                  : 'Terminated'))
+                          : (isPaused
+                              ? 'Paused'
+                              : '$displayRate$displayEta'),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: isCompleted
+                            ? Colors.green
+                            : (isPaused ? Colors.amber.shade900 : null),
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
             if (isOutcomeUnknown) ...[
               const SizedBox(height: 12),
