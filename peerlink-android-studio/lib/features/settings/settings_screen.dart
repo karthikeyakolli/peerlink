@@ -286,43 +286,50 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: (isConnected ? const Color(0xFF10B981) : Colors.amber)
-                                    .withValues(alpha: 0.16),
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(
-                                isConnected ? Icons.verified_user_rounded : Icons.sensors_off_rounded,
-                                color: isConnected ? const Color(0xFF10B981) : Colors.amber,
-                                size: 22,
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _isAndroid
-                                      ? 'Local Node Daemon Status (Embedded)'
-                                      : 'Local Node Daemon Status',
-                                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                        Expanded(
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: (isConnected ? const Color(0xFF10B981) : Colors.amber)
+                                      .withValues(alpha: 0.16),
+                                  shape: BoxShape.circle,
                                 ),
-                                Text(
-                                  statusSubtitle,
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                    color: isConnected ? const Color(0xFF10B981) : Colors.amber,
-                                  ),
+                                child: Icon(
+                                  isConnected ? Icons.verified_user_rounded : Icons.sensors_off_rounded,
+                                  color: isConnected ? const Color(0xFF10B981) : Colors.amber,
+                                  size: 22,
                                 ),
-                              ],
-                            ),
-                          ],
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      _isAndroid
+                                          ? 'Local Node Daemon Status (Embedded)'
+                                          : 'Local Node Daemon Status',
+                                      style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    Text(
+                                      statusSubtitle,
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: isConnected ? const Color(0xFF10B981) : Colors.amber,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
+                        const SizedBox(width: 8),
                         FilledButton.tonalIcon(
                           onPressed: _isRestarting ? null : _restartDaemon,
                           icon: _isRestarting
