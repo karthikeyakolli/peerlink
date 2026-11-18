@@ -87,7 +87,13 @@ public final class DesktopNodeDaemon implements Closeable {
                 String platform = System.getProperty("os.name", "Windows");
 
                 this.identityManager = org.peerlink.core.identity.DeviceIdentityManager.loadOrCreate(
-                        keyStore, sqliteStorage, deviceName, org.peerlink.protocol.v1.DeviceType.DEVICE_TYPE_DESKTOP_WINDOWS, platform, "0.1.0");
+                        keyStore,
+                        sqliteStorage,
+                        deviceName,
+                        org.peerlink.protocol.v1.DeviceType.DEVICE_TYPE_DESKTOP_WINDOWS,
+                        platform,
+                        "1.0.0"
+                );
                 this.peerId = identityManager.getPeerIdentity().getPeerId().getValue();
                 log.info("Initialized device cryptographic identity. Stable Peer ID: {}, Fingerprint: {}",
                         this.peerId, identityManager.getFingerprint());
@@ -107,7 +113,7 @@ public final class DesktopNodeDaemon implements Closeable {
 
         // 4. Initialize Transfer Engine with durable SQLite transfer journal
         Path stagingRoot = configuration.getDataDirectory().resolve("staging");
-        Path receivedDir = configuration.getDataDirectory().resolve("received");
+        final Path receivedDir = resolveReceivedDirectory();
         transferEngine = new org.peerlink.core.transfer.PeerTransferEngine(sqliteStorage, sqliteStorage, stagingRoot);
 
         // 5. Run Startup Recovery (Operations & Transfers)
@@ -121,7 +127,7 @@ public final class DesktopNodeDaemon implements Closeable {
 
         // 6. Initialize Real P2P Network Transport & PeerSessionManager
         try {
-            tcpTransport = new org.peerlink.core.transport.StandardTcpTransportProvider(NodeConfiguration.DEFAULT_HOST);
+            tcpTransport = new org.peerlink.core.transport.StandardTcpTransportProvider("0.0.0.0");
             var negotiator = new org.peerlink.core.transport.TransportCapabilityNegotiator(java.util.List.of(tcpTransport));
             var protocolVersion = org.peerlink.protocol.v1.ProtocolVersion.newBuilder().setMajor(1).setMinor(0).setPatch(0).build();
             sessionManager = new org.peerlink.core.transport.PeerSessionManager(
@@ -134,21 +140,36 @@ public final class DesktopNodeDaemon implements Closeable {
                     negotiator
             );
 
-            var receiver = transferEngine.createSessionReceiver(receivedDir, trustStore);
             sessionManager.addSessionLifecycleListener(new org.peerlink.core.transport.PeerSessionManager.SessionLifecycleListener() {
                 @Override
                 public void onSessionEstablished(org.peerlink.core.transport.PeerSession session) {
-                    log.info("Session [{}] established with peer [{}]. Attaching TransferSessionCoordinator and Receiver",
-                            session.getSessionId().getValue(), session.getRemotePeer().getPeerId().getValue());
-                    var coordinator = new org.peerlink.core.transfer.TransferSessionCoordinator(session);
+                    log.info("Inbound PeerSession established on Windows Daemon with peer: {}", session.getRemotePeer().getPeerId().getValue());
+                    org.peerlink.core.transfer.TransferSessionCoordinator coordinator;
+                    if (session.getPayloadHandler() instanceof org.peerlink.core.transfer.TransferSessionCoordinator existing) {
+                        coordinator = existing;
+                    } else {
+                        coordinator = new org.peerlink.core.transfer.TransferSessionCoordinator(session);
+                    }
+                    var receiver = new org.peerlink.core.transfer.TransferSessionReceiver(
+                            transferEngine,
+                            receivedDir,
+                            trustStore,
+                            org.peerlink.core.transfer.TransferSessionReceiver.ReceiverConsentMode.AUTO_ACCEPT_PAIRED_TRUSTED
+                    );
                     coordinator.registerReceiver(receiver);
+                    log.info("Registered TransferSessionReceiver on Windows Daemon for session [{}]", session.getSessionId().getValue());
+                }
+
+                @Override
+                public void onSessionClosed(org.peerlink.core.transport.PeerSession session) {
+                    log.info("PeerSession closed on Windows Daemon: {}", session.getSessionId().getValue());
                 }
             });
 
             tcpTransport.startListening(configuration.getP2pPort(), conn -> {
                 sessionManager.handleInboundConnection(conn);
             });
-            log.info("P2P TCP transport listening on {}:{}", NodeConfiguration.DEFAULT_HOST, tcpTransport.getListeningPort());
+            log.info("P2P TCP transport listening on 0.0.0.0:{}", tcpTransport.getListeningPort());
         } catch (Exception e) {
             log.warn("P2P transport failed to start on configured port: {}", e.getMessage());
         }
@@ -201,7 +222,9 @@ public final class DesktopNodeDaemon implements Closeable {
             tcpTransport = null;
         }
         if (sessionManager != null) {
-            sessionManager.close();
+            try {
+                sessionManager.close();
+            } catch (Exception ignored) {}
             sessionManager = null;
         }
         if (grpcServer != null) {
@@ -284,6 +307,20 @@ public final class DesktopNodeDaemon implements Closeable {
     public ReconciliationFramework getReconciliationFramework() { return reconciliationFramework; }
     public StartupRecoveryManager.RecoveryReport getLastRecoveryReport() { return lastRecoveryReport; }
     public ObjectIndexRepository getObjectIndex() { return sqliteStorage != null ? sqliteStorage.getObjectIndex() : null; }
+    private Path resolveReceivedDirectory() {
+        try {
+            String userHome = System.getProperty("user.home");
+            Path userDownloadsPeerLink = (userHome != null && !userHome.isBlank())
+                    ? Paths.get(userHome, "Downloads", "PeerLink")
+                    : configuration.getDataDirectory().resolve("received");
+            java.nio.file.Files.createDirectories(userDownloadsPeerLink);
+            return userDownloadsPeerLink;
+        } catch (Exception e) {
+            log.warn("Falling back to dataDirectory/received for incoming transfers: {}", e.getMessage());
+            return configuration.getDataDirectory().resolve("received");
+        }
+    }
+
     public org.peerlink.core.transfer.PeerTransferEngine getTransferEngine() { return transferEngine; }
     public org.peerlink.core.identity.DeviceIdentityManager getIdentityManager() { return identityManager; }
     public org.peerlink.core.security.TrustStore getTrustStore() { return trustStore; }

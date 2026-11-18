@@ -5,6 +5,7 @@ import org.peerlink.protocol.v1.KeyType;
 
 import java.nio.charset.StandardCharsets;
 import java.security.*;
+import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.HexFormat;
 
@@ -27,10 +28,49 @@ public class PeerCryptoSigner {
 
     public static PeerCryptoSigner generate(String keyId) {
         try {
-            KeyPairGenerator kpg = KeyPairGenerator.getInstance(ALGORITHM);
+            KeyPairGenerator kpg;
+            try {
+                kpg = KeyPairGenerator.getInstance(ALGORITHM);
+            } catch (NoSuchAlgorithmException e) {
+                // If default JVM provider lacks Ed25519 (e.g. Android Conscrypt/ART), fallback to BouncyCastle
+                kpg = KeyPairGenerator.getInstance(ALGORITHM, "BC");
+            }
             return new PeerCryptoSigner(kpg.generateKeyPair(), keyId);
-        } catch (NoSuchAlgorithmException e) {
+        } catch (Exception e) {
             throw new IllegalStateException("JVM environment does not support Ed25519", e);
+        }
+    }
+
+    /**
+     * Restores an Ed25519 signer from durable private and public key bytes.
+     */
+    public static PeerCryptoSigner fromPrivateKeyBytes(String keyId, byte[] privateKeyBytes, byte[] publicKeyBytes) {
+        try {
+            KeyFactory kf;
+            try {
+                kf = KeyFactory.getInstance(ALGORITHM);
+            } catch (NoSuchAlgorithmException e) {
+                kf = KeyFactory.getInstance(ALGORITHM, "BC");
+            }
+            PrivateKey priv = kf.generatePrivate(new PKCS8EncodedKeySpec(privateKeyBytes));
+            PublicKey pub = kf.generatePublic(new X509EncodedKeySpec(publicKeyBytes));
+            return new PeerCryptoSigner(new KeyPair(pub, priv), keyId);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Failed to restore Ed25519 keypair from encoded bytes", e);
+        }
+    }
+
+    /**
+     * Stable Peer ID derivation rule (Version 1: SHA-256 of public key).
+     * Derivation: "peer_" + first 16 hex chars of SHA-256(publicKeyEncoded).
+     */
+    public static String deriveStablePeerId(byte[] publicKeyEncoded) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(publicKeyEncoded);
+            return "peer_" + HexFormat.of().formatHex(hash).substring(0, 16);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 algorithm missing", e);
         }
     }
 

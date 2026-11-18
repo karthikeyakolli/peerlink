@@ -1,7 +1,10 @@
 package org.peerlink.core.transfer;
 
+import org.peerlink.core.transport.ConnectionLifecycleListener;
+import org.peerlink.core.transport.ConnectionState;
 import org.peerlink.core.transport.PeerSession;
 import org.peerlink.core.transport.SessionPayloadHandler;
+import org.peerlink.core.transport.TransportConnection;
 import org.peerlink.protocol.v1.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,6 +34,22 @@ public class TransferSessionCoordinator implements SessionPayloadHandler {
     public TransferSessionCoordinator(PeerSession session) {
         this.session = session;
         this.session.setPayloadHandler(this);
+        TransportConnection conn = session.getConnection();
+        if (conn != null) {
+            conn.addLifecycleListener(new ConnectionLifecycleListener() {
+                @Override
+                public void onStateChanged(TransportConnection connection, ConnectionState oldState, ConnectionState newState) {
+                    if (newState == ConnectionState.CLOSED) {
+                        failPendingRequests(new IOException("Transport connection closed during active transfer"));
+                    }
+                }
+
+                @Override
+                public void onError(TransportConnection connection, Throwable error) {
+                    failPendingRequests(error != null ? error : new IOException("Transport connection error"));
+                }
+            });
+        }
     }
 
     public void registerReceiver(TransferSessionReceiver receiver) {

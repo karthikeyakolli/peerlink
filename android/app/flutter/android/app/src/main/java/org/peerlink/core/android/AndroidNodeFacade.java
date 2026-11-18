@@ -60,6 +60,7 @@ public class AndroidNodeFacade {
     private volatile org.peerlink.core.transfer.TransferSessionReceiver.ReceiverConsentMode receiverConsentMode =
             org.peerlink.core.transfer.TransferSessionReceiver.ReceiverConsentMode.AUTO_ACCEPT_PAIRED_TRUSTED;
     private volatile org.peerlink.core.transfer.TransferSessionReceiver currentReceiver;
+    private final ConcurrentMap<String, org.peerlink.core.transfer.TransferSessionReceiver> sessionReceivers = new ConcurrentHashMap<>();
     private final List<IncomingOfferListener> incomingOfferListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
     private org.peerlink.core.transport.PeerSessionManager.SessionLifecycleListener inboundSessionLifecycleListener;
 
@@ -130,6 +131,14 @@ public class AndroidNodeFacade {
 
     public NodeLifecycleState getLifecycleState() {
         return lifecycleState;
+    }
+
+    public int getListeningPort() {
+        if (transportProvider instanceof org.peerlink.core.transport.StandardTcpTransportProvider tcp) {
+            int port = tcp.getListeningPort();
+            if (port > 0) return port;
+        }
+        return 8765;
     }
 
     public void addLifecycleListener(LifecycleEventListener listener) {
@@ -223,6 +232,7 @@ public class AndroidNodeFacade {
                             receiverConsentMode
                     );
                     currentReceiver = receiver;
+                    sessionReceivers.put(session.getSessionId().getValue(), receiver);
                     receiver.addListener(new org.peerlink.core.transfer.TransferSessionReceiver.ReceiverTransferEventListener() {
                         @Override
                         public void onIncomingOffer(org.peerlink.core.transport.PeerSession sess, org.peerlink.protocol.v1.TransferOffer offer) {
@@ -257,6 +267,7 @@ public class AndroidNodeFacade {
 
                 @Override
                 public void onSessionClosed(org.peerlink.core.transport.PeerSession session) {
+                    sessionReceivers.remove(session.getSessionId().getValue());
                     if (activeTrackers.isEmpty() && isStarted) {
                         setLifecycleState(NodeLifecycleState.READY, "Peer disconnected; node ready");
                     }
@@ -421,6 +432,31 @@ public class AndroidNodeFacade {
         return discoveryEngine;
     }
 
+    private volatile boolean discoveryVisible = true;
+
+    public boolean isDiscoveryVisible() {
+        return discoveryVisible && discoveryEngine.isRunning();
+    }
+
+    public synchronized void setDiscoveryVisible(boolean visible) {
+        this.discoveryVisible = visible;
+        if (visible) {
+            if (!discoveryEngine.isRunning()) {
+                discoveryEngine.startAll();
+            }
+            int boundPort = getListeningPort();
+            discoveryEngine.startAdvertisingAll(keystoreManager.getPeerId(), "Android Peer", boundPort);
+        } else {
+            discoveryEngine.stopAdvertisingAll();
+        }
+    }
+
+    public synchronized boolean toggleDiscoveryVisible() {
+        boolean next = !isDiscoveryVisible();
+        setDiscoveryVisible(next);
+        return next;
+    }
+
     public AndroidNotificationController getNotificationController() {
         return notificationController;
     }
@@ -469,7 +505,6 @@ public class AndroidNodeFacade {
         }
 
         // 1. Resolve and validate EVERY SAF URI before recording operation or emitting events
-        List<java.nio.file.Path> sourcePaths = new ArrayList<>();
         List<PeerFileHandle> handles = new ArrayList<>();
         List<String> targetNames = new ArrayList<>();
         long totalBytes = 0;
@@ -482,8 +517,8 @@ public class AndroidNodeFacade {
             PeerFileHandle handle = handleOpt.get();
             handles.add(handle);
             targetNames.add(handle.getDisplayName());
-            totalBytes += handle.getSizeBytes();
-            sourcePaths.add(resolveHandleToPath(handle, transferId));
+            long bytes = handle.getSizeBytes();
+            totalBytes += (bytes > 0 ? bytes : 0);
         }
 
         String firstFileName = targetNames.isEmpty() ? "File" : targetNames.get(0);
@@ -528,10 +563,16 @@ public class AndroidNodeFacade {
 
         transferExecutor.submit(() -> {
             try {
+                List<java.nio.file.Path> sourcePaths = new ArrayList<>();
+                for (PeerFileHandle handle : handles) {
+                    java.nio.file.Path resolved = resolveHandleToPath(handle, transferId);
+                    sourcePaths.add(resolved);
+                }
                 org.peerlink.core.transport.PeerSession session = obtainSessionForPeer(targetPeer);
+                String authenticatedRemotePeerId = session.getRemotePeer().getPeerId().getValue();
                 org.peerlink.protocol.v1.TransferManifest manifest = transferEngine.prepareSend(
                         keystoreManager.getPeerId().getValue(),
-                        targetPeer.getValue(),
+                        authenticatedRemotePeerId,
                         sourcePaths,
                         org.peerlink.protocol.v1.DuplicateDestinationPolicy.DUPLICATE_DESTINATION_POLICY_RENAME_WITH_SUFFIX
                 );
@@ -578,22 +619,38 @@ public class AndroidNodeFacade {
                 }
                 notifyTransferFinished(transferId, firstFileName, false, e.getMessage());
                 executionFuture.completeExceptionally(e);
+            } finally {
+                cleanStagingOutbound(transferId);
             }
         });
 
         return executionFuture;
     }
 
+    private long calculatePathBytes(java.nio.file.Path p) {
+        if (p == null || !java.nio.file.Files.exists(p)) return 0;
+        if (java.nio.file.Files.isRegularFile(p)) {
+            try { return java.nio.file.Files.size(p); } catch (Exception ignored) { return 0; }
+        }
+        long sum = 0;
+        try (var stream = java.nio.file.Files.walk(p)) {
+            sum = stream.filter(java.nio.file.Files::isRegularFile).mapToLong(f -> {
+                try { return java.nio.file.Files.size(f); } catch (Exception ignored) { return 0L; }
+            }).sum();
+        } catch (Exception ignored) {}
+        return sum;
+    }
+
     private java.nio.file.Path resolveHandleToPath(PeerFileHandle handle, String transferId) throws IOException {
         if (handle instanceof AndroidStorageAbstraction.SafPeerFileHandle safHandle) {
             String physicalUri = safHandle.getPhysicalUri();
             File directFile = new File(physicalUri);
-            if (directFile.exists() && directFile.isFile()) {
+            if (directFile.exists()) {
                 return directFile.toPath();
             }
             if (physicalUri.startsWith("file://")) {
                 File fileUri = new File(physicalUri.substring(7));
-                if (fileUri.exists() && fileUri.isFile()) {
+                if (fileUri.exists()) {
                     return fileUri.toPath();
                 }
             }
@@ -603,17 +660,80 @@ public class AndroidNodeFacade {
             java.nio.file.Files.createDirectories(stagingOutbound);
             String rawName = handle.getDisplayName();
             String safeName = (rawName != null && !rawName.isBlank()) ? new File(rawName).getName() : "item";
-            java.nio.file.Path cachedFile = stagingOutbound.resolve(safeName).normalize();
-            if (!cachedFile.startsWith(stagingOutbound.normalize())) {
+            java.nio.file.Path cachedTarget = stagingOutbound.resolve(safeName).normalize();
+            if (!cachedTarget.startsWith(stagingOutbound.normalize())) {
                 throw new SecurityException("Path traversal attempt in outbound file name: " + rawName);
             }
+            if (handle.isDirectory()) {
+                java.nio.file.Files.createDirectories(cachedTarget);
+                stageDirectoryRecursive(handle, cachedTarget);
+                return cachedTarget;
+            }
             try (InputStream in = handle.openInputStream();
-                 OutputStream out = java.nio.file.Files.newOutputStream(cachedFile)) {
+                 OutputStream out = java.nio.file.Files.newOutputStream(cachedTarget)) {
                 in.transferTo(out);
             }
-            return cachedFile;
+            return cachedTarget;
         }
-        throw new IOException("Unsupported PeerFileHandle type: " + handle.getClass().getName());
+        if (handle != null) {
+            File direct = new File(handle.getDisplayName());
+            if (direct.exists()) return direct.toPath();
+        }
+        throw new IOException("Unsupported PeerFileHandle type: " + (handle != null ? handle.getClass().getName() : "null"));
+    }
+
+    private static final int MAX_STAGE_DIRECTORY_DEPTH = 32;
+    private static final int MAX_STAGE_DIRECTORY_FILES = 10000;
+
+    private void stageDirectoryRecursive(PeerFileHandle dirHandle, java.nio.file.Path localDir) throws IOException {
+        stageDirectoryRecursiveInternal(dirHandle, localDir, 0, new java.util.concurrent.atomic.AtomicInteger(0));
+    }
+
+    private void stageDirectoryRecursiveInternal(PeerFileHandle dirHandle, java.nio.file.Path localDir,
+                                                 int currentDepth, java.util.concurrent.atomic.AtomicInteger fileCounter) throws IOException {
+        if (currentDepth > MAX_STAGE_DIRECTORY_DEPTH) {
+            throw new IOException("Directory hierarchy exceeds maximum supported nesting depth (" + MAX_STAGE_DIRECTORY_DEPTH + ")");
+        }
+        List<PeerFileHandle> children = storageAbstraction.listChildren(dirHandle);
+        for (PeerFileHandle child : children) {
+            if (fileCounter.incrementAndGet() > MAX_STAGE_DIRECTORY_FILES) {
+                throw new IOException("Directory exceeds maximum supported file count (" + MAX_STAGE_DIRECTORY_FILES + ")");
+            }
+            String childRaw = child.getDisplayName();
+            String childSafe = (childRaw != null && !childRaw.isBlank()) ? new File(childRaw).getName() : "item";
+            java.nio.file.Path childTarget = localDir.resolve(childSafe).normalize();
+            if (!childTarget.startsWith(localDir.normalize())) {
+                throw new SecurityException("Path traversal attempt in outbound directory item: " + childRaw);
+            }
+            if (child.isDirectory()) {
+                java.nio.file.Files.createDirectories(childTarget);
+                stageDirectoryRecursiveInternal(child, childTarget, currentDepth + 1, fileCounter);
+            } else {
+                try (InputStream in = child.openInputStream();
+                     OutputStream out = java.nio.file.Files.newOutputStream(childTarget)) {
+                    in.transferTo(out);
+                } catch (Exception e) {
+                    throw new IOException("Failed to read source file during directory staging [" + childRaw + "]: " + e.getMessage(), e);
+                }
+            }
+        }
+    }
+
+    private void cleanStagingOutbound(String transferId) {
+        try {
+            java.nio.file.Path stagingOutbound = (destinationRoot != null ? destinationRoot.getParent() : new File(System.getProperty("java.io.tmpdir")).toPath())
+                    .resolve("staging_outbound")
+                    .resolve(transferId);
+            if (java.nio.file.Files.exists(stagingOutbound)) {
+                try (var walk = java.nio.file.Files.walk(stagingOutbound)) {
+                    walk.sorted(Comparator.reverseOrder())
+                            .map(java.nio.file.Path::toFile)
+                            .forEach(File::delete);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to clean staging outbound directory for transfer {}: {}", transferId, e.getMessage());
+        }
     }
 
     private org.peerlink.core.transport.PeerSession obtainSessionForPeer(PeerId targetPeer) throws Exception {
@@ -626,16 +746,141 @@ public class AndroidNodeFacade {
             return existing.get();
         }
 
+        // Also check if any active session matches by remote IP address or display name
+        for (org.peerlink.core.transport.PeerSession activeSession : sessionManager.getActiveSessions()) {
+            if (activeSession.getState() == org.peerlink.protocol.v1.SessionState.SESSION_STATE_ESTABLISHED) {
+                if (activeSession.getRemotePeer().getPeerId().getValue().equalsIgnoreCase(targetPeer.getValue())) {
+                    return activeSession;
+                }
+                if (activeSession.getConnection() != null && activeSession.getConnection().getRemoteAddress() != null) {
+                    String remoteAddr = activeSession.getConnection().getRemoteAddress().getAddress() != null
+                            ? activeSession.getConnection().getRemoteAddress().getAddress().getHostAddress()
+                            : activeSession.getConnection().getRemoteAddress().getHostString();
+                    if (remoteAddr != null && (remoteAddr.equalsIgnoreCase(targetPeer.getValue())
+                            || targetPeer.getValue().startsWith(remoteAddr + ":")
+                            || targetPeer.getValue().equalsIgnoreCase("manual_" + remoteAddr.replace(".", "_"))
+                            || (targetPeer.getValue().startsWith("p2p_") && (remoteAddr.startsWith("192.168.") || remoteAddr.startsWith("10.") || remoteAddr.startsWith("172.") || remoteAddr.startsWith("169.254."))))) {
+                        log.info("Reusing active full-duplex session [{}] for target peer [{}] via [{}]",
+                                activeSession.getSessionId().getValue(), targetPeer.getValue(), remoteAddr);
+                        return activeSession;
+                    }
+                }
+            }
+        }
+
         org.peerlink.core.android.discovery.DiscoveredPeerRecord targetRecord = null;
         for (org.peerlink.core.android.discovery.DiscoveredPeerRecord record : discoveryEngine.getDiscoveredPeers()) {
-            if (record.getPeerId().getValue().equals(targetPeer.getValue())) {
+            if (record.getPeerId().getValue().equalsIgnoreCase(targetPeer.getValue())
+                    || (record.getDisplayName() != null && record.getDisplayName().equalsIgnoreCase(targetPeer.getValue()))
+                    || (record.getHostAddress() != null && record.getHostAddress().equalsIgnoreCase(targetPeer.getValue()))) {
                 targetRecord = record;
                 break;
             }
         }
 
         if (targetRecord == null) {
+            String targetVal = targetPeer.getValue().trim();
+            if (targetVal.startsWith("{") && targetVal.contains("\"peerId\"")) {
+                try {
+                    String pidStr = extractJsonField(targetVal, "peerId");
+                    String name = extractJsonField(targetVal, "name");
+                    if (name == null || name.isBlank()) name = pidStr;
+                    String fingerprint = extractJsonField(targetVal, "fingerprint");
+                    String hint = extractFirstHint(targetVal);
+
+                    String host = null;
+                    int port = 8765;
+                    if (hint != null && !hint.isBlank()) {
+                        if (hint.contains(":")) {
+                            String[] hp = hint.split(":", 2);
+                            host = hp[0];
+                            try { port = Integer.parseInt(hp[1]); } catch (Exception ignored) {}
+                        } else {
+                            host = hint;
+                        }
+                    }
+
+                    if (pidStr != null && !pidStr.isBlank()) {
+                        PeerId parsedPid = PeerId.newBuilder().setValue(pidStr).build();
+                        if (host != null && !host.isBlank()) {
+                            log.info("Parsed JSON invitation: creating manual route for {} at {}:{}", pidStr, host, port);
+                            targetRecord = discoveryEngine.addManualPeer(parsedPid, name, host, port);
+                        } else {
+                            for (org.peerlink.core.android.discovery.DiscoveredPeerRecord record : discoveryEngine.getDiscoveredPeers()) {
+                                if (record.getPeerId().getValue().equalsIgnoreCase(pidStr)) {
+                                    targetRecord = record;
+                                    break;
+                                }
+                            }
+                        }
+                        if (trustStore != null && !trustStore.isTrusted(pidStr)) {
+                            trustStore.addTrustedPeer(pidStr, fingerprint != null ? fingerprint : "", new byte[0]);
+                        }
+                        targetPeer = parsedPid;
+                    }
+                } catch (Exception e) {
+                    log.warn("Failed to parse JSON target peer invitation: {}", e.getMessage());
+                }
+            }
+        }
+
+        if (targetRecord == null && trustStore != null) {
+            Optional<org.peerlink.protocol.v1.PeerIdentity> peerOpt = trustStore.getPeer(targetPeer.getValue());
+            if (peerOpt.isPresent()) {
+                String desc = peerOpt.get().getDisplayName();
+                if (desc != null && desc.contains(":")) {
+                    String clean = desc.replace("MANUAL_ROUTE:", "").replace("DISCOVERED_ROUTE:", "").trim();
+                    if (clean.contains(":")) {
+                        String[] parts = clean.split(":", 2);
+                        try {
+                            String h = parts[0].trim();
+                            int p = Integer.parseInt(parts[1].trim());
+                            log.info("Restoring manual peer route from trustStore alias for {}: {}:{}", targetPeer.getValue(), h, p);
+                            targetRecord = discoveryEngine.addManualPeer(targetPeer, targetPeer.getValue(), h, p);
+                        } catch (Exception ignored) {}
+                    }
+                }
+            }
+        }
+
+        if (targetRecord == null) {
+            String targetVal = targetPeer.getValue().trim();
+            String host = targetVal;
+            int port = 8765;
+            if (targetVal.contains(":")) {
+                String[] parts = targetVal.split(":", 2);
+                host = parts[0];
+                try {
+                    port = Integer.parseInt(parts[1]);
+                } catch (NumberFormatException ignored) {}
+            }
+            if (host.matches("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$") || host.equalsIgnoreCase("localhost") || host.equalsIgnoreCase("127.0.0.1") || host.contains(".")) {
+                log.info("Creating automatic manual peer route for target: {}:{}", host, port);
+                targetRecord = discoveryEngine.addManualPeer(targetPeer, host, host, port);
+                if (trustStore != null && !trustStore.isTrusted(targetPeer.getValue())) {
+                    trustStore.addTrustedPeer(targetPeer.getValue(), "MANUAL_ROUTE:" + host + ":" + port, new byte[0]);
+                }
+            }
+        } else {
+            String host = targetRecord.getHostAddress();
+            int port = targetRecord.getPort() > 0 ? targetRecord.getPort() : 8765;
+            if (trustStore != null && !trustStore.isTrusted(targetPeer.getValue())) {
+                trustStore.addTrustedPeer(targetPeer.getValue(), "DISCOVERED_ROUTE:" + host + ":" + port, new byte[0]);
+            }
+            if (host != null && !host.isBlank() && trustStore != null && !trustStore.isTrusted(host)) {
+                trustStore.addTrustedPeer(host, "DISCOVERED_ROUTE:" + host + ":" + port, new byte[0]);
+            }
+        }
+
+        if (targetRecord == null) {
             throw new IOException("Target peer " + targetPeer.getValue() + " has no reachable discovered routes or active sessions");
+        }
+
+        if (targetRecord.getAvailableRoutes().isEmpty()) {
+            if (targetPeer.getValue().startsWith("p2p_")) {
+                throw new IOException("WIFI_DIRECT_CLIENT_SESSION_REQUIRED: Local device is Wi-Fi Direct Group Owner. Waiting for remote client [" + targetRecord.getDisplayName() + "] to connect before transfer can begin.");
+            }
+            throw new IOException("Target peer " + targetPeer.getValue() + " has no available transport routes");
         }
 
         if (routeSelector == null) {
@@ -658,8 +903,13 @@ public class AndroidNodeFacade {
 
     public boolean respondIncomingTransfer(String transferId, boolean accept) {
         notificationController.dismissIncomingTransferRequest(transferId);
-        if (currentReceiver != null) {
-            return currentReceiver.respondConsent(transferId, accept);
+        if (currentReceiver != null && currentReceiver.respondConsent(transferId, accept)) {
+            return true;
+        }
+        for (org.peerlink.core.transfer.TransferSessionReceiver r : sessionReceivers.values()) {
+            if (r.respondConsent(transferId, accept)) {
+                return true;
+            }
         }
         return false;
     }
@@ -668,6 +918,9 @@ public class AndroidNodeFacade {
         this.receiverConsentMode = Objects.requireNonNull(mode);
         if (currentReceiver != null) {
             currentReceiver.setConsentMode(mode);
+        }
+        for (org.peerlink.core.transfer.TransferSessionReceiver r : sessionReceivers.values()) {
+            r.setConsentMode(mode);
         }
     }
 
@@ -678,6 +931,7 @@ public class AndroidNodeFacade {
     public org.peerlink.core.transport.TransportProvider getTransportProvider() {
         return transportProvider;
     }
+
 
     public org.peerlink.core.transport.PeerSessionManager getSessionManager() {
         return sessionManager;
@@ -809,5 +1063,21 @@ public class AndroidNodeFacade {
         }
         log.info("Executing opportunistic background backup under charging and unmetered Wi-Fi");
         return true;
+    }
+
+    private static String extractJsonField(String json, String field) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"" + java.util.regex.Pattern.quote(field) + "\"\\s*:\\s*\"([^\"]+)\"").matcher(json);
+        if (m.find()) {
+            return m.group(1);
+        }
+        return null;
+    }
+
+    private static String extractFirstHint(String json) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"hints\"\\s*:\\s*\\[\\s*\"([^\"]+)\"").matcher(json);
+        if (m.find()) {
+            return m.group(1);
+        }
+        return null;
     }
 }

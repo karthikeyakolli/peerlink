@@ -131,6 +131,16 @@ public class AndroidDiscoveryEngine implements DiscoveryAdapter.DiscoveryCallbac
         }
     }
 
+    public synchronized void stopAdvertisingAll() {
+        for (DiscoveryAdapter adapter : adapters) {
+            try {
+                adapter.stopAdvertising();
+            } catch (Exception e) {
+                log.error("Failed to stop advertising on: " + adapter.getTechnologyName(), e);
+            }
+        }
+    }
+
     @Override
     public void onPeerFound(DiscoveredPeerRecord peer) {
         if (peer == null || peer.getPeerId() == null || peer.getPeerId().getValue().isBlank()) {
@@ -186,6 +196,19 @@ public class AndroidDiscoveryEngine implements DiscoveryAdapter.DiscoveryCallbac
         log.warn("Discovery error on {}: {}", technology, errorMessage);
     }
 
+    @Override
+    public void onRoutesInvalidated(String technology) {
+        if (technology == null) return;
+        log.info("Invalidating all routes for technology: {}", technology);
+        for (DiscoveredPeerRecord record : activePeers.values()) {
+            record.removeRoutesForTechnology(technology);
+        }
+    }
+
+    public void invalidateRoutesForTechnology(String technology) {
+        onRoutesInvalidated(technology);
+    }
+
     /**
      * Periodically sweeps stale peers whose routes have not been seen within maxAgeMs.
      * Fires onPeerLost for any pruned peer.
@@ -197,6 +220,10 @@ public class AndroidDiscoveryEngine implements DiscoveryAdapter.DiscoveryCallbac
         while (it.hasNext()) {
             Map.Entry<PeerId, DiscoveredPeerRecord> entry = it.next();
             DiscoveredPeerRecord record = entry.getValue();
+            // Manual endpoints are explicitly configured by user and must not be pruned by ephemeral mDNS sweeper
+            if ("MANUAL".equalsIgnoreCase(record.getDiscoveryTechnology())) {
+                continue;
+            }
             boolean allRoutesExpired = record.pruneExpiredRoutes(maxAgeMs);
             if (allRoutesExpired || record.isExpired(maxAgeMs)) {
                 it.remove();

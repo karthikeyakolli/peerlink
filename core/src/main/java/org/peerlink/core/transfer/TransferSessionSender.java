@@ -27,9 +27,31 @@ public class TransferSessionSender {
 
     private static final Logger log = LoggerFactory.getLogger(TransferSessionSender.class);
 
-    private static final int DEFAULT_CHUNK_TIMEOUT_MS = 5000;
-    private static final int DEFAULT_OFFER_TIMEOUT_MS = 10000;
-    private static final int DEFAULT_COMMIT_TIMEOUT_MS = 15000;
+    private static final int DEFAULT_CHUNK_TIMEOUT_MS = 15000;
+    private static final int DEFAULT_OFFER_TIMEOUT_MS = 45000;
+    private static final int DEFAULT_COMMIT_TIMEOUT_MS = 60000;
+    private static final int PIPELINE_WINDOW_SIZE = 6;
+
+    private static final class InFlightChunk {
+        final int itemIndex;
+        final long chunkIndex;
+        final long offsetBytes;
+        final byte[] data;
+        final boolean isLast;
+        final String sha256;
+        final CompletableFuture<TransferChunkAck> ackFuture;
+
+        InFlightChunk(int itemIndex, long chunkIndex, long offsetBytes, byte[] data,
+                      boolean isLast, String sha256, CompletableFuture<TransferChunkAck> ackFuture) {
+            this.itemIndex = itemIndex;
+            this.chunkIndex = chunkIndex;
+            this.offsetBytes = offsetBytes;
+            this.data = data;
+            this.isLast = isLast;
+            this.sha256 = sha256;
+            this.ackFuture = ackFuture;
+        }
+    }
 
     private final PeerSession session;
     private final TransferSessionCoordinator coordinator;
@@ -132,35 +154,49 @@ public class TransferSessionSender {
                 long offset = 0;
                 long chunkIndex = 0;
 
-                try (FileInputStream fis = new FileInputStream(sourceFile.toFile())) {
-                    while (offset < fileSize) {
-                        if (tracker.isCancelled()) {
-                            notifyReceiverCancelled(transferId, tracker.getCancelReason());
-                            throw new IllegalStateException("Transfer cancelled during transmission: " + tracker.getCancelReason());
+                if (fileSize == 0) {
+                    String emptySha = item.getSha256Hex().isEmpty()
+                            ? FileManifestBuilder.calculateSha256Hex(new byte[0])
+                            : item.getSha256Hex();
+                    sendChunkWithRetry(transferId, i, 0, 0, new byte[0], true, emptySha);
+                } else {
+                    java.util.ArrayDeque<InFlightChunk> inFlight = new java.util.ArrayDeque<>(PIPELINE_WINDOW_SIZE);
+                    try (FileInputStream fis = new FileInputStream(sourceFile.toFile())) {
+                        while (offset < fileSize) {
+                            if (tracker.isCancelled()) {
+                                notifyReceiverCancelled(transferId, tracker.getCancelReason());
+                                throw new IllegalStateException("Transfer cancelled during transmission: " + tracker.getCancelReason());
+                            }
+                            if (tracker.isPaused()) {
+                                log.info("Transfer {} is paused; exiting chunk loop cleanly", transferId);
+                                return null;
+                            }
+
+                            int toRead = (int) Math.min(chunkSizeBytes, fileSize - offset);
+                            int read = fis.read(buffer, 0, toRead);
+                            if (read <= 0) {
+                                break;
+                            }
+
+                            byte[] chunkData = new byte[read];
+                            System.arraycopy(buffer, 0, chunkData, 0, read);
+
+                            bandwidthLimiter.consume(read);
+                            boolean isLast = (offset + read >= fileSize);
+                            String chunkSha = FileManifestBuilder.calculateSha256Hex(chunkData);
+
+                            inFlight.addLast(dispatchChunkAsync(transferId, i, chunkIndex, offset, chunkData, isLast, chunkSha));
+
+                            offset += read;
+                            chunkIndex++;
+
+                            if (inFlight.size() >= PIPELINE_WINDOW_SIZE) {
+                                awaitOrRetryInFlight(transferId, inFlight.removeFirst(), tracker);
+                            }
                         }
-                        if (tracker.isPaused()) {
-                            log.info("Transfer {} is paused; exiting chunk loop cleanly", transferId);
-                            return null;
+                        while (!inFlight.isEmpty()) {
+                            awaitOrRetryInFlight(transferId, inFlight.removeFirst(), tracker);
                         }
-
-                        int toRead = (int) Math.min(chunkSizeBytes, fileSize - offset);
-                        int read = fis.read(buffer, 0, toRead);
-                        if (read <= 0) {
-                            break;
-                        }
-
-                        byte[] chunkData = new byte[read];
-                        System.arraycopy(buffer, 0, chunkData, 0, read);
-
-                        bandwidthLimiter.consume(read);
-                        boolean isLast = (offset + read >= fileSize);
-                        String chunkSha = FileManifestBuilder.calculateSha256Hex(chunkData);
-
-                        sendChunkWithRetry(transferId, i, chunkIndex, offset, chunkData, isLast, chunkSha);
-
-                        offset += read;
-                        chunkIndex++;
-                        tracker.addBytes(read);
                     }
                 }
             }
@@ -192,6 +228,67 @@ public class TransferSessionSender {
         }
     }
 
+    private InFlightChunk dispatchChunkAsync(
+            String transferId,
+            int itemIndex,
+            long chunkIndex,
+            long offsetBytes,
+            byte[] chunkData,
+            boolean isLastChunk,
+            String chunkSha256) throws Exception {
+        if (session.getState() != SessionState.SESSION_STATE_ESTABLISHED) {
+            throw new IOException("Session no longer established: " + session.getState());
+        }
+        TransferChunk chunk = TransferChunk.newBuilder()
+                .setTransferId(transferId)
+                .setItemIndex(itemIndex)
+                .setChunkIndex(chunkIndex)
+                .setOffsetBytes(offsetBytes)
+                .setData(ByteString.copyFrom(chunkData))
+                .setIsLastChunk(isLastChunk)
+                .setChunkSha256(chunkSha256)
+                .build();
+        CompletableFuture<TransferChunkAck> ackFuture = coordinator.registerPendingChunkAck(
+                transferId, itemIndex, chunkIndex);
+        TransferWireMessage chunkWire = TransferWireMessage.newBuilder().setChunk(chunk).build();
+        CompletableFuture<Void> sendFuture = session.sendPayloadAsync(chunkWire.toByteArray());
+        if (sendFuture != null) {
+            sendFuture.get(DEFAULT_CHUNK_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        }
+        return new InFlightChunk(itemIndex, chunkIndex, offsetBytes, chunkData, isLastChunk, chunkSha256, ackFuture);
+    }
+
+    private void awaitOrRetryInFlight(
+            String transferId,
+            InFlightChunk inFlight,
+            TransferProgressTracker tracker) throws Exception {
+        try {
+            TransferChunkAck ack = inFlight.ackFuture.get(DEFAULT_CHUNK_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            if (ack.getSuccess()) {
+                tracker.addBytes(inFlight.data.length);
+                return;
+            }
+            log.warn("Pipelined chunk NACK [item={}, chunk={}]: {} — retrying cleanly",
+                    inFlight.itemIndex, inFlight.chunkIndex, ack.getErrorMessage());
+        } catch (Exception e) {
+            log.warn("Pipelined chunk timeout/error [item={}, chunk={}]: {} — retrying cleanly",
+                    inFlight.itemIndex, inFlight.chunkIndex, e.getMessage());
+            if (session.getState() != SessionState.SESSION_STATE_ESTABLISHED) {
+                throw new IOException("Peer session disconnected during pipelined chunk [" +
+                        inFlight.itemIndex + ":" + inFlight.chunkIndex + "]: " + e.getMessage(), e);
+            }
+        }
+        sendChunkWithRetry(
+                transferId,
+                inFlight.itemIndex,
+                inFlight.chunkIndex,
+                inFlight.offsetBytes,
+                inFlight.data,
+                inFlight.isLast,
+                inFlight.sha256);
+        tracker.addBytes(inFlight.data.length);
+    }
+
     private void sendChunkWithRetry(
             String transferId,
             int itemIndex,
@@ -218,9 +315,14 @@ public class TransferSessionSender {
                     transferId, itemIndex, chunkIndex);
 
             TransferWireMessage chunkWire = TransferWireMessage.newBuilder().setChunk(chunk).build();
-            session.sendPayloadAsync(chunkWire.toByteArray());
-
             try {
+                if (session.getState() != SessionState.SESSION_STATE_ESTABLISHED) {
+                    throw new IOException("Session no longer established: " + session.getState());
+                }
+                CompletableFuture<Void> sendFuture = session.sendPayloadAsync(chunkWire.toByteArray());
+                if (sendFuture != null) {
+                    sendFuture.get(DEFAULT_CHUNK_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                }
                 TransferChunkAck ack = ackFuture.get(DEFAULT_CHUNK_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                 if (ack.getSuccess()) {
                     return;
@@ -231,6 +333,9 @@ public class TransferSessionSender {
             } catch (Exception e) {
                 log.warn("Chunk timeout or send error: item={}, chunk={}, attempt={}/{}, msg={}",
                         itemIndex, chunkIndex, attempts, maxChunkRetries, e.getMessage());
+                if (session.getState() != SessionState.SESSION_STATE_ESTABLISHED) {
+                    throw new IOException("Peer session disconnected during chunk [" + itemIndex + ":" + chunkIndex + "]: " + e.getMessage(), e);
+                }
             }
 
             if (attempts > maxChunkRetries) {
@@ -238,8 +343,8 @@ public class TransferSessionSender {
                         "] after " + attempts + " attempts over session " + session.getSessionId().getValue());
             }
 
-            // Brief backoff before retransmit
-            Thread.sleep(50L * attempts);
+            // Bounded backoff before retransmit
+            Thread.sleep(Math.min(1000L, 150L * attempts));
         }
     }
 

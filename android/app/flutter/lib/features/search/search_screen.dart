@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import '../../core/ai_gateway_service.dart';
+import '../../core/app_settings_service.dart';
 import '../../core/device_trust_service.dart';
 import '../../core/operation_journal_service.dart';
 import '../../core/sync_backup_service.dart';
+import '../../design_system/components/ai_proposal_card.dart';
 import '../../design_system/components/glass_container.dart';
 import '../../design_system/components/interactive_glass_card.dart';
 
@@ -36,7 +39,8 @@ class SearchResultItem {
 }
 
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({super.key});
+  final void Function(int targetTabIndex)? onNavigate;
+  const SearchScreen({super.key, this.onNavigate});
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -45,6 +49,8 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _searchController = TextEditingController();
   int _selectedFilter = 0;
+  AiProposal? _activeProposal;
+  bool _isExecutingProposal = false;
 
   final List<String> _filters = [
     'All',
@@ -57,6 +63,52 @@ class _SearchScreenState extends State<SearchScreen> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _triggerAiAssistant() {
+    final query = _searchController.text.trim();
+    if (query.isEmpty) return;
+    setState(() {
+      _activeProposal = AiGatewayService.instance.formulateProposal(query);
+    });
+  }
+
+  Future<void> _handleAcceptProposal() async {
+    final proposal = _activeProposal;
+    if (proposal == null) return;
+
+    setState(() => _isExecutingProposal = true);
+    try {
+      final success = await AiGatewayService.instance.executeProposal(
+        proposal: proposal,
+        userConfirmed: true,
+      );
+
+      if (!mounted) return;
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Action confirmed: ${proposal.justification}'),
+            backgroundColor: const Color(0xFF10B981),
+          ),
+        );
+        setState(() {
+          _activeProposal = null;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Action halted: $e'),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isExecutingProposal = false);
+      }
+    }
   }
 
   List<SearchResultItem> _generateResults(String query) {
@@ -156,7 +208,14 @@ class _SearchScreenState extends State<SearchScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Cross-Device Omni-Search'),
+        title: const Text('Cross-Device Omni-Search', overflow: TextOverflow.ellipsis),
+        leading: widget.onNavigate != null
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back),
+                tooltip: 'Back to Home',
+                onPressed: () => widget.onNavigate!(0),
+              )
+            : null,
       ),
       body: Column(
         children: [
@@ -164,23 +223,35 @@ class _SearchScreenState extends State<SearchScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
             child: GlassContainer(
-              glowColor: const Color(0xFF6366F1),
               borderRadius: BorderRadius.circular(16),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               child: TextField(
                 controller: _searchController,
                 onChanged: (_) => setState(() {}),
+                onSubmitted: (_) => _triggerAiAssistant(),
                 decoration: InputDecoration(
                   hintText: 'Search local spaces, backups, and authorized peers...',
                   border: InputBorder.none,
                   prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF6366F1)),
                   suffixIcon: query.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.clear_rounded, size: 18),
-                          onPressed: () {
-                            _searchController.clear();
-                            setState(() {});
-                          },
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.auto_awesome_rounded, color: Color(0xFF6366F1), size: 20),
+                              tooltip: 'AI Smart Assist (Rule 11)',
+                              onPressed: _triggerAiAssistant,
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.clear_rounded, size: 18),
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() {
+                                  _activeProposal = null;
+                                });
+                              },
+                            ),
+                          ],
                         )
                       : null,
                 ),
@@ -213,56 +284,73 @@ class _SearchScreenState extends State<SearchScreen> {
             ),
           ),
 
+          // Non-Authoritative AI Proposal Card (Phase 15, Rule 11)
+          if (_activeProposal != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+              child: AiProposalCard(
+                proposal: _activeProposal!,
+                isExecuting: _isExecutingProposal,
+                onAccept: _handleAcceptProposal,
+                onDismiss: () => setState(() => _activeProposal = null),
+              ),
+            ),
+
           const SizedBox(height: 8),
 
           // Content List
           Expanded(
             child: allResults.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24.0),
-                      child: GlassContainer(
-                        glowColor: const Color(0xFF6366F1),
-                        borderRadius: BorderRadius.circular(20),
+                ? SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(vertical: 16.0),
+                    child: Center(
+                      child: Padding(
                         padding: const EdgeInsets.all(24.0),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.saved_search_rounded, size: 48, color: Color(0xFF6366F1)),
-                            const SizedBox(height: 12),
-                            Text(
-                              'Search Local and Authorized Peer Indexes',
-                              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-                              textAlign: TextAlign.center,
-                            ),
-                            const SizedBox(height: 6),
-                            const Text(
-                              'Search local sync directories, verified backup snapshots, and authorized peer catalogs. Discovered remote results are clearly distinguished from content retrievable right now.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(fontSize: 12, color: Colors.grey),
-                            ),
-                          ],
+                        child: GlassContainer(
+                          borderRadius: BorderRadius.circular(20),
+                          padding: const EdgeInsets.all(24.0),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.saved_search_rounded, size: 48, color: Color(0xFF6366F1)),
+                              const SizedBox(height: 12),
+                              Text(
+                                'Search Local and Authorized Peer Indexes',
+                                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 6),
+                              const Text(
+                                'Search local sync directories, verified backup snapshots, and authorized peer catalogs. Discovered remote results are clearly distinguished from content retrievable right now.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(fontSize: 12, color: Colors.grey),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   )
                 : filteredResults.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.search_off_rounded, size: 44, color: theme.disabledColor),
-                            const SizedBox(height: 12),
-                            Text(
-                              'No matching items found for "$query"',
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                            ),
-                            const SizedBox(height: 4),
-                            const Text(
-                              'Check spelling or ensure target peer is paired.',
-                              style: TextStyle(fontSize: 12, color: Colors.grey),
-                            ),
-                          ],
+                    ? SingleChildScrollView(
+                        padding: const EdgeInsets.symmetric(vertical: 16.0),
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.search_off_rounded, size: 44, color: theme.disabledColor),
+                              const SizedBox(height: 12),
+                              Text(
+                                'No matching items found for "$query"',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                              ),
+                              const SizedBox(height: 4),
+                              const Text(
+                                'Check spelling or ensure target peer is paired.',
+                                style: TextStyle(fontSize: 12, color: Colors.grey),
+                              ),
+                            ],
+                          ),
                         ),
                       )
                     : ListView.builder(

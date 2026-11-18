@@ -131,7 +131,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     // Switch to Backup tab
-    await tester.tap(find.text('BACKUPS & SNAPSHOTS'));
+    await tester.tap(find.text('BACKUPS'));
     await tester.pumpAndSettle();
 
     expect(find.text('Verified Ledger Snapshot'), findsOneWidget);

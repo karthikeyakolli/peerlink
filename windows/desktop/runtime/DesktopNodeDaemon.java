@@ -87,7 +87,13 @@ public final class DesktopNodeDaemon implements Closeable {
                 String platform = System.getProperty("os.name", "Windows");
 
                 this.identityManager = org.peerlink.core.identity.DeviceIdentityManager.loadOrCreate(
-                        keyStore, sqliteStorage, deviceName, platform);
+                        keyStore,
+                        sqliteStorage,
+                        deviceName,
+                        org.peerlink.protocol.v1.DeviceType.DEVICE_TYPE_DESKTOP_WINDOWS,
+                        platform,
+                        "1.0.0"
+                );
                 this.peerId = identityManager.getPeerIdentity().getPeerId().getValue();
                 log.info("Initialized device cryptographic identity. Stable Peer ID: {}, Fingerprint: {}",
                         this.peerId, identityManager.getFingerprint());
@@ -121,7 +127,7 @@ public final class DesktopNodeDaemon implements Closeable {
 
         // 6. Initialize Real P2P Network Transport & PeerSessionManager
         try {
-            tcpTransport = new org.peerlink.core.transport.StandardTcpTransportProvider(NodeConfiguration.DEFAULT_HOST);
+            tcpTransport = new org.peerlink.core.transport.StandardTcpTransportProvider("0.0.0.0");
             var negotiator = new org.peerlink.core.transport.TransportCapabilityNegotiator(java.util.List.of(tcpTransport));
             var protocolVersion = org.peerlink.protocol.v1.ProtocolVersion.newBuilder().setMajor(1).setMinor(0).setPatch(0).build();
             sessionManager = new org.peerlink.core.transport.PeerSessionManager(
@@ -134,12 +140,36 @@ public final class DesktopNodeDaemon implements Closeable {
                     negotiator
             );
 
-            var receiver = transferEngine.createSessionReceiver(receivedDir, trustStore);
+            sessionManager.addSessionLifecycleListener(new org.peerlink.core.transport.PeerSessionManager.SessionLifecycleListener() {
+                @Override
+                public void onSessionEstablished(org.peerlink.core.transport.PeerSession session) {
+                    log.info("Inbound PeerSession established on Windows Daemon with peer: {}", session.getRemotePeer().getPeerId().getValue());
+                    org.peerlink.core.transfer.TransferSessionCoordinator coordinator;
+                    if (session.getPayloadHandler() instanceof org.peerlink.core.transfer.TransferSessionCoordinator existing) {
+                        coordinator = existing;
+                    } else {
+                        coordinator = new org.peerlink.core.transfer.TransferSessionCoordinator(session);
+                    }
+                    var receiver = new org.peerlink.core.transfer.TransferSessionReceiver(
+                            transferEngine,
+                            receivedDir,
+                            trustStore,
+                            org.peerlink.core.transfer.TransferSessionReceiver.ReceiverConsentMode.AUTO_ACCEPT_PAIRED_TRUSTED
+                    );
+                    coordinator.registerReceiver(receiver);
+                    log.info("Registered TransferSessionReceiver on Windows Daemon for session [{}]", session.getSessionId().getValue());
+                }
+
+                @Override
+                public void onSessionClosed(org.peerlink.core.transport.PeerSession session) {
+                    log.info("PeerSession closed on Windows Daemon: {}", session.getSessionId().getValue());
+                }
+            });
 
             tcpTransport.startListening(configuration.getP2pPort(), conn -> {
                 sessionManager.handleInboundConnection(conn);
             });
-            log.info("P2P TCP transport listening on {}:{}", NodeConfiguration.DEFAULT_HOST, tcpTransport.getListeningPort());
+            log.info("P2P TCP transport listening on 0.0.0.0:{}", tcpTransport.getListeningPort());
         } catch (Exception e) {
             log.warn("P2P transport failed to start on configured port: {}", e.getMessage());
         }
@@ -194,7 +224,7 @@ public final class DesktopNodeDaemon implements Closeable {
         if (sessionManager != null) {
             try {
                 sessionManager.close();
-            } catch (IOException ignored) {}
+            } catch (Exception ignored) {}
             sessionManager = null;
         }
         if (grpcServer != null) {

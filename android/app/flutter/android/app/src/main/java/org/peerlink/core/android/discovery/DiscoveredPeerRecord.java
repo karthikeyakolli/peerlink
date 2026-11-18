@@ -20,10 +20,7 @@ public final class DiscoveredPeerRecord {
 
     public DiscoveredPeerRecord(PeerId peerId,
                                 String displayName,
-                                String hostAddress,
-                                int port,
-                                String discoveryTechnology,
-                                List<String> supportedTransports) {
+                                String discoveryTechnology) {
         this.peerId = Objects.requireNonNull(peerId, "peerId is required");
         this.displayName = displayName != null && !displayName.isBlank() ? displayName : peerId.getValue();
         this.discoveredAtUtcMs = System.currentTimeMillis();
@@ -32,13 +29,24 @@ public final class DiscoveredPeerRecord {
         if (discoveryTechnology != null) {
             this.discoveryTechnologies.add(discoveryTechnology);
         }
+    }
 
-        int priority = calculatePriority(discoveryTechnology);
-        PeerTransportRoute initialRoute = new PeerTransportRoute(
-                hostAddress, port, discoveryTechnology != null ? discoveryTechnology : "UNKNOWN",
-                supportedTransports, priority
-        );
-        this.availableRoutes.add(initialRoute);
+    public DiscoveredPeerRecord(PeerId peerId,
+                                String displayName,
+                                String hostAddress,
+                                int port,
+                                String discoveryTechnology,
+                                List<String> supportedTransports) {
+        this(peerId, displayName, discoveryTechnology);
+
+        if (hostAddress != null && !hostAddress.isBlank() && port > 0) {
+            int priority = calculatePriority(discoveryTechnology);
+            PeerTransportRoute initialRoute = new PeerTransportRoute(
+                    hostAddress, port, discoveryTechnology != null ? discoveryTechnology : "UNKNOWN",
+                    supportedTransports, priority
+            );
+            this.availableRoutes.add(initialRoute);
+        }
     }
 
     public static int calculatePriority(String technology) {
@@ -94,12 +102,21 @@ public final class DiscoveredPeerRecord {
 
     public String getHostAddress() {
         PeerTransportRoute best = getBestRoute();
-        return best != null ? best.getHostAddress() : "127.0.0.1";
+        return best != null ? best.getHostAddress() : "";
     }
 
     public int getPort() {
         PeerTransportRoute best = getBestRoute();
-        return best != null ? best.getPort() : 8765;
+        return best != null ? best.getPort() : 0;
+    }
+
+    public synchronized boolean removeRoutesForTechnology(String technology) {
+        if (technology == null) return false;
+        boolean removed = availableRoutes.removeIf(r -> technology.equalsIgnoreCase(r.getDiscoveryTechnology()));
+        if (availableRoutes.stream().noneMatch(r -> technology.equalsIgnoreCase(r.getDiscoveryTechnology()))) {
+            this.discoveryTechnologies.remove(technology);
+        }
+        return removed;
     }
 
     public List<String> getSupportedTransports() {
@@ -116,6 +133,10 @@ public final class DiscoveredPeerRecord {
     public synchronized void addOrMergeRoute(PeerTransportRoute route) {
         this.lastSeenAtUtcMs = System.currentTimeMillis();
         this.discoveryTechnologies.add(route.getDiscoveryTechnology());
+
+        if ("WIFI_DIRECT".equalsIgnoreCase(route.getDiscoveryTechnology())) {
+            availableRoutes.removeIf(r -> "WIFI_DIRECT".equalsIgnoreCase(r.getDiscoveryTechnology()) && !r.equals(route));
+        }
 
         boolean updated = false;
         for (PeerTransportRoute existing : availableRoutes) {

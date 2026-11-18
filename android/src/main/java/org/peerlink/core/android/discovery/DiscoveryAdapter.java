@@ -12,6 +12,7 @@ public interface DiscoveryAdapter {
         void onPeerFound(DiscoveredPeerRecord peer);
         void onPeerLost(PeerId peerId);
         void onDiscoveryError(String technology, String errorMessage);
+        default void onRoutesInvalidated(String technology) {}
     }
 
     String getTechnologyName();

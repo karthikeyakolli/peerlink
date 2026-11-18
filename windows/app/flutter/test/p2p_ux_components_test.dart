@@ -268,7 +268,7 @@ void main() {
       expect(find.text('Settings & Zero-Trust Safety'), findsOneWidget);
       expect(find.text('Zero-Trust Invariant Enforcement'), findsOneWidget);
       expect(find.text('Trust & Devices'), findsOneWidget);
-      await tester.drag(find.byType(ListView), const Offset(0, -300));
+      await tester.drag(find.byType(ListView), const Offset(0, -600));
       await tester.pump();
       expect(find.text('Safety & Antimalware'), findsOneWidget);
     });

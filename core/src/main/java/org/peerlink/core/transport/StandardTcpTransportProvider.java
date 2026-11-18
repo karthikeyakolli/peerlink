@@ -19,6 +19,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class StandardTcpTransportProvider implements TransportProvider {
 
     private static final Logger log = LoggerFactory.getLogger(StandardTcpTransportProvider.class);
+    private static final int SOCKET_BUFFER_BYTES = 512 * 1024;
+    private static final int CONNECT_TIMEOUT_MS = 8000;
 
     private final String bindHost;
     private ServerSocketChannel serverChannel;
@@ -81,6 +83,9 @@ public class StandardTcpTransportProvider implements TransportProvider {
                 SocketChannel clientChannel = serverChannel.accept();
                 if (clientChannel != null) {
                     clientChannel.setOption(StandardSocketOptions.TCP_NODELAY, true);
+                    clientChannel.setOption(StandardSocketOptions.SO_KEEPALIVE, true);
+                    clientChannel.setOption(StandardSocketOptions.SO_RCVBUF, SOCKET_BUFFER_BYTES);
+                    clientChannel.setOption(StandardSocketOptions.SO_SNDBUF, SOCKET_BUFFER_BYTES);
                     StandardTcpTransportConnection connection = new StandardTcpTransportConnection(
                             clientChannel, TransportType.TRANSPORT_TYPE_DIRECT_TCP_TLS);
                     connection.startReading();
@@ -106,11 +111,22 @@ public class StandardTcpTransportProvider implements TransportProvider {
 
     @Override
     public CompletableFuture<TransportConnection> connectAsync(InetSocketAddress remoteAddress) {
+        return connectAsync(remoteAddress, null);
+    }
+
+    @Override
+    public CompletableFuture<TransportConnection> connectAsync(InetSocketAddress remoteAddress, PreConnectSocketBinder socketBinder) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 SocketChannel channel = SocketChannel.open();
                 channel.setOption(StandardSocketOptions.TCP_NODELAY, true);
-                channel.connect(remoteAddress);
+                channel.setOption(StandardSocketOptions.SO_KEEPALIVE, true);
+                channel.setOption(StandardSocketOptions.SO_RCVBUF, SOCKET_BUFFER_BYTES);
+                channel.setOption(StandardSocketOptions.SO_SNDBUF, SOCKET_BUFFER_BYTES);
+                if (socketBinder != null) {
+                    socketBinder.bind(channel.socket());
+                }
+                channel.socket().connect(remoteAddress, CONNECT_TIMEOUT_MS);
                 StandardTcpTransportConnection connection = new StandardTcpTransportConnection(
                         channel, TransportType.TRANSPORT_TYPE_DIRECT_TCP_TLS);
                 connection.startReading();

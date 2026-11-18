@@ -14,23 +14,46 @@ class MainActivity : FlutterActivity() {
     companion object {
         const val REQUEST_CODE_PICK_DOCUMENT = 4210
         const val REQUEST_CODE_PERMISSIONS = 4211
+        const val REQUEST_CODE_PICK_DIRECTORY = 4212
     }
 
     private var pigeonBridge: AndroidPigeonBridge? = null
     private var pendingPickResult: MethodChannel.Result? = null
+    private var pendingDirectoryPickResult: MethodChannel.Result? = null
     private var pendingPermissionResult: MethodChannel.Result? = null
+    private var pendingSharedPayload: Map<String, Any>? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            window.decorView.isForceDarkAllowed = false
+        }
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        flutterEngine.platformViewsController.registry.registerViewFactory(
+            "org.peerlink/inline_video_view",
+            org.peerlink.app.media.InlineVideoViewFactory()
+        )
         val app = application as? PeerLinkApplication
         val nodeFacade = app?.nodeFacade
         if (nodeFacade != null) {
             pigeonBridge = AndroidPigeonBridge(
                 nodeFacade = nodeFacade,
                 filePicker = { result, category -> pickContentUris(result, category) },
-                permissionRequester = { requested, result -> requestRequiredPermissions(requested, result) }
+                directoryPicker = { result -> pickDirectoryUri(result) },
+                permissionRequester = { requested, result -> requestRequiredPermissions(requested, result) },
+                appStorageDirectoryProvider = { context.filesDir.absolutePath },
+                context = this,
+                pendingShareIntentConsumer = {
+                    val current = pendingSharedPayload
+                    pendingSharedPayload = null
+                    current
+                }
             )
             pigeonBridge?.register(flutterEngine)
+            org.peerlink.app.share.DirectShareManager.updateShareTargetsFromTrustStore(this, nodeFacade.trustStore)
         }
         handleShareIntent(intent)
         handleIncomingTransferIntent(intent)
@@ -100,6 +123,28 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    fun pickDirectoryUri(result: MethodChannel.Result) {
+        if (pendingDirectoryPickResult != null) {
+            result.error("BUSY", "Directory selection already in progress", null)
+            return
+        }
+        pendingDirectoryPickResult = result
+        try {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                addFlags(
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
+                )
+            }
+            startActivityForResult(intent, REQUEST_CODE_PICK_DIRECTORY)
+        } catch (e: Exception) {
+            pendingDirectoryPickResult = null
+            result.error("PICK_ERROR", e.message, null)
+        }
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQUEST_CODE_PICK_DOCUMENT) {
@@ -127,6 +172,19 @@ class MainActivity : FlutterActivity() {
                 }
             }
             result.success(uris)
+        } else if (requestCode == REQUEST_CODE_PICK_DIRECTORY) {
+            val result = pendingDirectoryPickResult
+            pendingDirectoryPickResult = null
+            if (result == null) return
+
+            if (resultCode != RESULT_OK || data == null || data.data == null) {
+                result.success(null)
+                return
+            }
+
+            val treeUri = data.data!!
+            takePersistablePermission(treeUri)
+            result.success(treeUri.toString())
         }
     }
 
@@ -196,8 +254,15 @@ class MainActivity : FlutterActivity() {
 
     private fun takePersistablePermission(uri: Uri) {
         try {
-            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        } catch (ignored: Exception) {}
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        } catch (_: Exception) {
+            try {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (ignored: Exception) {}
+        }
     }
 
     override fun onResume() {
@@ -238,6 +303,8 @@ class MainActivity : FlutterActivity() {
         if (intent == null) return
         val action = intent.action
         val type = intent.type ?: return
+        val targetPeerId = intent.getStringExtra(org.peerlink.app.share.DirectShareManager.EXTRA_TARGET_PEER_ID)
+        val peerName = intent.getStringExtra(org.peerlink.app.share.DirectShareManager.EXTRA_PEER_NAME)
 
         val sharedUris = mutableListOf<String>()
 
@@ -249,6 +316,18 @@ class MainActivity : FlutterActivity() {
                 intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
             }
             uri?.let { sharedUris.add(it.toString()) }
+
+            val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+            if (text != null && text.isNotBlank()) {
+                val payload = mutableMapOf<String, Any>("text" to text)
+                if (targetPeerId != null) payload["targetPeerId"] = targetPeerId
+                if (peerName != null) payload["peerName"] = peerName
+                pendingSharedPayload = payload
+                flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
+                    MethodChannel(messenger, AndroidPigeonBridge.METHOD_CHANNEL)
+                        .invokeMethod("onTextSharedViaIntent", payload)
+                }
+            }
         } else if (Intent.ACTION_SEND_MULTIPLE == action) {
             val uris = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
                 intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
@@ -260,9 +339,20 @@ class MainActivity : FlutterActivity() {
         }
 
         if (sharedUris.isNotEmpty()) {
+            val payload = mutableMapOf<String, Any>(
+                "uris" to sharedUris,
+                "mimeType" to type
+            )
+            if (targetPeerId != null) {
+                payload["targetPeerId"] = targetPeerId
+            }
+            if (peerName != null) {
+                payload["peerName"] = peerName
+            }
+            pendingSharedPayload = payload
             flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
                 MethodChannel(messenger, AndroidPigeonBridge.METHOD_CHANNEL)
-                    .invokeMethod("onFilesSharedViaIntent", mapOf("uris" to sharedUris, "mimeType" to type))
+                    .invokeMethod("onFilesSharedViaIntent", payload)
             }
         }
     }

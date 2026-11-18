@@ -14,10 +14,19 @@
         android:name="android.permission.NEARBY_WIFI_DEVICES"
         android:usesPermissionFlags="neverForLocation" />
 
+    <!-- Android 17+ (API 37+) Local Network Access for LAN P2P Socket Transfers -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+
     <!-- Location required only for Wi-Fi Direct / NSD discovery on Android 12 and below -->
     <uses-permission
         android:name="android.permission.ACCESS_FINE_LOCATION"
         android:maxSdkVersion="32" />
+
+    <!-- Camera for Authenticated QR Pairing (Phase 3) -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
 
     <!-- Notifications & Foreground Execution -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -72,6 +81,10 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="*/*" />
             </intent-filter>
+
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <!-- Native Jetpack Compose / Dialog Pairing Confirmation Activity -->
@@ -85,6 +98,34 @@
             android:name="org.peerlink.app.service.PeerLinkForegroundService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Notification Action Receiver for Inbound Transfers -->
+        <receiver
+            android:name="org.peerlink.app.notification.InboundTransferActionReceiver"
+            android:exported="false" />
+
+        <!-- Quick Settings Tile for Toggling Discovery Broadcast Visibility -->
+        <service
+            android:name="org.peerlink.app.service.PeerLinkTileService"
+            android:label="PeerLink Discovery"
+            android:icon="@mipmap/ic_launcher"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- FileProvider for Safe System Media / Document Opening & Sharing -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/provider_paths" />
+        </provider>
 
         <meta-data
             android:name="flutterEmbedding"

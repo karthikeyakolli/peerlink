@@ -2,7 +2,7 @@
 # Toolchains: Protoc 29.x, gRPC-Java 1.69.x, Dart protoc-gen-dart 21.x
 
 param(
-    [string[]]$TargetPlatforms = @("windows", "linux", "macos", "android")
+    [string[]]$TargetPlatforms = @("windows", "android")
 )
 
 $ErrorActionPreference = "Stop"

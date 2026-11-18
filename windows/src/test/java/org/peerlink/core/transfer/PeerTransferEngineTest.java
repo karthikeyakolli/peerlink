@@ -358,8 +358,12 @@ class PeerTransferEngineTest {
         Path file = sourceDir.resolve("dest_unavail.txt");
         Files.writeString(file, "Some content");
 
-        // Use a path on a non-existent drive (e.g. Z:\invalid_drive\...)
-        Path invalidDest = Path.of("Z:\\non_existent_drive_peerlink\\test_folder");
+        // Use a path whose parent is an existing regular file (not a directory).
+        // This fails on all platforms: Files.createDirectories cannot create a directory
+        // inside a path component that already exists as a regular file.
+        Path parentAsFile = tempDir.resolve("not_a_directory.bin");
+        Files.writeString(parentAsFile, "I am a regular file, not a directory");
+        Path invalidDest = parentAsFile.resolve("nested_folder");
 
         assertThrows(PreflightException.class, () ->
                 engine.executeTransfer(

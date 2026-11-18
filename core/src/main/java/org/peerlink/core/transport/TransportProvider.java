@@ -18,5 +18,8 @@ public interface TransportProvider extends Closeable {
     void startListening(int port, TransportConnectionListener listener) throws IOException;
     int getListeningPort();
     CompletableFuture<TransportConnection> connectAsync(InetSocketAddress remoteAddress);
+    default CompletableFuture<TransportConnection> connectAsync(InetSocketAddress remoteAddress, PreConnectSocketBinder socketBinder) {
+        return connectAsync(remoteAddress);
+    }
     void stopListening();
 }

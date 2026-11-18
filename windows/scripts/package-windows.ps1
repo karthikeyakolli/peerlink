@@ -16,19 +16,24 @@ Write-Host " PeerLink Windows Release Packaging: v$Version" -ForegroundColor Cya
 Write-Host " Base Directory: $windowsDir" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
-# 1. Locate Node JAR
+# 1. Locate Node JAR (prefer shaded all-in-one jar)
 $nodeJar = $null
+$shadedJar = Join-Path $windowsDir "target\peerlink-windows-node-0.1.0-SNAPSHOT-all.jar"
 $localJar = Join-Path $windowsDir "target\peerlink-windows-node-0.1.0-SNAPSHOT.jar"
 
-if (Test-Path $localJar) {
+if (Test-Path $shadedJar) {
+    $nodeJar = $shadedJar
+} elseif (Test-Path $localJar) {
     $nodeJar = $localJar
 }
 
 if (-not $nodeJar) {
-    Write-Host "Local Node JAR not found at $localJar." -ForegroundColor Yellow
-    Write-Host "Building Windows Local Node jar..." -ForegroundColor Yellow
+    Write-Host "Local Node JAR not found at $shadedJar." -ForegroundColor Yellow
+    Write-Host "Building Windows Local Node shaded jar..." -ForegroundColor Yellow
     & "$repoRoot\mvnw.cmd" package -DskipTests -f "$windowsDir\pom.xml" -B
-    if (Test-Path $localJar) {
+    if (Test-Path $shadedJar) {
+        $nodeJar = $shadedJar
+    } elseif (Test-Path $localJar) {
         $nodeJar = $localJar
     } else {
         Write-Error "Cannot package: Local Node JAR is missing."
@@ -79,13 +84,22 @@ peerlink.security.fail-closed-scanning=true
 Set-Content -Path "$targetDist\config\application.properties" -Value $configContent -Encoding UTF8
 
 # Check if Flutter Windows native bundle exists
-$flutterReleaseDir = Join-Path $windowsDir "app\flutter\build\windows\runner\Release"
+$flutterReleaseDir = Join-Path $windowsDir "app\flutter\build\windows\x64\runner\Release"
+if (-not (Test-Path $flutterReleaseDir)) {
+    $flutterReleaseDir = Join-Path $windowsDir "app\flutter\build\windows\runner\Release"
+}
 if (Test-Path $flutterReleaseDir) {
-    Write-Host "`n[2/3] Including compiled Flutter Windows desktop runner..." -ForegroundColor Cyan
+    Write-Host "`n[2/3] Including compiled Flutter Windows desktop runner from $flutterReleaseDir..." -ForegroundColor Cyan
     Copy-Item -Recurse -Force "$flutterReleaseDir\*" "$targetDist\bin\"
 } else {
     Write-Host "`n[2/3] Flutter Windows desktop runner not present in Release build (skipped)." -ForegroundColor Gray
 }
+
+# Include 1-Click Installer and Context Menu scripts
+Copy-Item "$scriptDir\install.bat" "$targetDist\install.bat" -Force
+Copy-Item "$scriptDir\install.ps1" "$targetDist\install.ps1" -Force
+Copy-Item "$scriptDir\register-context-menu.ps1" "$targetDist\register-context-menu.ps1" -Force
+Copy-Item "$scriptDir\unregister-context-menu.ps1" "$targetDist\unregister-context-menu.ps1" -Force
 
 # 3. Generate Release Manifest and SHA-256
 Write-Host "`n[3/3] Generating release manifest and SHA-256 signatures..." -ForegroundColor Cyan
@@ -105,9 +119,20 @@ $manifestContent = @"
 "@
 Set-Content -Path "$targetDist\manifest.json" -Value $manifestContent -Encoding UTF8
 
+# Compress into standalone distributable ZIP archive
+$zipOutput = Join-Path $windowsDir "$OutputDir\peerlink-windows-$Version.zip"
+Write-Host "`nCreating distributable release ZIP archive: $zipOutput..." -ForegroundColor Cyan
+if (Test-Path $zipOutput) {
+    Remove-Item -Force $zipOutput
+}
+Compress-Archive -Path "$targetDist\*" -DestinationPath $zipOutput -Force
+$zipHash = (Get-FileHash $zipOutput -Algorithm SHA256).Hash.ToLower()
+
 Write-Host "`n==========================================================" -ForegroundColor Green
 Write-Host " Windows Release Package created successfully!" -ForegroundColor Green
 Write-Host " Output Directory: $targetDist" -ForegroundColor Green
+Write-Host " Release Archive : $zipOutput" -ForegroundColor Green
+Write-Host " Archive SHA256  : $zipHash" -ForegroundColor Green
 Write-Host " Local Node SHA256: $jarHash" -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 exit 0

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
-/// Giant Send & Receive bilateral hero widget inspired by SHAREit and modern P2P utilities.
-/// Designed for zero-friction one-tap access to primary transfer actions.
+/// Minimalist Light-Only Send & Receive bilateral hero widget.
+/// Flat white cards with crisp 1px borders, essential restrained accents,
+/// zero gradients, zero dark backgrounds, and zero drop shadows/glow.
 class SendReceiveHero extends StatelessWidget {
   final VoidCallback onSendPressed;
   final VoidCallback onReceivePressed;
@@ -23,7 +24,7 @@ class SendReceiveHero extends StatelessWidget {
       children: [
         Row(
           children: [
-            // SEND HERO CARD
+            // SEND HERO CARD (Flat Light Surface)
             Expanded(
               child: _HeroActionButton(
                 title: 'Send',
@@ -32,29 +33,21 @@ class SendReceiveHero extends StatelessWidget {
                     ? '$discoveredPeersCount nearby'
                     : 'Tap to select',
                 icon: Icons.arrow_upward_rounded,
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF2563EB), Color(0xFF1D4ED8)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                shadowColor: const Color(0xFF2563EB).withValues(alpha: 0.35),
+                accentColor: const Color(0xFF2563EB),
+                accentTint: const Color(0xFFEFF6FF),
                 onTap: onSendPressed,
               ),
             ),
-            const SizedBox(width: 14),
-            // RECEIVE HERO CARD
+            const SizedBox(width: 12),
+            // RECEIVE HERO CARD (Flat Light Surface)
             Expanded(
               child: _HeroActionButton(
                 title: 'Receive',
                 subtitle: 'Wait for incoming files',
                 actionTag: isNodeOnline ? 'Radar active' : 'Connecting...',
                 icon: Icons.arrow_downward_rounded,
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF059669), Color(0xFF047857)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                shadowColor: const Color(0xFF059669).withValues(alpha: 0.35),
+                accentColor: const Color(0xFF15803D),
+                accentTint: const Color(0xFFF0FDF4),
                 onTap: onReceivePressed,
               ),
             ),
@@ -70,8 +63,8 @@ class _HeroActionButton extends StatefulWidget {
   final String subtitle;
   final String actionTag;
   final IconData icon;
-  final Gradient gradient;
-  final Color shadowColor;
+  final Color accentColor;
+  final Color accentTint;
   final VoidCallback onTap;
 
   const _HeroActionButton({
@@ -79,8 +72,8 @@ class _HeroActionButton extends StatefulWidget {
     required this.subtitle,
     required this.actionTag,
     required this.icon,
-    required this.gradient,
-    required this.shadowColor,
+    required this.accentColor,
+    required this.accentTint,
     required this.onTap,
   });
 
@@ -98,9 +91,9 @@ class _HeroActionButtonState extends State<_HeroActionButton>
     super.initState();
     _animController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 120),
+      duration: const Duration(milliseconds: 100),
     );
-    _scaleAnimation = Tween<double>(begin: 1.0, end: 0.96).animate(
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 0.98).animate(
       CurvedAnimation(parent: _animController, curve: Curves.easeInOut),
     );
   }
@@ -121,27 +114,23 @@ class _HeroActionButtonState extends State<_HeroActionButton>
       ),
       child: Container(
         decoration: BoxDecoration(
-          gradient: widget.gradient,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: widget.shadowColor,
-              offset: const Offset(0, 8),
-              blurRadius: 18,
-              spreadRadius: -2,
-            ),
-          ],
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: const Color(0xFFE5E7EB),
+            width: 1.0,
+          ),
         ),
         child: Material(
           color: Colors.transparent,
           child: InkWell(
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(14),
             onTapDown: (_) => _animController.forward(),
             onTapUp: (_) => _animController.reverse(),
             onTapCancel: () => _animController.reverse(),
             onTap: widget.onTap,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 20.0),
+              padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 14.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -149,57 +138,66 @@ class _HeroActionButtonState extends State<_HeroActionButton>
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(10),
+                        padding: const EdgeInsets.all(7),
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.22),
+                          color: widget.accentTint,
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
                           widget.icon,
-                          color: Colors.white,
-                          size: 26,
+                          color: widget.accentColor,
+                          size: 18,
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.18),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          widget.actionTag,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.2,
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF3F4F6),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              widget.actionTag,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Color(0xFF475569),
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 12),
                   Text(
                     widget.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.8,
+                      color: Color(0xFF0F172A),
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.2,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 3),
                   Text(
                     widget.subtitle,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.85),
-                      fontSize: 12,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF64748B),
+                      fontSize: 11,
                       height: 1.25,
                       fontWeight: FontWeight.w400,
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),

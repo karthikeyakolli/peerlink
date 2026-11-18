@@ -13,6 +13,8 @@ class TransferSpeedometer extends StatelessWidget {
   final String peerName;
   final bool isSender;
   final VoidCallback? onCancel;
+  final String? networkRouteInfo;
+  final String? performanceAdvice;
 
   const TransferSpeedometer({
     super.key,
@@ -26,6 +28,8 @@ class TransferSpeedometer extends StatelessWidget {
     required this.peerName,
     this.isSender = true,
     this.onCancel,
+    this.networkRouteInfo,
+    this.performanceAdvice,
   });
 
   String _formatEta(int seconds) {
@@ -36,6 +40,12 @@ class TransferSpeedometer extends StatelessWidget {
     return '${mins}m ${secs}s remaining';
   }
 
+  bool get _isFastBand =>
+      (networkRouteInfo ?? '').contains('5 GHz') ||
+      (networkRouteInfo ?? '').contains('Wi-Fi Direct') ||
+      (networkRouteInfo ?? '').contains('Hotspot') ||
+      speedMbps >= 15.0;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -45,20 +55,14 @@ class TransferSpeedometer extends StatelessWidget {
         isSender ? const Color(0xFF2563EB) : const Color(0xFF059669);
 
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
-        borderRadius: BorderRadius.circular(24),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: isDark ? Colors.white12 : Colors.black12,
+          color: const Color(0xFFE5E7EB),
+          width: 1.0,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.4 : 0.08),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -90,7 +94,7 @@ class TransferSpeedometer extends StatelessWidget {
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 13,
-                      color: isDark ? Colors.white70 : Colors.black87,
+                      color: theme.colorScheme.onSurface,
                     ),
                   ),
                 ],
@@ -113,11 +117,12 @@ class TransferSpeedometer extends StatelessWidget {
             children: [
               Text(
                 speedMbps > 0 ? speedMbps.toStringAsFixed(1) : '—',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 34,
                   fontWeight: FontWeight.w900,
                   fontFamily: 'monospace',
                   letterSpacing: -1.0,
+                  color: theme.colorScheme.onSurface,
                 ),
               ),
               const SizedBox(width: 4),
@@ -142,9 +147,10 @@ class TransferSpeedometer extends StatelessWidget {
                     const SizedBox(width: 4),
                     Text(
                       _formatEta(etaSeconds),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
+                        color: theme.colorScheme.onSurface,
                       ),
                     ),
                   ],
@@ -152,7 +158,91 @@ class TransferSpeedometer extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+
+          // Wi-Fi Band & Route Diagnostic Bar
+          if (networkRouteInfo != null) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Container(
+                  key: const Key('wifi_band_diagnostic_pill'),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: (_isFastBand
+                        ? const Color(0xFF10B981)
+                        : const Color(0xFFF59E0B)).withValues(alpha: isDark ? 0.20 : 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: (_isFastBand
+                          ? const Color(0xFF10B981)
+                          : const Color(0xFFF59E0B)).withValues(alpha: isDark ? 0.40 : 0.25),
+                      width: 1.0,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.wifi_rounded,
+                        size: 13,
+                        color: _isFastBand
+                            ? (isDark ? const Color(0xFF34D399) : const Color(0xFF047857))
+                            : (isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309)),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        networkRouteInfo!,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: _isFastBand
+                              ? (isDark ? const Color(0xFF34D399) : const Color(0xFF047857))
+                              : (isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+
+          if (performanceAdvice != null) ...[
+            const SizedBox(height: 8),
+            Container(
+              key: const Key('performance_advice_banner'),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                  width: 1.0,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline_rounded,
+                    size: 14,
+                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      performanceAdvice!,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 14),
 
           // Current File Label & Index
           Row(
@@ -161,9 +251,10 @@ class TransferSpeedometer extends StatelessWidget {
               Expanded(
                 child: Text(
                   fileName,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
+                    color: theme.colorScheme.onSurface,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -210,10 +301,11 @@ class TransferSpeedometer extends StatelessWidget {
               ),
               Text(
                 '${(totalBatchProgress * 100).toInt()}%',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
                   fontFamily: 'monospace',
+                  color: theme.colorScheme.onSurface,
                 ),
               ),
             ],

@@ -4,8 +4,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.peerlink.core.platform.android.AndroidPlatformAdapter;
-import org.peerlink.core.platform.linux.LinuxPlatformAdapter;
-import org.peerlink.core.platform.macos.MacPlatformAdapter;
 import org.peerlink.core.platform.windows.WindowsPlatformAdapter;
 
 import java.io.IOException;
@@ -91,92 +89,6 @@ public class NativePlatformIntegrationTest {
     }
 
     @Test
-    void testMacPlatformIntegration() {
-        MacPlatformAdapter macAdapter = new MacPlatformAdapter(true);
-        assertEquals(PlatformType.MACOS, macAdapter.getPlatformType());
-
-        // Capabilities
-        assertTrue(macAdapter.supportsFeature(PlatformFeature.FINDER_SYNC_INTEGRATION));
-        assertTrue(macAdapter.supportsFeature(PlatformFeature.FINDER_SHARE_EXTENSION));
-        assertTrue(macAdapter.supportsFeature(PlatformFeature.OS_KEYCHAIN_CREDENTIALS));
-        assertTrue(macAdapter.supportsFeature(PlatformFeature.SANDBOX_PERMISSIONS));
-        assertTrue(macAdapter.supportsFeature(PlatformFeature.OPTIONAL_FILE_PROVIDER));
-        assertFalse(macAdapter.supportsFeature(PlatformFeature.FILE_EXPLORER_CONTEXT_MENU));
-
-        // Finder reveal and open
-        assertTrue(macAdapter.revealInFileManager(sampleFile));
-        assertTrue(macAdapter.openFileWithDefaultApp(sampleFile));
-
-        // Notifications
-        PlatformNotification notification = new PlatformNotification(
-                "n-mac-1",
-                "New Shared Space",
-                "You were added to 'Project Apollo'",
-                PlatformNotification.Priority.HIGH,
-                PlatformNotification.Category.GENERAL,
-                List.of("View"),
-                null
-        );
-        assertTrue(macAdapter.postNotification(notification));
-        assertTrue(macAdapter.cancelNotification(notification.getId()));
-
-        // Keychain storage
-        CredentialStorage keychain = macAdapter.getCredentialStorage();
-        keychain.storeSecret("peerlink.keychain", "master_key", "aes-256-gcm-secret");
-        assertTrue(keychain.hasSecret("peerlink.keychain", "master_key"));
-        assertEquals(Optional.of("aes-256-gcm-secret"), keychain.getSecret("peerlink.keychain", "master_key"));
-        assertTrue(keychain.deleteSecret("peerlink.keychain", "master_key"));
-
-        // Sandbox permissions
-        String bookmarkPerm = "com.apple.security.files.user-selected.read-write";
-        assertTrue(macAdapter.checkPermission(bookmarkPerm));
-        assertFalse(macAdapter.checkPermission("custom.user.entitlement"));
-        assertTrue(macAdapter.requestPermission("custom.user.entitlement"));
-        assertTrue(macAdapter.checkPermission("custom.user.entitlement"));
-    }
-
-    @Test
-    void testLinuxPlatformIntegration() {
-        LinuxPlatformAdapter linuxAdapter = new LinuxPlatformAdapter(true);
-        assertEquals(PlatformType.LINUX, linuxAdapter.getPlatformType());
-
-        // Capabilities
-        assertTrue(linuxAdapter.supportsFeature(PlatformFeature.FILE_MANAGER_ACTIONS));
-        assertTrue(linuxAdapter.supportsFeature(PlatformFeature.XDG_INTEGRATION));
-        assertTrue(linuxAdapter.supportsFeature(PlatformFeature.DBUS_INTEGRATION));
-        assertTrue(linuxAdapter.supportsFeature(PlatformFeature.FREEDESKTOP_SECRET_SERVICE));
-        assertFalse(linuxAdapter.supportsFeature(PlatformFeature.DPAPI_CREDENTIALS));
-
-        // Desktop environment detection
-        String de = linuxAdapter.getDesktopEnvironment();
-        assertNotNull(de);
-
-        // Actions & XDG
-        assertTrue(linuxAdapter.revealInFileManager(sampleFile));
-        assertTrue(linuxAdapter.openFileWithDefaultApp(sampleFile));
-        assertTrue(linuxAdapter.registerFileManagerContextMenu());
-        assertTrue(linuxAdapter.registerFileAssociations());
-
-        // Notifications
-        PlatformNotification notification = new PlatformNotification(
-                "n-linux-1",
-                "Security Alert",
-                "Untrusted peer attempted connection",
-                PlatformNotification.Priority.CRITICAL,
-                PlatformNotification.Category.SECURITY_ALERT,
-                List.of("Block"),
-                null
-        );
-        assertTrue(linuxAdapter.postNotification(notification));
-
-        // Secret Service storage
-        CredentialStorage secrets = linuxAdapter.getCredentialStorage();
-        secrets.storeSecret("peerlink-secrets", "account1", "passphrase-token");
-        assertEquals(Optional.of("passphrase-token"), secrets.getSecret("peerlink-secrets", "account1"));
-        assertTrue(secrets.deleteSecret("peerlink-secrets", "account1"));
-    }
-
-    @Test
     void testAndroidPlatformIntegration() {
         AndroidPlatformAdapter androidAdapter = new AndroidPlatformAdapter();
         assertEquals(PlatformType.ANDROID, androidAdapter.getPlatformType());
@@ -251,18 +163,10 @@ public class NativePlatformIntegrationTest {
 
     @Test
     void testCoreDomainInvariance() {
-        // Assert that the platform integration package is entirely decoupled
-        // from core domain engines (Sync, Backup, Safety, Smart Operations, Protocol).
-        // It provides services to upper layers (e.g. Flutter / CLI / Services) without
-        // contaminating the protocol/domain semantics.
         WindowsPlatformAdapter win = new WindowsPlatformAdapter(true);
-        MacPlatformAdapter mac = new MacPlatformAdapter(true);
-        LinuxPlatformAdapter linux = new LinuxPlatformAdapter(true);
         AndroidPlatformAdapter android = new AndroidPlatformAdapter();
 
         assertEquals(PlatformType.WINDOWS, win.getPlatformType());
-        assertEquals(PlatformType.MACOS, mac.getPlatformType());
-        assertEquals(PlatformType.LINUX, linux.getPlatformType());
         assertEquals(PlatformType.ANDROID, android.getPlatformType());
     }
 }

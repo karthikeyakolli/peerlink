@@ -8,6 +8,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import org.peerlink.core.android.AndroidNodeFacade
 import org.peerlink.core.android.AndroidNodeState
+import org.peerlink.core.android.AndroidSqliteOperationJournal
 import org.peerlink.core.android.discovery.AndroidDiscoveryEngine
 import org.peerlink.core.android.discovery.DiscoveredPeerRecord
 import org.peerlink.protocol.v1.PeerId
@@ -17,7 +18,11 @@ import org.peerlink.protocol.v1.PeerId
  */
 class AndroidPigeonBridge(
     private val nodeFacade: AndroidNodeFacade,
-    private val filePicker: ((MethodChannel.Result) -> Unit)? = null
+    private val filePicker: ((MethodChannel.Result, String?) -> Unit)? = null,
+    private val directoryPicker: ((MethodChannel.Result) -> Unit)? = null,
+    private val permissionRequester: ((List<String>, MethodChannel.Result) -> Unit)? = null,
+    private val appStorageDirectoryProvider: (() -> String)? = null,
+    private val context: android.content.Context? = null
 ) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 
     companion object {
@@ -27,6 +32,7 @@ class AndroidPigeonBridge(
 
     private var eventSink: EventChannel.EventSink? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val hotspotManager = org.peerlink.core.platform.hotspot.LocalHotspotManager()
 
     fun register(flutterEngine: FlutterEngine) {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL)
@@ -43,7 +49,11 @@ class AndroidPigeonBridge(
                     "name" to peer.displayName,
                     "host" to peer.hostAddress,
                     "port" to peer.port,
-                    "technology" to peer.discoveryTechnology
+                    "technology" to peer.discoveryTechnology,
+                    "technologies" to peer.discoveryTechnologies.toList(),
+                    "transports" to peer.supportedTransports,
+                    "connectionState" to peer.connectionState.name,
+                    "routes" to peer.availableRoutes.map { it.toMap() }
                 ))
             }
 
@@ -64,6 +74,16 @@ class AndroidPigeonBridge(
                 "isForeground" to ctx.isAppInForeground,
                 "networkType" to ctx.networkType.name,
                 "batteryPercent" to ctx.batteryLevelPercent
+            ))
+        }
+
+        // Listen for lifecycle transitions
+        nodeFacade.addLifecycleListener { oldState, newState, reason ->
+            sendEvent(mapOf(
+                "type" to "nodeLifecycleChanged",
+                "oldState" to oldState.name,
+                "newState" to newState.name,
+                "reason" to reason
             ))
         }
 
@@ -90,6 +110,19 @@ class AndroidPigeonBridge(
             }
 
             override fun onTransferCompleted(transferId: String, success: Boolean, errorMessage: String?) {
+                if (success && context != null) {
+                    try {
+                        val pubDl = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                        val peerLinkDir = java.io.File(pubDl, "PeerLink")
+                        if (peerLinkDir.exists()) {
+                            val files = peerLinkDir.listFiles()
+                            if (files != null && files.isNotEmpty()) {
+                                val paths = files.map { it.absolutePath }.toTypedArray()
+                                android.media.MediaScannerConnection.scanFile(context, paths, null, null)
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
                 sendEvent(mapOf(
                     "type" to "transferCompleted",
                     "transferId" to transferId,
@@ -98,12 +131,46 @@ class AndroidPigeonBridge(
                 ))
             }
         })
+
+        // Listen for incoming transfer offers for receiver consent
+        nodeFacade.addIncomingOfferListener { transferId, senderPeer, fileName, totalBytes, itemCount ->
+            sendEvent(mapOf(
+                "type" to "incomingTransferOffer",
+                "transferId" to transferId,
+                "senderPeer" to senderPeer.value,
+                "fileName" to fileName,
+                "totalBytes" to totalBytes,
+                "itemCount" to itemCount
+            ))
+        }
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "getNodeState" -> {
                 result.success(nodeFacade.currentState.name)
+            }
+            "getLifecycleState" -> {
+                result.success(nodeFacade.lifecycleState.name)
+            }
+            "getNodeCapabilities" -> {
+                result.success(nodeFacade.nodeCapabilities.toMap())
+            }
+            "startNode" -> {
+                try {
+                    nodeFacade.start()
+                    result.success(nodeFacade.lifecycleState.name)
+                } catch (e: Exception) {
+                    result.error("START_FAILED", e.message, null)
+                }
+            }
+            "stopNode" -> {
+                try {
+                    nodeFacade.stop()
+                    result.success(nodeFacade.lifecycleState.name)
+                } catch (e: Exception) {
+                    result.error("STOP_FAILED", e.message, null)
+                }
             }
             "getLocalPeerId" -> {
                 result.success(nodeFacade.localPeerId.value)
@@ -115,9 +182,16 @@ class AndroidPigeonBridge(
                 result.success(nodeFacade.keystoreManager.securityLevelDescription)
             }
             "initiateSend" -> {
-                val targetPeerStr = call.argument<String>("targetPeerId") ?: ""
+                val rawTarget = (call.argument<String>("targetPeerId") ?: "").trim()
                 val uris = call.argument<List<String>>("contentUris") ?: emptyList()
                 try {
+                    var targetPeerStr = rawTarget
+                    if (targetPeerStr.startsWith("{") && targetPeerStr.contains("\"peerId\"")) {
+                        val m = java.util.regex.Pattern.compile("\"peerId\"\\s*:\\s*\"([^\"]+)\"").matcher(targetPeerStr)
+                        if (m.find()) {
+                            targetPeerStr = m.group(1) ?: rawTarget
+                        }
+                    }
                     val peerId = PeerId.newBuilder().setValue(targetPeerStr).build()
                     val transferId = nodeFacade.initiateSend(peerId, uris)
                     result.success(transferId)
@@ -129,6 +203,12 @@ class AndroidPigeonBridge(
                 val sessionId = call.argument<String>("sessionId") ?: ""
                 val accept = call.argument<Boolean>("accept") ?: false
                 val res = nodeFacade.confirmPairing(sessionId, accept)
+                result.success(res)
+            }
+            "respondIncomingTransfer" -> {
+                val transferId = call.argument<String>("transferId") ?: ""
+                val accept = call.argument<Boolean>("accept") ?: false
+                val res = nodeFacade.respondIncomingTransfer(transferId, accept)
                 result.success(res)
             }
             "syncClipboard" -> {
@@ -144,10 +224,293 @@ class AndroidPigeonBridge(
                 }
             }
             "pickContentUris" -> {
+                val category = call.argument<String>("category")
                 if (filePicker != null) {
-                    filePicker.invoke(result)
+                    filePicker.invoke(result, category)
                 } else {
                     result.success(emptyList<String>())
+                }
+            }
+            "pickDirectoryUri" -> {
+                if (directoryPicker != null) {
+                    directoryPicker.invoke(result)
+                } else {
+                    result.success(null)
+                }
+            }
+            "getAppStorageDirectory" -> {
+                val dir = appStorageDirectoryProvider?.invoke()
+                    ?: (nodeFacade.destinationRoot?.parent?.toAbsolutePath()?.toString() ?: "")
+                result.success(dir)
+            }
+            "checkPermissions" -> {
+                val ctx = nodeFacade.currentContext
+                result.success(mapOf(
+                    "storage" to ctx.isStoragePermissionGranted,
+                    "notifications" to ctx.isNotificationPermissionGranted,
+                    "nearbyDevices" to ctx.isNearbyDevicesPermissionGranted,
+                    "localNetwork" to ctx.isLocalNetworkPermissionGranted,
+                    "camera" to ctx.isCameraPermissionGranted
+                ))
+            }
+            "requestPermissions" -> {
+                val requested = call.argument<List<String>>("permissions") ?: emptyList()
+                if (permissionRequester != null) {
+                    permissionRequester.invoke(requested, result)
+                } else {
+                    result.success(emptyMap<String, Boolean>())
+                }
+            }
+            "getDiscoveredPeers" -> {
+                try {
+                    val peers = nodeFacade.discoveryEngine.discoveredPeers.map { it.toMap() }
+                    result.success(peers)
+                } catch (e: Exception) {
+                    result.error("DISCOVERY_ERROR", e.message, null)
+                }
+            }
+            "addManualPeer" -> {
+                try {
+                    val peerIdStr = call.argument<String>("peerId") ?: ""
+                    val name = call.argument<String>("name") ?: ""
+                    val host = call.argument<String>("host") ?: ""
+                    val port = call.argument<Int>("port") ?: 8765
+                    val peerId = PeerId.newBuilder().setValue(peerIdStr).build()
+                    val record = nodeFacade.discoveryEngine.addManualPeer(peerId, name, host, port)
+                    result.success(record.toMap())
+                } catch (e: Exception) {
+                    result.error("MANUAL_PEER_ERROR", e.message, null)
+                }
+            }
+            "refreshDiscovery" -> {
+                try {
+                    nodeFacade.discoveryEngine.sweepStalePeers(0)
+                    result.success(true)
+                } catch (e: Exception) {
+                    result.error("REFRESH_ERROR", e.message, null)
+                }
+            }
+            "setReceiverConsentMode" -> {
+                val modeStr = call.argument<String>("mode") ?: "AUTO_ACCEPT_PAIRED_TRUSTED"
+                try {
+                    val mode = org.peerlink.core.transfer.TransferSessionReceiver.ReceiverConsentMode.valueOf(modeStr)
+                    nodeFacade.setReceiverConsentMode(mode)
+                    result.success(true)
+                } catch (e: Exception) {
+                    result.error("INVALID_MODE", e.message, null)
+                }
+            }
+            "addTrustedPeer" -> {
+                val peerId = call.argument<String>("peerId") ?: ""
+                val fingerprint = call.argument<String>("fingerprint") ?: ""
+                val host = call.argument<String>("host") ?: ""
+                val port = call.argument<Int>("port") ?: 8765
+                val name = call.argument<String>("name") ?: (if (host.isNotBlank()) host else peerId)
+                try {
+                    if (host.isNotBlank()) {
+                        val pid = PeerId.newBuilder().setValue(peerId).build()
+                        nodeFacade.discoveryEngine.addManualPeer(pid, name, host, port)
+                    }
+                    nodeFacade.trustStore.addTrustedPeer(peerId, fingerprint, ByteArray(0))
+                    context?.let { ctx ->
+                        org.peerlink.app.share.DirectShareManager.updateShareTargetsFromTrustStore(ctx, nodeFacade.trustStore)
+                    }
+                    result.success(true)
+                } catch (e: Exception) {
+                    result.error("TRUST_ERROR", e.message, null)
+                }
+            }
+            "revokeTrustedPeer" -> {
+                val peerId = call.argument<String>("peerId") ?: ""
+                try {
+                    nodeFacade.trustStore.revokeTrust(peerId)
+                    context?.let { ctx ->
+                        org.peerlink.app.share.DirectShareManager.updateShareTargetsFromTrustStore(ctx, nodeFacade.trustStore)
+                    }
+                    result.success(true)
+                } catch (e: Exception) {
+                    result.error("REVOKE_ERROR", e.message, null)
+                }
+            }
+            "isPeerTrusted" -> {
+                val peerId = call.argument<String>("peerId") ?: ""
+                result.success(nodeFacade.trustStore.isTrusted(peerId))
+            }
+            "isPeerRevoked" -> {
+                val peerId = call.argument<String>("peerId") ?: ""
+                result.success(nodeFacade.trustStore.isRevoked(peerId))
+            }
+            "getJournalOperations" -> {
+                try {
+                    val journal = nodeFacade.operationJournal
+                    if (journal is AndroidSqliteOperationJournal) {
+                        result.success(journal.listAllOperationsDetailed())
+                    } else {
+                        result.success(emptyList<Map<String, Any>>())
+                    }
+                } catch (e: Exception) {
+                    result.error("JOURNAL_ERROR", e.message, null)
+                }
+            }
+            "startLocalHotspot" -> {
+                try {
+                    val profile = hotspotManager.startHotspot()
+                    result.success(mapOf(
+                        "ssid" to profile.ssid(),
+                        "passphrase" to profile.passphrase(),
+                        "gatewayIp" to profile.gatewayIp(),
+                        "listenPort" to profile.listenPort(),
+                        "wifiQr" to profile.toWifiQrPayload(),
+                        "peerlinkUri" to profile.toPeerLinkConnectionUri()
+                    ))
+                } catch (e: Exception) {
+                    result.error("HOTSPOT_ERROR", e.message, null)
+                }
+            }
+            "stopLocalHotspot" -> {
+                try {
+                    hotspotManager.stopHotspot()
+                    result.success(true)
+                } catch (e: Exception) {
+                    result.error("HOTSPOT_ERROR", e.message, null)
+                }
+            }
+            "isHotspotActive" -> {
+                result.success(hotspotManager.isHotspotActive)
+            }
+            "openFile" -> {
+                val path = call.argument<String>("path") ?: ""
+                if (context != null && path.isNotBlank()) {
+                    try {
+                        val file = java.io.File(path)
+                        if (!file.exists()) {
+                            result.error("FILE_NOT_FOUND", "File does not exist: $path", null)
+                            return
+                        }
+                        val ext = file.extension.lowercase()
+                        val mimeType = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+                        val contentUri = androidx.core.content.FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.fileprovider",
+                            file
+                        )
+                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                            setDataAndType(contentUri, mimeType)
+                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        val chooser = android.content.Intent.createChooser(intent, "Open file with...").apply {
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(chooser)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("OPEN_FAILED", e.message, null)
+                    }
+                } else {
+                    result.error("INVALID_CONTEXT", "Context or path invalid", null)
+                }
+            }
+            "revealInFolder" -> {
+                val path = call.argument<String>("path") ?: ""
+                if (context != null) {
+                    try {
+                        val file = if (path.isNotBlank()) java.io.File(path) else null
+                        val targetDir = if (file != null && file.isDirectory) file else file?.parentFile
+                        if (targetDir != null && targetDir.exists()) {
+                            try {
+                                val contentUri = androidx.core.content.FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    targetDir
+                                )
+                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                                    setDataAndType(contentUri, "resource/folder")
+                                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(intent)
+                                result.success(true)
+                                return
+                            } catch (_: Exception) {}
+                        }
+                        val dlIntent = android.content.Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS).apply {
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(dlIntent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("REVEAL_FAILED", e.message, null)
+                    }
+                } else {
+                    result.error("INVALID_CONTEXT", "Context is null", null)
+                }
+            }
+            "shareFile" -> {
+                val path = call.argument<String>("path") ?: ""
+                if (context != null && path.isNotBlank()) {
+                    try {
+                        val file = java.io.File(path)
+                        if (!file.exists()) {
+                            result.error("FILE_NOT_FOUND", "File does not exist: $path", null)
+                            return
+                        }
+                        val ext = file.extension.lowercase()
+                        val mimeType = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+                        val contentUri = androidx.core.content.FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.fileprovider",
+                            file
+                        )
+                        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = mimeType
+                            putExtra(android.content.Intent.EXTRA_STREAM, contentUri)
+                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        val chooser = android.content.Intent.createChooser(intent, "Share file via...").apply {
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(chooser)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("SHARE_FAILED", e.message, null)
+                    }
+                } else {
+                    result.error("INVALID_CONTEXT", "Context or path invalid", null)
+                }
+            }
+            "scanMediaFile" -> {
+                val path = call.argument<String>("path") ?: ""
+                if (context != null && path.isNotBlank()) {
+                    android.media.MediaScannerConnection.scanFile(
+                        context,
+                        arrayOf(path),
+                        null
+                    ) { scannedPath, uri ->
+                        android.util.Log.i("PeerLink", "MediaScanner indexed: $scannedPath -> $uri")
+                    }
+                    result.success(true)
+                } else {
+                    result.success(false)
+                }
+            }
+            "getStorageSpaceInfo" -> {
+                try {
+                    val dataDir = android.os.Environment.getDataDirectory()
+                    val total = dataDir.totalSpace
+                    val free = dataDir.freeSpace
+                    result.success(mapOf(
+                        "totalBytes" to total,
+                        "freeBytes" to free,
+                        "usedBytes" to (total - free)
+                    ))
+                } catch (e: Exception) {
+                    result.success(mapOf(
+                        "totalBytes" to 0L,
+                        "freeBytes" to 0L,
+                        "usedBytes" to 0L
+                    ))
                 }
             }
             else -> result.notImplemented()

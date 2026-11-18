@@ -25,8 +25,6 @@ REF_PROJECT = os.path.join(REPO_ROOT, "peerlink-android-studio")
 
 TARGET_PROJECTS = {
     "windows_flutter": os.path.join(REPO_ROOT, "windows", "app", "flutter"),
-    "linux_flutter": os.path.join(REPO_ROOT, "linux", "app", "flutter"),
-    "macos_flutter": os.path.join(REPO_ROOT, "macos", "app", "flutter"),
     "android_flutter": os.path.join(REPO_ROOT, "android", "app", "flutter"),
     "canonical_flutter": os.path.join(REPO_ROOT, "shared-source", "canonical", "flutter")
 }

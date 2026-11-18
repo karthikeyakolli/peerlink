@@ -1,6 +1,7 @@
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
+#include <shobjidl.h>
 
 #include "flutter_window.h"
 #include "utils.h"
@@ -24,10 +25,22 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
+  // Set explicit Win32 AppUserModelID for taskbar pinning and notification routing
+  ::SetCurrentProcessExplicitAppUserModelID(L"PeerLink.Desktop.v1");
+
   FlutterWindow window(project);
-  Win32Window::Point origin(10, 10);
-  Win32Window::Size size(1280, 720);
-  if (!window.Create(L"peerlink", origin, size)) {
+
+  // Center window on primary monitor with responsive default dimensions
+  const int screenWidth = ::GetSystemMetrics(SM_CXSCREEN);
+  const int screenHeight = ::GetSystemMetrics(SM_CYSCREEN);
+  const int windowWidth = 1280;
+  const int windowHeight = 800;
+  const int originX = (screenWidth > windowWidth) ? (screenWidth - windowWidth) / 2 : 40;
+  const int originY = (screenHeight > windowHeight) ? (screenHeight - windowHeight) / 2 : 40;
+
+  Win32Window::Point origin(originX, originY);
+  Win32Window::Size size(windowWidth, windowHeight);
+  if (!window.Create(L"PeerLink — Decentralized Personal Data Network", origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

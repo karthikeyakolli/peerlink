@@ -135,13 +135,12 @@ class _BurnViewerModalState extends State<BurnViewerModal> with SingleTickerProv
       backgroundColor: Colors.transparent,
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       child: GlassContainer(
-        borderRadius: BorderRadius.circular(24),
-        blur: 24,
+        borderRadius: BorderRadius.circular(20),
         customBorder: Border.all(
-          color: _isShredding ? const Color(0xFFEF4444) : const Color(0xFFF59E0B),
-          width: 1.5,
+          color: _isShredding ? const Color(0xFFDC2626) : const Color(0xFFE5E7EB),
+          width: 1.0,
         ),
-        customBgColor: const Color(0xFF0B0F17).withValues(alpha: 0.92),
+        customBgColor: Colors.white,
         padding: const EdgeInsets.all(20),
         child: Stack(
           children: [
@@ -156,7 +155,7 @@ class _BurnViewerModalState extends State<BurnViewerModal> with SingleTickerProv
                       '$watermarkText\n$watermarkText\n$watermarkText\n$watermarkText',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
-                        color: Colors.white,
+                        color: Color(0xFF0F172A),
                         fontSize: 28,
                         fontWeight: FontWeight.w900,
                         letterSpacing: 4,
@@ -179,14 +178,14 @@ class _BurnViewerModalState extends State<BurnViewerModal> with SingleTickerProv
                       opacity: _pulseCtrl,
                       child: Container(
                         padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFEF4444).withValues(alpha: 0.2),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFFEF2F2),
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(
                           Icons.local_fire_department,
-                          color: Color(0xFFEF4444),
-                          size: 22,
+                          color: Color(0xFFDC2626),
+                          size: 20,
                         ),
                       ),
                     ),
@@ -201,7 +200,7 @@ class _BurnViewerModalState extends State<BurnViewerModal> with SingleTickerProv
                                 child: Text(
                                   widget.fileName,
                                   style: const TextStyle(
-                                    color: Colors.white,
+                                    color: Color(0xFF0F172A),
                                     fontSize: 16,
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -212,14 +211,14 @@ class _BurnViewerModalState extends State<BurnViewerModal> with SingleTickerProv
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFEF4444).withValues(alpha: 0.2),
+                                  color: const Color(0xFFFEF2F2),
                                   borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(color: const Color(0xFFEF4444)),
+                                  border: Border.all(color: const Color(0xFFFECACA)),
                                 ),
                                 child: const Text(
                                   'EPHEMERAL',
                                   style: TextStyle(
-                                    color: Color(0xFFEF4444),
+                                    color: Color(0xFFDC2626),
                                     fontSize: 9,
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -229,7 +228,7 @@ class _BurnViewerModalState extends State<BurnViewerModal> with SingleTickerProv
                           ),
                           Text(
                             widget.fileSize,
-                            style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                            style: const TextStyle(color: Color(0xFF64748B), fontSize: 11),
                           ),
                         ],
                       ),
@@ -239,19 +238,19 @@ class _BurnViewerModalState extends State<BurnViewerModal> with SingleTickerProv
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFEF4444).withValues(alpha: 0.15),
+                        color: const Color(0xFFFEF2F2),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.4)),
+                        border: Border.all(color: const Color(0xFFFECACA)),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.timer, color: Color(0xFFEF4444), size: 14),
+                          const Icon(Icons.timer, color: Color(0xFFDC2626), size: 14),
                           const SizedBox(width: 5),
                           Text(
                             _formatTimer(_remainingSeconds),
                             style: const TextStyle(
-                              color: Color(0xFFEF4444),
+                              color: Color(0xFFDC2626),
                               fontFamily: 'monospace',
                               fontWeight: FontWeight.bold,
                               fontSize: 13,
@@ -270,15 +269,15 @@ class _BurnViewerModalState extends State<BurnViewerModal> with SingleTickerProv
                   constraints: const BoxConstraints(maxHeight: 280),
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.03),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFE5E7EB)),
                   ),
                   child: SingleChildScrollView(
                     child: Text(
                       widget.previewContent,
                       style: const TextStyle(
-                        color: Colors.white70,
+                        color: Color(0xFF0F172A),
                         fontSize: 13,
                         height: 1.5,
                         fontFamily: 'monospace',
@@ -292,7 +291,7 @@ class _BurnViewerModalState extends State<BurnViewerModal> with SingleTickerProv
                 // Security notice
                 Row(
                   children: [
-                    const Icon(Icons.lock_clock, color: Color(0xFFF59E0B), size: 16),
+                    const Icon(Icons.lock_clock, color: Color(0xFFB45309), size: 16),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -300,7 +299,7 @@ class _BurnViewerModalState extends State<BurnViewerModal> with SingleTickerProv
                             ? '1-View Mode: Closing this viewer or timer expiry will trigger immediate zero-trust multi-pass shredding.'
                             : 'TTL Mode: File will be wiped when the timer reaches 00:00.',
                         style: const TextStyle(
-                          color: Color(0xFFF59E0B),
+                          color: Color(0xFFB45309),
                           fontSize: 11,
                         ),
                       ),
@@ -319,8 +318,8 @@ class _BurnViewerModalState extends State<BurnViewerModal> with SingleTickerProv
                         icon: const Icon(Icons.close, size: 16),
                         label: const Text('Close & Burn Now'),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFFEF4444),
-                          side: const BorderSide(color: Color(0xFFEF4444)),
+                          foregroundColor: const Color(0xFFDC2626),
+                          side: const BorderSide(color: Color(0xFFFECACA)),
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -335,7 +334,8 @@ class _BurnViewerModalState extends State<BurnViewerModal> with SingleTickerProv
                         icon: const Icon(Icons.local_fire_department, size: 18),
                         label: Text(_isShredding ? 'Shredding...' : 'Shred Immediately'),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFEF4444),
+                          elevation: 0,
+                          backgroundColor: const Color(0xFFDC2626),
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(

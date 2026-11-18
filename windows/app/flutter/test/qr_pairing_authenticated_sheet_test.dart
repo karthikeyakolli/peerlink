@@ -106,7 +106,7 @@ void main() {
       expect(completedPayload, equals(validInvitation.toJsonString()));
     });
 
-    testWidgets('QrPairingSheet: Hotspot Direct generates real Wi-Fi QR code and dynamic credentials',
+    testWidgets('QrPairingSheet: Hotspot Direct truthfully displays planned status and guidance to Wi-Fi Direct',
         (WidgetTester tester) async {
       await tester.pumpWidget(
         const MaterialApp(
@@ -123,17 +123,13 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
 
-      // 1. Assert dynamic SSID is generated from actual peer ID (not hardcoded fake SSID)
-      expect(find.textContaining('PeerLink-PEER-H'), findsOneWidget);
-      expect(find.text('PeerLink-Direct-94A2'), findsNothing);
+      // 1. Assert truthful planned status badge is displayed
+      expect(find.text('PLANNED / OS API PENDING'), findsOneWidget);
+      expect(find.textContaining('Wi-Fi Direct (P2P Group)'), findsOneWidget);
 
-      // 2. Start hotspot
-      await tester.tap(find.text('Start Direct Hotspot (Offline Mode)'));
-      await tester.pumpAndSettle();
-
-      // 3. Real Wi-Fi QR code is generated for cameras to join
-      expect(find.byType(QrImageView), findsOneWidget);
-      expect(find.text('BROADCASTING'), findsOneWidget);
+      // 2. Assert direct button indicates planned state and directs users to Wi-Fi Direct
+      expect(find.text('Direct Hotspot (Planned — Use Wi-Fi Direct)'), findsOneWidget);
+      expect(find.text('BROADCASTING'), findsNothing);
     });
   });
 }

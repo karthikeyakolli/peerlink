@@ -60,5 +60,7 @@ data/
 **/data/
 dist/
 **/dist/
+dist_share/
+**/dist_share/
 *.token
 dependency-reduced-pom.xml

@@ -277,9 +277,18 @@ public class RemoteAccessTest {
                 "../outside.txt",
                 "..\\outside.txt",
                 "subfolder/../../root.txt",
+                "subfolder/../../../outside.txt",
+                "subfolder\\..\\..\\root.txt",
+                "subfolder\\..\\outside.txt",
+                "/../outside.txt",
+                "/etc/passwd",
+                "/etc/shadow",
+                "\\Windows\\System32\\calc.exe",
                 "C:\\Windows\\System32\\cmd.exe",
                 "D:/secret.dat",
+                "E:secrets.txt",
                 "\\\\192.168.1.1\\share\\test",
+                "//192.168.1.1/share/test",
                 "file.txt\0evil.exe",
                 "normal.txt:stream:$DATA"
         );
@@ -329,8 +338,10 @@ public class RemoteAccessTest {
 
             AccessResponse response = coordinator.handleAccessRequest(req);
             assertFalse(response.getSuccess(), "Symlink pointing outside share must be blocked");
+            assertEquals(ErrorCode.ERROR_CODE_UNAUTHORIZED, response.getError().getCode());
             assertTrue(response.getError().getHumanSummary().toLowerCase().contains("symlink") ||
-                    response.getError().getHumanSummary().toLowerCase().contains("escaped"));
+                    response.getError().getHumanSummary().toLowerCase().contains("escaped") ||
+                    response.getError().getHumanSummary().toLowerCase().contains("access denied"));
         } catch (UnsupportedOperationException | FileSystemException e) {
             // Some Windows environments without Developer Mode may disallow creating symlinks without admin
             // In that case, verify PathSandboxValidator explicitly with a simulated escape check

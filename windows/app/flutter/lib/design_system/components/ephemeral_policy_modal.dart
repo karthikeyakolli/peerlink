@@ -146,10 +146,10 @@ class _EphemeralPolicyModalState extends State<EphemeralPolicyModal> {
         MediaQuery.of(context).viewInsets.bottom + 28,
       ),
       decoration: const BoxDecoration(
-        color: Color(0xFF0F172A),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         border: Border(
-          top: BorderSide(color: Color(0xFFEF4444), width: 1.5),
+          top: BorderSide(color: Color(0xFFE5E7EB), width: 1.0),
         ),
       ),
       child: SingleChildScrollView(
@@ -160,11 +160,11 @@ class _EphemeralPolicyModalState extends State<EphemeralPolicyModal> {
           // Drag handle
           Center(
             child: Container(
-              width: 44,
+              width: 40,
               height: 4,
               margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(
-                color: Colors.white24,
+                color: const Color(0xFFCBD5E1),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -176,14 +176,14 @@ class _EphemeralPolicyModalState extends State<EphemeralPolicyModal> {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFEF4444).withValues(alpha: 0.15),
+                  color: const Color(0xFFFEF2F2),
                   shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.5)),
+                  border: Border.all(color: const Color(0xFFFECACA)),
                 ),
                 child: const Icon(
                   Icons.local_fire_department,
-                  color: Color(0xFFEF4444),
-                  size: 26,
+                  color: Color(0xFFDC2626),
+                  size: 24,
                 ),
               ),
               const SizedBox(width: 14),
@@ -194,8 +194,8 @@ class _EphemeralPolicyModalState extends State<EphemeralPolicyModal> {
                     Text(
                       'Burn-After-Read & Ephemeral Beam',
                       style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
+                        color: Color(0xFF0F172A),
+                        fontSize: 17,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -203,7 +203,7 @@ class _EphemeralPolicyModalState extends State<EphemeralPolicyModal> {
                     Text(
                       'Self-destructing file transfer with cryptographic wipe',
                       style: TextStyle(
-                        color: Color(0xFF94A3B8),
+                        color: Color(0xFF64748B),
                         fontSize: 12,
                       ),
                     ),
@@ -212,28 +212,27 @@ class _EphemeralPolicyModalState extends State<EphemeralPolicyModal> {
               ),
               IconButton(
                 onPressed: () => Navigator.pop(context),
-                icon: const Icon(Icons.close, color: Colors.white54, size: 20),
+                icon: const Icon(Icons.close, color: Color(0xFF64748B), size: 20),
               ),
             ],
           ),
 
-          const SizedBox(height: 18),
+          const SizedBox(height: 16),
 
           // Info banner
           GlassContainer(
             borderRadius: BorderRadius.circular(14),
-            blur: 10,
-            customBorder: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.3)),
+            customBgColor: const Color(0xFFF8FAFC),
             padding: const EdgeInsets.all(12),
-            child: Row(
+            child: const Row(
               children: [
-                const Icon(Icons.shield_outlined, color: Color(0xFFF59E0B), size: 20),
-                const SizedBox(width: 10),
+                Icon(Icons.shield_outlined, color: Color(0xFFB45309), size: 20),
+                SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     'When triggered, the recipient disk sectors are overwritten 3 times with CSPRNG noise, bitwise complements, and unlinked immediately.',
                     style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.85),
+                      color: Color(0xFF475569),
                       fontSize: 11,
                       height: 1.35,
                     ),
@@ -243,7 +242,7 @@ class _EphemeralPolicyModalState extends State<EphemeralPolicyModal> {
             ),
           ),
 
-          const SizedBox(height: 18),
+          const SizedBox(height: 16),
 
           const Text(
             'SELF-DESTRUCT POLICY',
@@ -251,7 +250,7 @@ class _EphemeralPolicyModalState extends State<EphemeralPolicyModal> {
               color: Color(0xFF64748B),
               fontSize: 11,
               fontWeight: FontWeight.bold,
-              letterSpacing: 1.1,
+              letterSpacing: 0.8,
             ),
           ),
 
@@ -263,7 +262,7 @@ class _EphemeralPolicyModalState extends State<EphemeralPolicyModal> {
             icon: Icons.visibility_off,
             title: '1-View Auto-Burn (Recommended)',
             subtitle: 'Wipes file from recipient disk the second the viewer closes',
-            color: const Color(0xFFEF4444),
+            color: const Color(0xFFDC2626),
           ),
           const SizedBox(height: 8),
           _buildPolicyTile(
@@ -271,7 +270,7 @@ class _EphemeralPolicyModalState extends State<EphemeralPolicyModal> {
             icon: Icons.timer,
             title: '5-Minute Auto-Burn',
             subtitle: 'Auto-shreds exactly 300 seconds after receipt',
-            color: const Color(0xFFF59E0B),
+            color: const Color(0xFFB45309),
           ),
           const SizedBox(height: 8),
           _buildPolicyTile(
@@ -279,7 +278,7 @@ class _EphemeralPolicyModalState extends State<EphemeralPolicyModal> {
             icon: Icons.hourglass_top,
             title: '1-Hour Auto-Burn',
             subtitle: 'Auto-shreds after 60 minutes TTL expires',
-            color: const Color(0xFF06B6D4),
+            color: const Color(0xFF2563EB),
           ),
           const SizedBox(height: 8),
           _buildPolicyTile(
@@ -287,7 +286,7 @@ class _EphemeralPolicyModalState extends State<EphemeralPolicyModal> {
             icon: Icons.save_alt,
             title: 'Permanent Transfer',
             subtitle: 'Normal zero-trust file transfer (no auto-wipe)',
-            color: const Color(0xFF10B981),
+            color: const Color(0xFF15803D),
           ),
 
           const SizedBox(height: 16),
@@ -300,27 +299,27 @@ class _EphemeralPolicyModalState extends State<EphemeralPolicyModal> {
                 color: Color(0xFF64748B),
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
-                letterSpacing: 1.1,
+                letterSpacing: 0.8,
               ),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _watermarkCtrl,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13),
               decoration: InputDecoration(
                 filled: true,
-                fillColor: Colors.white.withValues(alpha: 0.05),
-                prefixIcon: const Icon(Icons.water_drop, color: Color(0xFFF59E0B), size: 18),
+                fillColor: const Color(0xFFF8FAFC),
+                prefixIcon: const Icon(Icons.water_drop, color: Color(0xFFB45309), size: 18),
                 hintText: 'Watermark tag (e.g. CONFIDENTIAL)',
-                hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
+                hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+                  borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFFEF4444)),
+                  borderSide: const BorderSide(color: Color(0xFF2563EB)),
                 ),
               ),
             ),
@@ -343,15 +342,15 @@ class _EphemeralPolicyModalState extends State<EphemeralPolicyModal> {
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             style: ElevatedButton.styleFrom(
+              elevation: 0,
               backgroundColor: _selectedPreset == 3
-                  ? const Color(0xFF10B981)
-                  : const Color(0xFFEF4444),
+                  ? const Color(0xFF15803D)
+                  : const Color(0xFFDC2626),
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 14),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(12),
               ),
-              elevation: 4,
             ),
           ),
         ],
@@ -373,14 +372,13 @@ class _EphemeralPolicyModalState extends State<EphemeralPolicyModal> {
       borderRadius: BorderRadius.circular(14),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       isSelected: isSelected,
-      glowColor: color,
-      customBgColor: isSelected ? color.withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.03),
+      customBgColor: isSelected ? const Color(0xFFF8FAFC) : Colors.white,
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.2),
+              color: color.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon, color: color, size: 20),
@@ -393,7 +391,7 @@ class _EphemeralPolicyModalState extends State<EphemeralPolicyModal> {
                 Text(
                   title,
                   style: TextStyle(
-                    color: Colors.white,
+                    color: const Color(0xFF0F172A),
                     fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
                     fontSize: 13,
                   ),
@@ -401,8 +399,8 @@ class _EphemeralPolicyModalState extends State<EphemeralPolicyModal> {
                 const SizedBox(height: 2),
                 Text(
                   subtitle,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.6),
+                  style: const TextStyle(
+                    color: Color(0xFF64748B),
                     fontSize: 11,
                   ),
                 ),
@@ -412,7 +410,7 @@ class _EphemeralPolicyModalState extends State<EphemeralPolicyModal> {
           if (isSelected)
             Icon(Icons.check_circle, color: color, size: 20)
           else
-            Icon(Icons.circle_outlined, color: Colors.white.withValues(alpha: 0.2), size: 20),
+            const Icon(Icons.circle_outlined, color: Color(0xFFCBD5E1), size: 20),
         ],
       ),
     );

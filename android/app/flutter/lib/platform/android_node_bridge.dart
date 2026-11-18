@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'package:flutter/services.dart';
 import 'platform_capabilities.dart';
+import '../core/file_staging_service.dart';
+import '../core/quick_text_service.dart';
+import '../core/pairing_invitation.dart';
 
 enum AndroidNodeStateEnum {
   active,
@@ -223,7 +226,14 @@ class AndroidNodeBridge {
         final args = call.arguments as Map<dynamic, dynamic>?;
         final uris = (args?['uris'] as List<dynamic>?)?.cast<String>() ?? [];
         if (uris.isNotEmpty) {
+          FileStagingService.instance.addPaths(uris);
           _sharedFilesController.add(uris);
+        }
+      } else if (call.method == 'onTextSharedViaIntent') {
+        final args = call.arguments as Map<dynamic, dynamic>?;
+        final text = args?['text'] as String?;
+        if (text != null && text.isNotEmpty) {
+          QuickTextService.instance.addSnippet(text);
         }
       } else if (call.method == 'onIncomingTransferIntent') {
         final args = call.arguments as Map<dynamic, dynamic>?;
@@ -279,6 +289,13 @@ class AndroidNodeBridge {
       );
     }
     return _eventsController!.stream;
+  }
+
+  void emitEventForTesting(Map<dynamic, dynamic> event) {
+    if (_eventsController == null || _eventsController!.isClosed) {
+      events; // initialize stream controller
+    }
+    _eventsController?.add(event);
   }
 
   void resetForTesting() {
@@ -442,10 +459,37 @@ class AndroidNodeBridge {
     required String targetPeerId,
     required List<String> contentUris,
   }) async {
+    var cleanTarget = targetPeerId.trim();
+    if (cleanTarget.startsWith('{') && cleanTarget.contains('"peerId"')) {
+      try {
+        final invitation = PairingInvitation.parse(cleanTarget);
+        cleanTarget = invitation.peerId;
+        String? hintHost;
+        int hintPort = 8765;
+        if (invitation.connectionHints.isNotEmpty) {
+          final hint = invitation.connectionHints.first;
+          if (hint.contains(':')) {
+            final parts = hint.split(':');
+            hintHost = parts[0];
+            hintPort = int.tryParse(parts[1]) ?? 8765;
+          } else {
+            hintHost = hint;
+          }
+        }
+        await addTrustedPeer(
+          peerId: invitation.peerId,
+          fingerprint: invitation.fingerprint,
+          name: invitation.name,
+          host: hintHost,
+          port: hintPort,
+        );
+      } catch (_) {}
+    }
+
     final transferId = await _methodChannel.invokeMethod<String>(
       'initiateSend',
       {
-        'targetPeerId': targetPeerId,
+        'targetPeerId': cleanTarget,
         'contentUris': contentUris,
       },
     );
@@ -471,21 +515,39 @@ class AndroidNodeBridge {
   }
 
   Future<Map<String, bool>> checkPermissions() async {
+    if (!PlatformCapabilities.isAndroid) {
+      return {
+        'notifications': true,
+        'nearbyDevices': true,
+        'camera': true,
+        'storage': true,
+        'localNetwork': true,
+      };
+    }
     try {
-      final res = await _methodChannel.invokeMapMethod<String, bool>('checkPermissions');
-      return res ?? {};
+      final Map<dynamic, dynamic>? res =
+          await _methodChannel.invokeMapMethod<dynamic, dynamic>('checkPermissions');
+      if (res != null) {
+        return res.map((k, v) => MapEntry(k.toString(), v == true));
+      }
+      return {};
     } catch (e) {
       return {};
     }
   }
 
   Future<Map<String, bool>> requestPermissions(List<String> permissions) async {
+    if (!PlatformCapabilities.isAndroid) return {};
     try {
-      final res = await _methodChannel.invokeMapMethod<String, bool>(
+      final Map<dynamic, dynamic>? res =
+          await _methodChannel.invokeMapMethod<dynamic, dynamic>(
         'requestPermissions',
         {'permissions': permissions},
       );
-      return res ?? {};
+      if (res != null) {
+        return res.map((k, v) => MapEntry(k.toString(), v == true));
+      }
+      return {};
     } catch (e) {
       return {};
     }
@@ -583,18 +645,100 @@ class AndroidNodeBridge {
     }
   }
 
+  Future<String?> pickDirectoryUri() async {
+    if (!PlatformCapabilities.isAndroid) return null;
+    try {
+      final res = await _methodChannel.invokeMethod<String>('pickDirectoryUri');
+      return res;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> getAppStorageDirectory() async {
+    if (!PlatformCapabilities.isAndroid) return null;
+    try {
+      final res = await _methodChannel.invokeMethod<String>('getAppStorageDirectory');
+      return res;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> openFile(String path) async {
+    if (!PlatformCapabilities.isAndroid) return false;
+    try {
+      final res = await _methodChannel.invokeMethod<bool>('openFile', {'path': path});
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> revealInFolder(String path) async {
+    if (!PlatformCapabilities.isAndroid) return false;
+    try {
+      final res = await _methodChannel.invokeMethod<bool>('revealInFolder', {'path': path});
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> shareFile(String path) async {
+    if (!PlatformCapabilities.isAndroid) return false;
+    try {
+      final res = await _methodChannel.invokeMethod<bool>('shareFile', {'path': path});
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> scanMediaFile(String path) async {
+    if (!PlatformCapabilities.isAndroid) return false;
+    try {
+      final res = await _methodChannel.invokeMethod<bool>('scanMediaFile', {'path': path});
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<Map<String, int>> getStorageSpaceInfo() async {
+    if (!PlatformCapabilities.isAndroid) {
+      return {'totalBytes': 0, 'freeBytes': 0, 'usedBytes': 0};
+    }
+    try {
+      final res = await _methodChannel.invokeMapMethod<String, dynamic>('getStorageSpaceInfo');
+      if (res != null) {
+        return {
+          'totalBytes': (res['totalBytes'] as num?)?.toInt() ?? 0,
+          'freeBytes': (res['freeBytes'] as num?)?.toInt() ?? 0,
+          'usedBytes': (res['usedBytes'] as num?)?.toInt() ?? 0,
+        };
+      }
+    } catch (_) {}
+    return {'totalBytes': 0, 'freeBytes': 0, 'usedBytes': 0};
+  }
+
   Future<bool> addTrustedPeer({
     required String peerId,
     required String fingerprint,
+    String? host,
+    int? port,
+    String? name,
   }) async {
     try {
-      final res = await _methodChannel.invokeMethod<bool>(
-        'addTrustedPeer',
-        {
-          'peerId': peerId,
-          'fingerprint': fingerprint,
-        },
-      );
+      final args = <String, dynamic>{
+        'peerId': peerId,
+        'fingerprint': fingerprint,
+      };
+      if (host != null && host.isNotEmpty) args['host'] = host;
+      if (port != null) args['port'] = port;
+      if (name != null && name.isNotEmpty) args['name'] = name;
+
+      final res = await _methodChannel.invokeMethod<bool>('addTrustedPeer', args);
       return res ?? false;
     } catch (e) {
       return false;
@@ -645,6 +789,240 @@ class AndroidNodeBridge {
       return res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     } catch (e) {
       return [];
+    }
+  }
+
+  Future<Map<String, dynamic>?> startLocalHotspot() async {
+    if (!PlatformCapabilities.isAndroid) {
+      // Return simulated profile on desktop platforms for offline testability
+      return {
+        'ssid': 'PeerLink-Direct-SIM88',
+        'passphrase': 'passphraseSIM88',
+        'gatewayIp': '192.168.49.1',
+        'listenPort': 52001,
+        'wifiQr': 'WIFI:S:PeerLink-Direct-SIM88;T:WPA;P:passphraseSIM88;;',
+        'peerlinkUri': 'peerlink://hotspot?ssid=PeerLink-Direct-SIM88&pass=passphraseSIM88&ip=192.168.49.1&port=52001',
+      };
+    }
+    try {
+      final res = await _methodChannel.invokeMapMethod<dynamic, dynamic>('startLocalHotspot');
+      if (res == null) return null;
+      return res.map((k, v) => MapEntry(k.toString(), v));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> stopLocalHotspot() async {
+    if (!PlatformCapabilities.isAndroid) return true;
+    try {
+      final res = await _methodChannel.invokeMethod<bool>('stopLocalHotspot');
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> isHotspotActive() async {
+    if (!PlatformCapabilities.isAndroid) return false;
+    try {
+      final res = await _methodChannel.invokeMethod<bool>('isHotspotActive');
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Copies an Android SAF content:// URI into a temporary app cache file
+  /// so Dart's embedded Web Beam HTTP server can stream it over Wi-Fi.
+  Future<Map<String, dynamic>?> resolveContentUriToCacheFile(String contentUri) async {
+    if (!PlatformCapabilities.isAndroid || !contentUri.startsWith('content://')) {
+      return null;
+    }
+    try {
+      final res = await _methodChannel.invokeMapMethod<dynamic, dynamic>(
+        'resolveContentUriToCacheFile',
+        {'uri': contentUri},
+      );
+      if (res == null) return null;
+      return res.map((k, v) => MapEntry(k.toString(), v));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Checks whether Android 11+ All Files Access (MANAGE_EXTERNAL_STORAGE) is granted
+  /// so the in-app File Manager can browse, move, copy, zip, and manage Device Storage.
+  Future<bool> hasAllFilesAccess() async {
+    if (!PlatformCapabilities.isAndroid) return true;
+    try {
+      final res = await _methodChannel.invokeMethod<bool>('hasAllFilesAccess');
+      return res ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// Launches the Android OS All Files Access settings screen for PeerLink.
+  Future<bool> requestAllFilesAccess() async {
+    if (!PlatformCapabilities.isAndroid) return true;
+    try {
+      final res = await _methodChannel.invokeMethod<bool>('requestAllFilesAccess');
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Consumes any cold-start ACTION_SEND / ACTION_SEND_MULTIPLE share payload
+  /// buffered by MainActivity before Flutter finished initializing.
+  Future<Map<String, dynamic>?> consumePendingShareIntent() async {
+    if (!PlatformCapabilities.isAndroid) return null;
+    try {
+      final res = await _methodChannel.invokeMapMethod<dynamic, dynamic>('consumePendingShareIntent');
+      if (res == null) return null;
+      return res.map((k, v) => MapEntry(k.toString(), v));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Shares one or multiple files (local paths or content:// URIs) to any
+  /// installed Android app via ACTION_SEND / ACTION_SEND_MULTIPLE with ClipData permissions.
+  Future<bool> shareFiles(List<String> paths, {String title = 'Share via...'}) async {
+    if (!PlatformCapabilities.isAndroid || paths.isEmpty) return false;
+    try {
+      final res = await _methodChannel.invokeMethod<bool>(
+        'shareFiles',
+        {'paths': paths, 'title': title},
+      );
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Shares one or multiple files directly via Android Quick Share (Google Play Services
+  /// Nearby Share) when available, falling back cleanly to the Android System Share Sheet.
+  Future<String?> shareViaQuickShare(List<String> paths) async {
+    if (!PlatformCapabilities.isAndroid || paths.isEmpty) return null;
+    try {
+      final res = await _methodChannel.invokeMethod<String>(
+        'shareViaQuickShare',
+        {'paths': paths},
+      );
+      return res;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Queries Android's MediaStore by category ('photos', 'videos', 'audio', 'documents',
+  /// 'archives', 'apps', 'downloads') so users immediately see real device media even
+  /// across nested DCIM/Pictures/WhatsApp directories or Scoped Storage.
+  Future<List<Map<String, dynamic>>> queryDeviceMediaByCategory(
+    String category, {
+    int limit = 250,
+  }) async {
+    if (!PlatformCapabilities.isAndroid) return const [];
+    try {
+      final res = await _methodChannel.invokeListMethod<dynamic>(
+        'queryDeviceMediaByCategory',
+        {'category': category, 'limit': limit},
+      );
+      if (res == null) return const [];
+      return res
+          .whereType<Map>()
+          .map((m) => m.map((k, v) => MapEntry(k.toString(), v)))
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Returns the authoritative native directory where inbound P2P transfers are saved.
+  Future<String?> getReceivedDirectory() async {
+    if (!PlatformCapabilities.isAndroid) return null;
+    try {
+      return await _methodChannel.invokeMethod<String>('getReceivedDirectory');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>> audioPlay(String path) async {
+    if (!PlatformCapabilities.isAndroid) return {'playing': false};
+    try {
+      final res = await _methodChannel.invokeMapMethod<dynamic, dynamic>('audioPlay', {'path': path});
+      return res?.map((k, v) => MapEntry(k.toString(), v)) ?? {'playing': false};
+    } catch (_) {
+      return {'playing': false};
+    }
+  }
+
+  Future<Map<String, dynamic>> audioPause() async {
+    if (!PlatformCapabilities.isAndroid) return {'playing': false};
+    try {
+      final res = await _methodChannel.invokeMapMethod<dynamic, dynamic>('audioPause');
+      return res?.map((k, v) => MapEntry(k.toString(), v)) ?? {'playing': false};
+    } catch (_) {
+      return {'playing': false};
+    }
+  }
+
+  Future<bool> audioSeek(int positionMs) async {
+    if (!PlatformCapabilities.isAndroid) return false;
+    try {
+      return (await _methodChannel.invokeMethod<bool>('audioSeek', {'positionMs': positionMs})) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> audioStop() async {
+    if (!PlatformCapabilities.isAndroid) return;
+    try {
+      await _methodChannel.invokeMethod<bool>('audioStop');
+    } catch (_) {}
+  }
+
+  Future<Map<String, dynamic>> audioGetStatus() async {
+    if (!PlatformCapabilities.isAndroid) return {'playing': false, 'positionMs': 0, 'durationMs': 0};
+    try {
+      final res = await _methodChannel.invokeMapMethod<dynamic, dynamic>('audioGetStatus');
+      return res?.map((k, v) => MapEntry(k.toString(), v)) ?? {'playing': false, 'positionMs': 0, 'durationMs': 0};
+    } catch (_) {
+      return {'playing': false, 'positionMs': 0, 'durationMs': 0};
+    }
+  }
+
+  Future<int> getPdfPageCount(String path) async {
+    if (!PlatformCapabilities.isAndroid) return 0;
+    try {
+      return (await _methodChannel.invokeMethod<int>('getPdfPageCount', {'path': path})) ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<Uint8List?> renderPdfPage(String path, int pageIndex, {int width = 900}) async {
+    if (!PlatformCapabilities.isAndroid) return null;
+    try {
+      return await _methodChannel.invokeMethod<Uint8List>(
+        'renderPdfPage',
+        {'path': path, 'pageIndex': pageIndex, 'width': width},
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Uint8List?> getVideoThumbnail(String path) async {
+    if (!PlatformCapabilities.isAndroid) return null;
+    try {
+      return await _methodChannel.invokeMethod<Uint8List>('getVideoThumbnail', {'path': path});
+    } catch (_) {
+      return null;
     }
   }
 }

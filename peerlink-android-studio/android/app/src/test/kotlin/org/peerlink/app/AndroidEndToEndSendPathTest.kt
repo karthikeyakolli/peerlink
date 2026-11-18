@@ -436,4 +436,48 @@ class AndroidEndToEndSendPathTest {
 
         assertFalse("Exploit file must not be committed", File(destDirB, "exploit.sh").exists())
     }
+
+    @Test
+    fun testTransferInitiatedUsingIpAndPortSucceedsWithAuthenticPeerBinding() {
+        // Node B starts listening
+        facadeB.start()
+        val portB = facadeB.transportProvider.listeningPort
+
+        // Node A starts
+        facadeA.start()
+
+        // Create a test file on Node A
+        val content = "PeerLink IP-to-Peer Transfer Payload Verification"
+        val testFile = File(dirA, "ip_transfer_test.txt").apply {
+            writeText(content, StandardCharsets.UTF_8)
+        }
+        val transferId = "tx_ip_" + UUID.randomUUID().toString().replace("-", "")
+
+        // Initiate transfer using IP:port target ("127.0.0.1:$portB")
+        val ipTarget = PeerId.newBuilder().setValue("127.0.0.1:$portB").build()
+        val receiptFuture = facadeA.initiateSendAsync(ipTarget, listOf(testFile.absolutePath), transferId)
+
+        val receipt = receiptFuture.get(10, TimeUnit.SECONDS)
+        assertNotNull("Receipt must not be null", receipt)
+        assertTrue("Transfer initiated with IP:port must succeed via authentic remote peer binding", receipt.success)
+        assertEquals(testFile.length(), receipt.totalBytesTransferred)
+
+        // Verify committed file on Node B
+        val receivedFile = File(destDirB, "ip_transfer_test.txt")
+        assertTrue("Committed file must exist in destination on Node B", receivedFile.exists())
+        assertEquals(content, receivedFile.readText(StandardCharsets.UTF_8))
+    }
+
+    @Test
+    fun testManualPeerPreservedOnDiscoverySweep() {
+        val testPid = PeerId.newBuilder().setValue("manual_test_peer").build()
+        val record = facadeA.discoveryEngine.addManualPeer(testPid, "Manual Box", "192.168.1.99", 8765)
+        assertNotNull(record)
+        assertTrue("Manual peer should be discovered", facadeA.discoveryEngine.discoveredPeers.any { it.peerId == testPid })
+
+        // Sweep with 0 maxAge (forced sweep as done during refresh)
+        val pruned = facadeA.discoveryEngine.sweepStalePeers(0)
+        assertFalse("Manual peer must not be pruned during TTL sweep", pruned.contains(testPid))
+        assertTrue("Manual peer must remain active after sweep", facadeA.discoveryEngine.discoveredPeers.any { it.peerId == testPid })
+    }
 }

@@ -34,7 +34,7 @@ foreach ($pom in $poms) {
 }
 
 # Check platform source directories for OS-specific or forbidden imports
-$platforms = @("windows", "linux", "macos", "android", "core")
+$platforms = @("windows", "android", "core")
 foreach ($plat in $platforms) {
     $srcPath = Join-Path $plat "src\main\java"
     if (Test-Path $srcPath) {

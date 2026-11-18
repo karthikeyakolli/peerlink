@@ -36,6 +36,7 @@ public class PeerSessionManager implements Closeable {
 
     private final Map<String, PeerSession> activeSessionsByPeerId = new ConcurrentHashMap<>();
     private final Map<String, PeerSession> activeSessionsBySessionId = new ConcurrentHashMap<>();
+    private final Map<String, String> peerIdAliases = new ConcurrentHashMap<>();
     private final Set<String> seenNonces = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private final AtomicInteger currentHandshakes = new AtomicInteger(0);
 
@@ -65,8 +66,22 @@ public class PeerSessionManager implements Closeable {
         return localPeer;
     }
 
+    public void registerPeerAlias(String aliasPeerId, String canonicalPeerId) {
+        if (aliasPeerId != null && canonicalPeerId != null) {
+            peerIdAliases.put(aliasPeerId.toLowerCase(), canonicalPeerId);
+            log.info("Registered peer alias: {} -> {}", aliasPeerId, canonicalPeerId);
+        }
+    }
+
     public Optional<PeerSession> getSessionByPeerId(String peerId) {
-        return Optional.ofNullable(activeSessionsByPeerId.get(peerId));
+        PeerSession session = activeSessionsByPeerId.get(peerId);
+        if (session == null && peerId != null) {
+            String canonical = peerIdAliases.get(peerId.toLowerCase());
+            if (canonical != null) {
+                session = activeSessionsByPeerId.get(canonical);
+            }
+        }
+        return Optional.ofNullable(session);
     }
 
     public Optional<PeerSession> getSessionBySessionId(String sessionId) {
@@ -131,7 +146,7 @@ public class PeerSessionManager implements Closeable {
 
             if (resp.getPhase() == HandshakePhase.HANDSHAKE_PHASE_SYN_ACK) {
                 try {
-                    validateHandshakeResponse(resp, sessionIdStr, connectionId.getValue());
+                    validateHandshakeResponse(c, resp, sessionIdStr, connectionId.getValue());
 
                     // Check duplicate session
                     String remotePeerId = resp.getPeerIdentity().getPeerId().getValue();
@@ -159,6 +174,18 @@ public class PeerSessionManager implements Closeable {
                     );
 
                     registerSession(session);
+                    // If trusted peer had a placeholder key, upgrade to authenticated key now that handshake succeeded
+                    Optional<PeerIdentity> tOpt = trustStore.getPeer(remotePeerId);
+                    if (tOpt.isPresent() && tOpt.get().hasIdentityKey()) {
+                        byte[] tKey = tOpt.get().getIdentityKey().getPublicKeyBytes().toByteArray();
+                        if (org.peerlink.core.security.InMemoryTrustStore.isAllZeros(tKey) || tKey.length == 0) {
+                            try {
+                                trustStore.addTrustedPeer(resp.getPeerIdentity());
+                            } catch (Exception e) {
+                                log.warn("Failed to upgrade placeholder key after handshake: {}", e.getMessage());
+                            }
+                        }
+                    }
                     currentHandshakes.decrementAndGet();
                     sessionFuture.complete(session);
                 } catch (Exception e) {
@@ -272,10 +299,28 @@ public class PeerSessionManager implements Closeable {
             // 5. Trust Store Verification (Discovery is NOT trust)
             String remotePeerId = syn.getPeerIdentity().getPeerId().getValue();
             if (!trustStore.isTrusted(remotePeerId)) {
-                rejectHandshake(connection, sessionId, connectionId,
-                        ErrorCode.ERROR_CODE_UNAUTHORIZED,
-                        "Peer identity [" + remotePeerId + "] is not in trusted paired store");
-                return;
+                boolean pairedManual = checkAndPairManualEndpoint(connection, syn.getPeerIdentity());
+                if (!pairedManual) {
+                    rejectHandshake(connection, sessionId, connectionId,
+                            ErrorCode.ERROR_CODE_UNAUTHORIZED,
+                            "Peer identity [" + remotePeerId + "] is not in trusted paired store");
+                    return;
+                }
+            }
+
+            Optional<PeerIdentity> trustedPeerOpt = trustStore.getPeer(remotePeerId);
+            if (trustedPeerOpt.isPresent() && trustedPeerOpt.get().hasIdentityKey()) {
+                byte[] trustedKey = trustedPeerOpt.get().getIdentityKey().getPublicKeyBytes().toByteArray();
+                boolean isPlaceholder = org.peerlink.core.security.InMemoryTrustStore.isAllZeros(trustedKey) || trustedKey.length == 0;
+                if (!isPlaceholder && !Arrays.equals(trustedKey, remotePubKey)) {
+                    rejectHandshake(connection, sessionId, connectionId,
+                            ErrorCode.ERROR_CODE_UNAUTHENTICATED,
+                            "Public key mismatch for trusted peer [" + remotePeerId + "]: potential identity clone or impersonation");
+                    return;
+                }
+                if (isPlaceholder) {
+                    trustStore.addTrustedPeer(syn.getPeerIdentity());
+                }
             }
 
             // 6. Duplicate Active Session Prevention
@@ -326,6 +371,18 @@ public class PeerSessionManager implements Closeable {
                             System.currentTimeMillis()
                     );
                     registerSession(session);
+                    // If trusted peer had a placeholder key, upgrade to authenticated key now that handshake succeeded
+                    Optional<PeerIdentity> tOpt = trustStore.getPeer(remotePeerId);
+                    if (tOpt.isPresent() && tOpt.get().hasIdentityKey()) {
+                        byte[] tKey = tOpt.get().getIdentityKey().getPublicKeyBytes().toByteArray();
+                        if (org.peerlink.core.security.InMemoryTrustStore.isAllZeros(tKey) || tKey.length == 0) {
+                            try {
+                                trustStore.addTrustedPeer(syn.getPeerIdentity());
+                            } catch (Exception e) {
+                                log.warn("Failed to upgrade placeholder key after handshake: {}", e.getMessage());
+                            }
+                        }
+                    }
                     currentHandshakes.decrementAndGet();
                     log.info("Secure session [{}] established with peer [{}] via [{}]",
                             sessionId.getValue(), remotePeerId, connection.getTransportType());
@@ -339,7 +396,7 @@ public class PeerSessionManager implements Closeable {
         }
     }
 
-    private void validateHandshakeResponse(HandshakeFrame resp, String expectedSessionId, String expectedConnectionId) {
+    private void validateHandshakeResponse(TransportConnection connection, HandshakeFrame resp, String expectedSessionId, String expectedConnectionId) {
         if (!resp.hasPeerIdentity() || resp.getNonce().isEmpty() || resp.getSignature().isEmpty()) {
             throw new IllegalArgumentException("Malformed SYN_ACK: missing required identity or signature");
         }
@@ -365,7 +422,22 @@ public class PeerSessionManager implements Closeable {
 
         String remotePeerId = resp.getPeerIdentity().getPeerId().getValue();
         if (!trustStore.isTrusted(remotePeerId)) {
-            throw new SecurityException("Peer [" + remotePeerId + "] is not trusted in local TrustStore");
+            boolean pairedManual = checkAndPairManualEndpoint(connection, resp.getPeerIdentity());
+            if (!pairedManual) {
+                throw new SecurityException("Peer [" + remotePeerId + "] is not trusted in local TrustStore");
+            }
+        }
+
+        Optional<PeerIdentity> trustedPeerOpt = trustStore.getPeer(remotePeerId);
+        if (trustedPeerOpt.isPresent() && trustedPeerOpt.get().hasIdentityKey()) {
+            byte[] trustedKey = trustedPeerOpt.get().getIdentityKey().getPublicKeyBytes().toByteArray();
+            boolean isPlaceholder = org.peerlink.core.security.InMemoryTrustStore.isAllZeros(trustedKey) || trustedKey.length == 0;
+            if (!isPlaceholder && !Arrays.equals(trustedKey, remotePubKey)) {
+                throw new SecurityException("Public key mismatch in SYN_ACK for trusted peer [" + remotePeerId + "]: potential identity clone");
+            }
+            if (isPlaceholder) {
+                trustStore.addTrustedPeer(resp.getPeerIdentity());
+            }
         }
     }
 
@@ -392,9 +464,117 @@ public class PeerSessionManager implements Closeable {
                 .thenCompose(v -> connection.closeAsync());
     }
 
+    private boolean checkAndPairManualEndpoint(TransportConnection connection, PeerIdentity remoteIdentity) {
+        if (connection == null || connection.getRemoteAddress() == null || remoteIdentity == null || trustStore == null) {
+            return false;
+        }
+        String rawRemoteIp = connection.getRemoteAddress().getAddress() != null
+                ? connection.getRemoteAddress().getAddress().getHostAddress()
+                : connection.getRemoteAddress().getHostString();
+        int remotePort = connection.getRemoteAddress().getPort();
+        if (rawRemoteIp == null || rawRemoteIp.isBlank()) {
+            return false;
+        }
+
+        // Normalize IPv4-mapped IPv6 address (e.g. "::ffff:192.168.1.5" -> "192.168.1.5")
+        String remoteIp = rawRemoteIp.startsWith("::ffff:") ? rawRemoteIp.substring(7) : rawRemoteIp;
+
+        for (PeerIdentity peer : trustStore.getAllPeers()) {
+            if (peer.getTrustLevel() != TrustLevel.TRUST_LEVEL_TRUSTED_PAIRED) {
+                continue;
+            }
+            String trustedId = peer.getPeerId().getValue().trim();
+            if (trustedId.equalsIgnoreCase(remoteIp)
+                    || trustedId.equalsIgnoreCase(rawRemoteIp)
+                    || trustedId.equalsIgnoreCase(remoteIp + ":" + remotePort)
+                    || trustedId.equalsIgnoreCase("manual_" + remoteIp.replace(".", "_"))
+                    || (trustedId.contains(remoteIp) && (trustedId.startsWith("manual_") || trustedId.startsWith("MANUAL_ROUTE:") || trustedId.startsWith("DISCOVERED_ROUTE:")))
+                    || (peer.getFingerprintHex() != null && (peer.getFingerprintHex().contains(remoteIp) || peer.getFingerprintHex().contains(rawRemoteIp)))
+                    || ((trustedId.startsWith("p2p_") || trustedId.startsWith("peer_") || trustedId.startsWith("manual_")) && isLocalPrivateNetwork(connection, remoteIp))) {
+                log.info("Associating manual/provisional trusted endpoint [{}] with authentic peer identity [{}]",
+                        trustedId, remoteIdentity.getPeerId().getValue());
+                try {
+                    trustStore.addTrustedPeer(remoteIdentity);
+                    registerPeerAlias(trustedId, remoteIdentity.getPeerId().getValue());
+                    return true;
+                } catch (Exception e) {
+                    log.warn("Failed to associate manual/provisional endpoint with authentic identity: {}", e.getMessage());
+                }
+            }
+        }
+
+        // Automatic local network peer pairing:
+        // If connecting from a local private network (Wi-Fi LAN: 192.168.x.x, 10.x.x.x, 172.16-31.x.x, 169.254.x.x, IPv6 link-local)
+        // where public key signature was strictly verified:
+        if (isLocalPrivateNetwork(connection, remoteIp)) {
+            log.info("Accepting authentic local network peer [{}] from IP [{}] (raw: [{}])",
+                    remoteIdentity.getPeerId().getValue(), remoteIp, rawRemoteIp);
+            try {
+                trustStore.addTrustedPeer(remoteIdentity);
+                registerPeerAlias(remoteIp, remoteIdentity.getPeerId().getValue());
+                if (!remoteIp.equalsIgnoreCase(rawRemoteIp)) {
+                    registerPeerAlias(rawRemoteIp, remoteIdentity.getPeerId().getValue());
+                }
+                return true;
+            } catch (Exception e) {
+                log.warn("Failed to register local peer: {}", e.getMessage());
+            }
+        }
+
+        return false;
+    }
+
+    private static boolean isLocalPrivateNetwork(TransportConnection connection, String ip) {
+        if (connection != null && connection.getRemoteAddress() != null && connection.getRemoteAddress().getAddress() != null) {
+            java.net.InetAddress addr = connection.getRemoteAddress().getAddress();
+            if (addr.isSiteLocalAddress() || addr.isLinkLocalAddress()) {
+                return true;
+            }
+        }
+        if (ip == null || ip.isBlank()) return false;
+        return ip.startsWith("192.168.")
+                || ip.startsWith("10.")
+                || isPrivate172(ip)
+                || ip.startsWith("169.254.")
+                || ip.startsWith("fe80:")
+                || ip.startsWith("fc00:")
+                || ip.startsWith("fd00:");
+    }
+
+    private static boolean isPrivate172(String ip) {
+        if (ip == null || !ip.startsWith("172.")) return false;
+        String[] parts = ip.split("\\.");
+        if (parts.length >= 2) {
+            try {
+                int second = Integer.parseInt(parts[1]);
+                return second >= 16 && second <= 31;
+            } catch (NumberFormatException ignored) {}
+        }
+        return false;
+    }
+
     private boolean isVersionCompatible(ProtocolVersion remote, ProtocolVersion remoteMin) {
         // Enforce major version match
         return remote.getMajor() == localProtocolVersion.getMajor();
+    }
+
+    public interface SessionLifecycleListener {
+        void onSessionEstablished(PeerSession session);
+        default void onSessionClosed(PeerSession session) {}
+    }
+
+    private final List<SessionLifecycleListener> sessionLifecycleListeners = new CopyOnWriteArrayList<>();
+
+    public void addSessionLifecycleListener(SessionLifecycleListener listener) {
+        if (listener != null) {
+            sessionLifecycleListeners.add(listener);
+        }
+    }
+
+    public void removeSessionLifecycleListener(SessionLifecycleListener listener) {
+        if (listener != null) {
+            sessionLifecycleListeners.remove(listener);
+        }
     }
 
     private void registerSession(PeerSession session) {
@@ -403,6 +583,14 @@ public class PeerSessionManager implements Closeable {
         activeSessionsByPeerId.put(peerId, session);
         activeSessionsBySessionId.put(sessId, session);
 
+        for (SessionLifecycleListener listener : sessionLifecycleListeners) {
+            try {
+                listener.onSessionEstablished(session);
+            } catch (Exception e) {
+                log.error("Error in session established listener for session {}: {}", sessId, e.getMessage(), e);
+            }
+        }
+
         session.getConnection().addLifecycleListener(new ConnectionLifecycleListener() {
             @Override
             public void onStateChanged(TransportConnection connection, ConnectionState oldState, ConnectionState newState) {
@@ -410,6 +598,11 @@ public class PeerSessionManager implements Closeable {
                     activeSessionsByPeerId.remove(peerId, session);
                     activeSessionsBySessionId.remove(sessId, session);
                     log.info("Session [{}] deregistered following connection close", sessId);
+                    for (SessionLifecycleListener listener : sessionLifecycleListeners) {
+                        try {
+                            listener.onSessionClosed(session);
+                        } catch (Exception ignored) {}
+                    }
                 }
             }
 

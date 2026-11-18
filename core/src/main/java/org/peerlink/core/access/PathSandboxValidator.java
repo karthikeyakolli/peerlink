@@ -82,14 +82,26 @@ public final class PathSandboxValidator {
             throw new PathTraversalException("Alternate data streams prohibited in relative path: " + raw);
         }
 
-        // 5. Detect leading root slashes
+        // 5. Detect rooted/absolute paths
+        // In the protocol, requested paths MUST be relative to the share root.
+        // Rooted paths starting with '/' or '\' are strictly prohibited to prevent escaping.
         if (raw.startsWith("/") || raw.startsWith("\\")) {
-            // Strip leading slashes to prevent root-relative escaping
-            raw = raw.replaceAll("^[\\\\/]+", "");
+            throw new PathTraversalException("Rooted/absolute paths prohibited in relative path: " + raw);
         }
 
-        // 6. Split and inspect path components for ".."
-        Path normalizedRelative = Paths.get(raw).normalize();
+        // 6. Split and inspect raw path components for ".." across both POSIX ('/') and Windows ('\') separators.
+        // This is critical on POSIX platforms where backslashes are not treated as path separators by java.nio.file.Path,
+        // which would otherwise allow malicious paths like "..\\outside.txt" or "sub\\..\\..\\outside.txt" to bypass normalization.
+        String[] rawComponents = raw.split("[/\\\\]+");
+        for (String component : rawComponents) {
+            if ("..".equals(component)) {
+                throw new PathTraversalException("Parent directory traversal prohibited: " + raw);
+            }
+        }
+
+        // 7. Normalize backslashes to forward slashes for consistent cross-platform resolution
+        String normalizedSeparators = raw.replace('\\', '/');
+        Path normalizedRelative = Paths.get(normalizedSeparators).normalize();
         for (Path part : normalizedRelative) {
             String partStr = part.toString();
             if ("..".equals(partStr)) {
@@ -97,10 +109,10 @@ public final class PathSandboxValidator {
             }
         }
 
-        // 7. Resolve against root
+        // 8. Resolve against root
         Path resolved = canonicalRoot.resolve(normalizedRelative).normalize();
 
-        // 8. Canonical check: resolved path must strictly start with canonicalRoot
+        // 9. Canonical check: resolved path must strictly start with canonicalRoot
         if (!resolved.startsWith(canonicalRoot)) {
             throw new PathTraversalException("Resolved path escaped root directory: " + raw);
         }

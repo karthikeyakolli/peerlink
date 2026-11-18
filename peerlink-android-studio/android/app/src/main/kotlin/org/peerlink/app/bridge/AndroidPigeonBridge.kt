@@ -19,7 +19,10 @@ import org.peerlink.protocol.v1.PeerId
 class AndroidPigeonBridge(
     private val nodeFacade: AndroidNodeFacade,
     private val filePicker: ((MethodChannel.Result, String?) -> Unit)? = null,
-    private val permissionRequester: ((List<String>, MethodChannel.Result) -> Unit)? = null
+    private val directoryPicker: ((MethodChannel.Result) -> Unit)? = null,
+    private val permissionRequester: ((List<String>, MethodChannel.Result) -> Unit)? = null,
+    private val appStorageDirectoryProvider: (() -> String)? = null,
+    private val context: android.content.Context? = null
 ) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 
     companion object {
@@ -29,6 +32,7 @@ class AndroidPigeonBridge(
 
     private var eventSink: EventChannel.EventSink? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val hotspotManager = org.peerlink.core.platform.hotspot.LocalHotspotManager()
 
     fun register(flutterEngine: FlutterEngine) {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL)
@@ -207,6 +211,18 @@ class AndroidPigeonBridge(
                     result.success(emptyList<String>())
                 }
             }
+            "pickDirectoryUri" -> {
+                if (directoryPicker != null) {
+                    directoryPicker.invoke(result)
+                } else {
+                    result.success(null)
+                }
+            }
+            "getAppStorageDirectory" -> {
+                val dir = appStorageDirectoryProvider?.invoke()
+                    ?: (nodeFacade.destinationRoot?.parent?.toAbsolutePath()?.toString() ?: "")
+                result.success(dir)
+            }
             "checkPermissions" -> {
                 val ctx = nodeFacade.currentContext
                 result.success(mapOf(
@@ -267,8 +283,18 @@ class AndroidPigeonBridge(
             "addTrustedPeer" -> {
                 val peerId = call.argument<String>("peerId") ?: ""
                 val fingerprint = call.argument<String>("fingerprint") ?: ""
+                val host = call.argument<String>("host") ?: ""
+                val port = call.argument<Int>("port") ?: 8765
+                val name = call.argument<String>("name") ?: (if (host.isNotBlank()) host else peerId)
                 try {
-                    nodeFacade.trustStore.addTrustedPeer(peerId, fingerprint, ByteArray(32))
+                    if (host.isNotBlank()) {
+                        val pid = PeerId.newBuilder().setValue(peerId).build()
+                        nodeFacade.discoveryEngine.addManualPeer(pid, name, host, port)
+                    }
+                    nodeFacade.trustStore.addTrustedPeer(peerId, fingerprint, ByteArray(0))
+                    context?.let { ctx ->
+                        org.peerlink.app.share.DirectShareManager.updateShareTargetsFromTrustStore(ctx, nodeFacade.trustStore)
+                    }
                     result.success(true)
                 } catch (e: Exception) {
                     result.error("TRUST_ERROR", e.message, null)
@@ -278,6 +304,9 @@ class AndroidPigeonBridge(
                 val peerId = call.argument<String>("peerId") ?: ""
                 try {
                     nodeFacade.trustStore.revokeTrust(peerId)
+                    context?.let { ctx ->
+                        org.peerlink.app.share.DirectShareManager.updateShareTargetsFromTrustStore(ctx, nodeFacade.trustStore)
+                    }
                     result.success(true)
                 } catch (e: Exception) {
                     result.error("REVOKE_ERROR", e.message, null)
@@ -302,6 +331,32 @@ class AndroidPigeonBridge(
                 } catch (e: Exception) {
                     result.error("JOURNAL_ERROR", e.message, null)
                 }
+            }
+            "startLocalHotspot" -> {
+                try {
+                    val profile = hotspotManager.startHotspot()
+                    result.success(mapOf(
+                        "ssid" to profile.ssid(),
+                        "passphrase" to profile.passphrase(),
+                        "gatewayIp" to profile.gatewayIp(),
+                        "listenPort" to profile.listenPort(),
+                        "wifiQr" to profile.toWifiQrPayload(),
+                        "peerlinkUri" to profile.toPeerLinkConnectionUri()
+                    ))
+                } catch (e: Exception) {
+                    result.error("HOTSPOT_ERROR", e.message, null)
+                }
+            }
+            "stopLocalHotspot" -> {
+                try {
+                    hotspotManager.stopHotspot()
+                    result.success(true)
+                } catch (e: Exception) {
+                    result.error("HOTSPOT_ERROR", e.message, null)
+                }
+            }
+            "isHotspotActive" -> {
+                result.success(hotspotManager.isHotspotActive)
             }
             else -> result.notImplemented()
         }

@@ -8,7 +8,7 @@ void main() {
     DeviceTrustService.instance.resetForTesting();
   });
 
-  testWidgets('HomeScreen UX Simplification: removes fake devices, duplicate tools, and deferred experiments',
+  testWidgets('HomeScreen UX Simplification: removes fake devices, duplicate tools, and Instant Beam',
       (WidgetTester tester) async {
     await tester.pumpWidget(
       const MaterialApp(
@@ -24,15 +24,17 @@ void main() {
     expect(find.text('Ubuntu Studio'), findsNothing);
     expect(find.text('ed25519:7fa8...91b2'), findsNothing);
 
-    // 2. Assert deferred unverified features are NOT present in primary navigation/shelf
+    // 2. Assert Instant Beam branding and panel are removed completely
+    expect(find.textContaining('Instant Beam'), findsNothing);
+    expect(find.text('Quick Share Media'), findsNothing);
+
+    // 3. Assert deferred unverified features are NOT present
     expect(find.text('Burn Beam'), findsNothing);
     expect(find.text('Web Beam'), findsNothing);
     expect(find.text('Hotspot P2P'), findsNothing);
-
-    // 3. Assert no duplicate Quick Text
     expect(find.text('Quick Text'), findsNothing);
 
-    // 4. Assert InstantBeamDeck displays clear empty state when no peers paired
+    // 4. Assert Nearby & Paired Devices displays clear empty state when no peers paired
     expect(find.textContaining('No paired devices', findRichText: true), findsOneWidget);
 
     // 5. Assert primary bilateral actions and storage modes are present
@@ -44,7 +46,7 @@ void main() {
     expect(find.text('BACKUP'), findsOneWidget);
   });
 
-  testWidgets('HomeScreen InstantBeam displays real paired device and does not fabricate transfers',
+  testWidgets('HomeScreen displays real paired device and does not fabricate transfers',
       (WidgetTester tester) async {
     // Add an authoritative paired device
     DeviceTrustService.instance.pairDevice(
@@ -59,9 +61,10 @@ void main() {
       ),
     );
 
+    int? navigatedTab;
     await tester.pumpWidget(
-      const MaterialApp(
-        home: HomeScreen(),
+      MaterialApp(
+        home: HomeScreen(onNavigate: (tab) => navigatedTab = tab),
       ),
     );
     await tester.pump();
@@ -69,14 +72,16 @@ void main() {
 
     // Authoritative device should be visible
     expect(find.text('Office ThinkPad'), findsOneWidget);
+    expect(find.text('Send Files'), findsOneWidget);
 
-    // Tap the peer without files staged
-    await tester.tap(find.text('Office ThinkPad'));
+    // Tap Send Files
+    await tester.tap(find.text('Send Files'));
     await tester.pump();
+
+    // Navigates to Files tab (index 2)
+    expect(navigatedTab, 2);
 
     // Must NOT fabricate a transfer
     expect(find.textContaining('Beaming 2 files directly'), findsNothing);
-    // Must guide the user to select files via snackbar
-    expect(find.textContaining('Select files to beam to Office ThinkPad'), findsOneWidget);
   });
 }

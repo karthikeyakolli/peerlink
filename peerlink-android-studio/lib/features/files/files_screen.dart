@@ -1,9 +1,13 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../../core/app_settings_service.dart';
 import '../../core/node_ipc_client.dart';
 import '../../core/operation_journal_service.dart';
 import '../../core/protocol/peerlink/v1/transfer.pb.dart';
+import '../../core/protocol/peerlink/v1/error.pb.dart';
+import 'package:fixnum/fixnum.dart';
 import '../../core/device_trust_service.dart';
 import '../../core/pairing_invitation.dart';
 import '../../design_system/components/radar_sonar_view.dart';
@@ -15,14 +19,25 @@ import '../../design_system/components/burn_viewer_modal.dart';
 import '../../design_system/components/desktop_dropzone.dart';
 import '../../platform/windows_file_dialog.dart';
 import '../../platform/android_node_bridge.dart';
+import '../../platform/platform_capabilities.dart';
 import '../../design_system/components/media_category_sheet.dart';
 import '../../core/transfer/transfer_progress_model.dart' show TransferProgressModel;
+import '../../core/file_staging_service.dart';
+import '../../design_system/components/quick_text_share_modal.dart';
+import '../../core/error_message_simplifier.dart';
+import '../../design_system/components/app_sharing_sheet.dart';
+import '../../design_system/components/web_beam_modal.dart';
+import '../../design_system/components/local_hotspot_modal.dart';
+import '../../core/feedback_sound_service.dart';
+import 'received_vault_view.dart';
+import 'remote_scoped_browser_sheet.dart';
 
 class SelectedFileInfo {
   final String path;
   final String name;
   final int sizeBytes;
   final bool isDirectory;
+  final int fileCount;
   bool selected;
 
   SelectedFileInfo({
@@ -30,12 +45,38 @@ class SelectedFileInfo {
     required this.name,
     required this.sizeBytes,
     required this.isDirectory,
+    this.fileCount = 0,
     this.selected = true,
   });
+
+  String get formattedSize {
+    if (isDirectory) {
+      if (fileCount == 0 && sizeBytes == 0) return 'Folder';
+      final sizeStr = _formatBytes(sizeBytes);
+      return fileCount == 1 ? '1 file ($sizeStr)' : '$fileCount files ($sizeStr)';
+    }
+    return _formatBytes(sizeBytes);
+  }
+
+  static String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
+  }
 }
 
 class FilesScreen extends StatefulWidget {
-  const FilesScreen({super.key});
+  final String? initialTargetPeer;
+  final int initialTabIndex;
+
+  const FilesScreen({
+    super.key,
+    this.initialTargetPeer,
+    this.initialTabIndex = 0,
+  });
 
   @override
   State<FilesScreen> createState() => _FilesScreenState();
@@ -44,8 +85,9 @@ class FilesScreen extends StatefulWidget {
 class _FilesScreenState extends State<FilesScreen> {
   final NodeIpcClient _client = NodeIpcClient.instance;
 
-  final TextEditingController _targetPeerController =
-      TextEditingController(text: 'peer-desktop-b');
+  final TextEditingController _targetPeerController = TextEditingController(
+    text: PlatformCapabilities.isAndroid ? '' : 'peer-desktop-b',
+  );
   final TextEditingController _sourcePathsController = TextEditingController();
   final TextEditingController _destinationDirController =
       TextEditingController();
@@ -60,9 +102,25 @@ class _FilesScreenState extends State<FilesScreen> {
   StreamSubscription<dynamic>? _incomingIntentSub;
   final Map<String, TransferProgress> _transfers = {};
   final Map<String, TransferProgressModel> _activeProgressModels = {};
+  DateTime _lastProgressUiUpdate = DateTime.fromMillisecondsSinceEpoch(0);
   EphemeralPolicy _currentPolicy = EphemeralPolicy.permanent;
 
   final List<SelectedFileInfo> _selectedFiles = [];
+  String? _localAndroidPeerId;
+  String? _localAndroidFingerprint;
+
+  Future<void> _resolveAndroidIdentity() async {
+    if (PlatformCapabilities.isAndroid) {
+      final pid = await AndroidNodeBridge.instance.getLocalPeerId();
+      final fp = await AndroidNodeBridge.instance.getFingerprint();
+      if (mounted) {
+        setState(() {
+          if (pid != null && pid.isNotEmpty) _localAndroidPeerId = pid;
+          if (fp != null && fp.isNotEmpty) _localAndroidFingerprint = fp;
+        });
+      }
+    }
+  }
 
   void _addPaths(List<String> paths) {
     for (final p in paths) {
@@ -78,12 +136,21 @@ class _FilesScreenState extends State<FilesScreen> {
 
       int size = 0;
       bool isDir = false;
+      int fileCount = 0;
       try {
         if (f.existsSync()) {
           size = f.lengthSync();
           isDir = false;
         } else if (d.existsSync()) {
           isDir = true;
+          int count = 0;
+          for (final entity in d.listSync(recursive: true, followLinks: false)) {
+            if (entity is File) {
+              size += entity.lengthSync();
+              count++;
+            }
+          }
+          fileCount = count;
         }
       } catch (_) {}
 
@@ -97,9 +164,11 @@ class _FilesScreenState extends State<FilesScreen> {
           name: name.isEmpty ? cleanPath : name,
           sizeBytes: size,
           isDirectory: isDir,
+          fileCount: fileCount,
         ));
       }
     }
+    FileStagingService.instance.addPaths(paths);
     _syncController();
   }
 
@@ -111,20 +180,28 @@ class _FilesScreenState extends State<FilesScreen> {
   }
 
   Future<void> _pickFiles() async {
-    final paths = await WindowsFileDialog.pickFiles();
-    if (paths.isNotEmpty && mounted) {
-      setState(() {
-        _addPaths(paths);
-      });
-    }
-  }
-
-  Future<void> _pickFolder() async {
-    final folder = await WindowsFileDialog.pickDirectory();
-    if (folder != null && mounted) {
-      setState(() {
-        _addPaths([folder]);
-      });
+    if (PlatformCapabilities.isAndroid) {
+      try {
+        final uris = await AndroidNodeBridge.instance.pickContentUris();
+        if (uris.isNotEmpty && mounted) {
+          setState(() {
+            _addPaths(uris);
+          });
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('File picker failed: $e')),
+          );
+        }
+      }
+    } else {
+      final paths = await WindowsFileDialog.pickFiles();
+      if (paths.isNotEmpty && mounted) {
+        setState(() {
+          _addPaths(paths);
+        });
+      }
     }
   }
 
@@ -136,10 +213,43 @@ class _FilesScreenState extends State<FilesScreen> {
           _addPaths(uris);
         });
       }
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('SAF picker failed: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _pickFolder() async {
+    if (PlatformCapabilities.isAndroid) {
+      try {
+        final folder = await AndroidNodeBridge.instance.pickDirectoryUri();
+        if (folder != null && folder.isNotEmpty && mounted) {
+          setState(() {
+            _addPaths([folder]);
+          });
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Folder picker failed: $e')),
+          );
+        }
+      }
+    } else {
+      final folder = await WindowsFileDialog.pickDirectory();
+      if (folder != null && mounted) {
+        setState(() {
+          _addPaths([folder]);
+        });
+      }
+    }
   }
 
   void _clearSelectedFiles() {
+    FileStagingService.instance.clear();
     setState(() {
       _selectedFiles.clear();
       _sourcePathsController.clear();
@@ -158,6 +268,7 @@ class _FilesScreenState extends State<FilesScreen> {
       context: context,
       currentSelection: selectionItems,
       onItemRemoved: (item) {
+        FileStagingService.instance.removePath(item.pathOrUri);
         setState(() {
           _selectedFiles.removeWhere((f) => f.path == item.pathOrUri);
           _syncController();
@@ -216,15 +327,78 @@ class _FilesScreenState extends State<FilesScreen> {
     return MediaCategory.allFiles;
   }
 
+  Future<void> _handlePasteToSend(BuildContext context) async {
+    final clipData = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = clipData?.text?.trim();
+    if (text == null || text.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Clipboard is empty')),
+        );
+      }
+      return;
+    }
+
+    final lines = text.split(RegExp(r'[\r\n]+')).map((l) => l.trim().replaceAll('"', '')).where((l) => l.isNotEmpty).toList();
+    final existingPaths = lines.where((l) => File(l).existsSync() || Directory(l).existsSync()).toList();
+
+    if (existingPaths.isNotEmpty) {
+      setState(() {
+        _addPaths(existingPaths);
+      });
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${existingPaths.length} item(s) pasted from clipboard!'),
+            backgroundColor: const Color(0xFF10B981),
+          ),
+        );
+      }
+    } else {
+      if (context.mounted) {
+        QuickTextShareModal.show(context, initialText: text);
+      }
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    _resolveAndroidIdentity();
+    if (widget.initialTargetPeer != null && widget.initialTargetPeer!.isNotEmpty) {
+      _targetPeerController.text = widget.initialTargetPeer!;
+    } else if (DeviceTrustService.instance.selectedSendTarget != null) {
+      _targetPeerController.text = DeviceTrustService.instance.selectedSendTarget!;
+      DeviceTrustService.instance.clearSelectedSendTarget();
+    } else if (DeviceTrustService.instance.devices.isNotEmpty) {
+      _targetPeerController.text = DeviceTrustService.instance.devices.first.id;
+    }
+    // Restore persistent staged draft files
+    if (FileStagingService.instance.isNotEmpty && _selectedFiles.isEmpty) {
+      for (final staged in FileStagingService.instance.stagedFiles) {
+        _selectedFiles.add(SelectedFileInfo(
+          path: staged.path,
+          name: staged.name,
+          sizeBytes: staged.sizeBytes,
+          isDirectory: staged.isDirectory,
+          fileCount: staged.fileCount,
+          selected: staged.selected,
+        ));
+      }
+      _syncController();
+    }
     _refreshTransfers();
     _progressSub = _client.transferProgressStream.listen((progress) {
       if (mounted) {
-        setState(() {
-          _transfers[progress.transferId] = progress;
-        });
+        _transfers[progress.transferId] = progress;
+        final now = DateTime.now();
+        if (now.difference(_lastProgressUiUpdate).inMilliseconds >= 120 ||
+            progress.state == TransferState.TRANSFER_STATE_COMPLETED ||
+            progress.state == TransferState.TRANSFER_STATE_FAILED ||
+            progress.state == TransferState.TRANSFER_STATE_CANCELLED) {
+          _lastProgressUiUpdate = now;
+          setState(() {});
+        }
         // Invariant: Unknown or uncertain transfer events trigger reconciliation
         if (progress.state == TransferState.TRANSFER_STATE_UNSPECIFIED ||
             progress.state == TransferState.TRANSFER_STATE_OUTCOME_UNKNOWN) {
@@ -262,6 +436,14 @@ class _FilesScreenState extends State<FilesScreen> {
             initialTotalBytes: total,
             initialFileName: fileName,
           );
+          _transfers[transferId] = TransferProgress(
+            transferId: transferId,
+            state: TransferState.TRANSFER_STATE_TRANSFERRING,
+            transferredBytes: Int64(0),
+            totalBytes: total > 0 ? Int64(total) : Int64(0),
+            currentFile: fileName,
+            totalItems: 1,
+          );
         });
         OperationJournalService.instance.recordOperation(
           JournalOperation(
@@ -286,15 +468,32 @@ class _FilesScreenState extends State<FilesScreen> {
           model.recordProgress(transferredBytes: transferred, totalBytes: total);
         }
         OperationJournalService.instance.updateProgress(transferId, transferred, total);
-        setState(() {
-          if (model != null && model.smoothedRateBytesPerSec != null) {
-            _statusBanner =
-                'Transferring $transferId: ${model.formattedProgress} • ${model.formattedRate} • ${model.formattedEta}';
-          } else {
-            _statusBanner =
-                'Transferring $transferId: $percent% (${(transferred / 1024).toStringAsFixed(1)} / ${(total / 1024).toStringAsFixed(1)} KB)';
-          }
-        });
+        final existing = _transfers[transferId];
+        final speedBps = model?.smoothedRateBytesPerSec != null
+            ? Int64(model!.smoothedRateBytesPerSec!.toInt())
+            : Int64(0);
+        _transfers[transferId] = TransferProgress(
+          transferId: transferId,
+          state: TransferState.TRANSFER_STATE_TRANSFERRING,
+          transferredBytes: Int64(transferred),
+          totalBytes: total > 0 ? Int64(total) : (existing?.totalBytes ?? Int64(0)),
+          currentFile: existing?.currentFile ?? (model?.currentFileName ?? ''),
+          speedBps: speedBps,
+          totalItems: 1,
+        );
+        final now = DateTime.now();
+        if (now.difference(_lastProgressUiUpdate).inMilliseconds >= 120 || percent >= 100) {
+          _lastProgressUiUpdate = now;
+          setState(() {
+            if (model != null && model.smoothedRateBytesPerSec != null) {
+              _statusBanner =
+                  'Transferring $transferId: ${model.formattedProgress} • ${model.formattedRate} • ${model.formattedEta}';
+            } else {
+              _statusBanner =
+                  'Transferring $transferId: $percent% (${(transferred / 1024).toStringAsFixed(1)} / ${(total / 1024).toStringAsFixed(1)} KB)';
+            }
+          });
+        }
       } else if (type == 'transferCompleted') {
         final transferId = event['transferId'] as String? ?? '';
         final success = event['success'] == true;
@@ -306,6 +505,26 @@ class _FilesScreenState extends State<FilesScreen> {
           );
         }
         final isCancelled = !success && errorMessage.toLowerCase().contains('cancel');
+        final existing = _transfers[transferId];
+        final finalBytes = (model != null && model.totalBytes > 0)
+            ? Int64(model.totalBytes)
+            : (existing?.totalBytes ?? Int64(0));
+        _transfers[transferId] = TransferProgress(
+          transferId: transferId,
+          state: success
+              ? TransferState.TRANSFER_STATE_COMPLETED
+              : (isCancelled ? TransferState.TRANSFER_STATE_CANCELLED : TransferState.TRANSFER_STATE_FAILED),
+          transferredBytes: success ? finalBytes : (existing?.transferredBytes ?? Int64(0)),
+          totalBytes: finalBytes,
+          currentFile: existing?.currentFile ?? (model?.currentFileName ?? ''),
+          error: (!success && errorMessage.isNotEmpty)
+              ? ErrorDetail(
+                  humanSummary: isCancelled ? 'Transfer cancelled' : 'Transfer failed',
+                  humanExplanation: errorMessage,
+                )
+              : null,
+          totalItems: 1,
+        );
         OperationJournalService.instance.updateState(
           transferId,
           success
@@ -316,11 +535,31 @@ class _FilesScreenState extends State<FilesScreen> {
         if (success) {
           OperationJournalService.instance.updateStage(transferId, JournalStage.finalize);
         }
+        _lastProgressUiUpdate = DateTime.now();
         setState(() {
-          _statusBanner = success
-              ? 'Transfer $transferId completed successfully!'
-              : 'Transfer $transferId failed: $errorMessage';
+          if (success) {
+            _statusBanner = 'Transfer completed successfully!';
+            FeedbackSoundService.instance.playTransferComplete();
+          } else {
+            final simplified = ErrorMessageSimplifier.simplify(
+              errorMessage,
+              transferId: transferId,
+              targetPeer: _targetPeerController.text.trim(),
+            );
+            _statusBanner = isCancelled
+                ? 'Transfer cancelled.'
+                : 'Transfer failed: ${simplified.oneLineMessage}';
+            if (!isCancelled) {
+              FeedbackSoundService.instance.playTransferFailed();
+            }
+          }
         });
+        if (!success && !isCancelled) {
+          _showTransferFailureDialog(
+            transferId: transferId,
+            errorMessage: errorMessage,
+          );
+        }
       } else if (type == 'incomingTransferOffer') {
         final transferId = event['transferId'] as String? ?? '';
         final senderPeer = event['senderPeer'] as String? ?? '';
@@ -342,15 +581,178 @@ class _FilesScreenState extends State<FilesScreen> {
           ),
         );
 
-        _showIncomingOfferDialog(
-          transferId: transferId,
-          senderPeer: senderPeer,
-          fileName: fileName,
-          totalBytes: totalBytes,
-          itemCount: itemCount,
-        );
+        final isTrusted = DeviceTrustService.instance.isTrusted(senderPeer);
+        if (isTrusted && AppSettingsService.instance.autoAcceptFromTrusted) {
+          OperationJournalService.instance.updateState(
+            transferId,
+            JournalOperationState.executing,
+          );
+          OperationJournalService.instance.updateStage(
+            transferId,
+            JournalStage.execute,
+          );
+          AndroidNodeBridge.instance.respondIncomingTransfer(
+            transferId: transferId,
+            accept: true,
+          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Auto-accepted "$fileName" from trusted device $senderPeer'),
+                backgroundColor: const Color(0xFF10B981),
+              ),
+            );
+          }
+        } else {
+          _showIncomingOfferDialog(
+            transferId: transferId,
+            senderPeer: senderPeer,
+            fileName: fileName,
+            totalBytes: totalBytes,
+            itemCount: itemCount,
+          );
+        }
       }
     });
+  }
+
+  void _showTransferFailureDialog({
+    required String transferId,
+    required String errorMessage,
+  }) {
+    if (!mounted) return;
+    final simplified = ErrorMessageSimplifier.simplify(
+      errorMessage,
+      transferId: transferId,
+      targetPeer: _targetPeerController.text.trim(),
+    );
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
+        contentPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: simplified.iconColor.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(simplified.icon, color: simplified.iconColor, size: 24),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                simplified.title,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+              ),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 8),
+              Text(
+                simplified.oneLineMessage,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                simplified.suggestedAction,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                  height: 1.4,
+                ),
+              ),
+              if (simplified.technicalDetails != null &&
+                  simplified.technicalDetails!.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                Theme(
+                  data: Theme.of(ctx).copyWith(dividerColor: Colors.transparent),
+                  child: ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    dense: true,
+                    title: const Text(
+                      'Technical details',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                    children: [
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.05),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.grey.withValues(alpha: 0.2)),
+                        ),
+                        child: SelectableText(
+                          simplified.technicalDetails!,
+                          style: const TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 11,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Dismiss'),
+          ),
+          if (simplified.canHotspotFallback)
+            FilledButton.tonalIcon(
+              key: const Key('hotspot_fallback_button'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF10B981).withValues(alpha: 0.15),
+                foregroundColor: const Color(0xFF10B981),
+              ),
+              onPressed: () {
+                Navigator.pop(ctx);
+                LocalHotspotModal.show(context);
+              },
+              icon: const Icon(Icons.wifi_tethering_rounded, size: 16),
+              label: const Text('Direct Hotspot'),
+            ),
+          if (simplified.canPair)
+            FilledButton.icon(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _openRadarPicker();
+              },
+              icon: const Icon(Icons.qr_code_scanner_rounded, size: 16),
+              label: const Text('Pair Device'),
+            )
+          else if (simplified.isRetryable)
+            FilledButton.icon(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _initiateSend();
+              },
+              icon: const Icon(Icons.refresh_rounded, size: 16),
+              label: const Text('Retry Transfer'),
+            ),
+        ],
+      ),
+    );
   }
 
   void _showIncomingOfferDialog({
@@ -368,20 +770,29 @@ class _FilesScreenState extends State<FilesScreen> {
           children: [
             Icon(Icons.download, color: Colors.blueAccent),
             SizedBox(width: 8),
-            Text('Incoming File Transfer'),
+            Expanded(
+              child: Text('Incoming File Transfer', overflow: TextOverflow.ellipsis),
+            ),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('From: $senderPeer', style: const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text('File: $fileName${itemCount > 1 ? ' (and ${itemCount - 1} other files)' : ''}'),
-            Text('Size: ${(totalBytes / 1024).toStringAsFixed(1)} KB'),
-            const SizedBox(height: 12),
-            const Text('Do you want to accept this transfer and save to your received folder?'),
-          ],
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('From: $senderPeer',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 8),
+              Text(
+                'File: $fileName${itemCount > 1 ? ' (and ${itemCount - 1} other files)' : ''}',
+                overflow: TextOverflow.ellipsis,
+              ),
+              Text('Size: ${(totalBytes / 1024).toStringAsFixed(1)} KB'),
+              const SizedBox(height: 12),
+              const Text('Do you want to accept this transfer and save to your received folder?'),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -471,12 +882,58 @@ class _FilesScreenState extends State<FilesScreen> {
       return;
     }
 
-    final targetPeer = _targetPeerController.text.trim();
+    var targetPeer = _targetPeerController.text.trim();
     if (targetPeer.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please specify a target peer ID.')),
       );
       return;
+    }
+
+    // Auto-detect JSON pairing invitation pasted directly into target peer field
+    if (targetPeer.startsWith('{') && targetPeer.contains('"peerId"')) {
+      try {
+        final invitation = PairingInvitation.parse(targetPeer);
+        targetPeer = invitation.peerId;
+        _targetPeerController.text = targetPeer;
+
+        String? hintHost;
+        int hintPort = 8765;
+        if (invitation.connectionHints.isNotEmpty) {
+          final hint = invitation.connectionHints.first;
+          if (hint.contains(':')) {
+            final parts = hint.split(':');
+            hintHost = parts[0];
+            hintPort = int.tryParse(parts[1]) ?? 8765;
+          } else {
+            hintHost = hint;
+          }
+        }
+
+        DeviceTrustService.instance.pairDevice(
+          PairedDevice(
+            id: invitation.peerId,
+            name: invitation.name.isNotEmpty ? invitation.name : invitation.peerId,
+            deviceType: 'device',
+            fingerprint: invitation.fingerprint,
+            trustLevel: DeviceTrustLevel.trustedPeer,
+            isOnline: true,
+            lastSeen: 'Active now',
+          ),
+          host: hintHost,
+          port: hintPort,
+        );
+
+        if (PlatformCapabilities.isAndroid) {
+          await AndroidNodeBridge.instance.addTrustedPeer(
+            peerId: invitation.peerId,
+            fingerprint: invitation.fingerprint,
+            host: hintHost,
+            port: hintPort,
+            name: invitation.name,
+          );
+        }
+      } catch (_) {}
     }
 
     final paths = rawPaths
@@ -490,6 +947,12 @@ class _FilesScreenState extends State<FilesScreen> {
       _statusBanner = null;
     });
 
+    if (Platform.isAndroid) {
+      try {
+        await AndroidNodeBridge.instance.requestPermissions(['notifications', 'nearby']);
+      } catch (_) {}
+    }
+
     if (Platform.isAndroid || paths.any((p) => p.startsWith('content://'))) {
       try {
         final transferId = await AndroidNodeBridge.instance.initiateSend(
@@ -498,6 +961,7 @@ class _FilesScreenState extends State<FilesScreen> {
         );
         if (mounted) {
           if (transferId.isNotEmpty) {
+            DeviceTrustService.instance.recordSendRecipient(targetPeer);
             setState(() {
               _statusBanner = 'Transfer initiated: $transferId';
               _sourcePathsController.clear();
@@ -555,6 +1019,7 @@ class _FilesScreenState extends State<FilesScreen> {
 
       if (mounted) {
         if (res.accepted) {
+          DeviceTrustService.instance.recordSendRecipient(targetPeer);
           setState(() {
             _statusBanner = 'Transfer initiated: ${res.transferId}';
             _sourcePathsController.clear();
@@ -569,12 +1034,16 @@ class _FilesScreenState extends State<FilesScreen> {
           );
           _refreshTransfers();
         } else {
+          final simplified = ErrorMessageSimplifier.simplify(
+            res.errorMessage,
+            targetPeer: targetPeer,
+          );
           setState(() {
-            _statusBanner = 'Initiation rejected: ${res.errorMessage}';
+            _statusBanner = 'Send rejected: ${simplified.oneLineMessage}';
           });
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Send failed: ${res.errorMessage}'),
+              content: Text(simplified.oneLineMessage),
               backgroundColor: Colors.red.shade700,
             ),
           );
@@ -582,12 +1051,13 @@ class _FilesScreenState extends State<FilesScreen> {
       }
     } catch (e) {
       if (mounted) {
+        final simplified = ErrorMessageSimplifier.simplify(e.toString());
         setState(() {
-          _statusBanner = 'Transfer Error: $e';
+          _statusBanner = 'Transfer Error: ${simplified.oneLineMessage}';
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error initiating transfer: $e'),
+            content: Text(simplified.oneLineMessage),
             backgroundColor: Colors.red.shade700,
           ),
         );
@@ -602,6 +1072,25 @@ class _FilesScreenState extends State<FilesScreen> {
   }
 
   Future<void> _cancelTransfer(String transferId) async {
+    if (PlatformCapabilities.isAndroid || !_client.isAuthenticated) {
+      if (mounted) {
+        setState(() {
+          final existing = _transfers[transferId];
+          if (existing != null) {
+            existing.state = TransferState.TRANSFER_STATE_CANCELLED;
+          }
+        });
+        OperationJournalService.instance.updateState(
+          transferId,
+          JournalOperationState.cancelled,
+          note: 'Cancelled by user',
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Transfer $transferId cancelled')),
+        );
+      }
+      return;
+    }
     try {
       final res = await _client.cancelTransfer(transferId);
       if (mounted) {
@@ -688,6 +1177,22 @@ class _FilesScreenState extends State<FilesScreen> {
     }
   }
 
+  Future<void> _openFile(String path) async {
+    try {
+      if (Platform.isWindows) {
+        await Process.run('cmd', ['/c', 'start', '', path]);
+      } else if (Platform.isAndroid) {
+        await AndroidNodeBridge.instance.openFile(path);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open file: $e')),
+        );
+      }
+    }
+  }
+
   String _formatBytes(dynamic bytes) {
     final b = bytes is int
         ? bytes
@@ -739,11 +1244,39 @@ class _FilesScreenState extends State<FilesScreen> {
     final sortedTransfers = _transfers.values.toList().reversed.toList();
 
     return DefaultTabController(
-      length: 2,
+      length: 4,
+      initialIndex: widget.initialTabIndex,
       child: Scaffold(
+        backgroundColor: const Color(0xFFF7F8FA),
         appBar: AppBar(
-          title: const Text('Direct File Send & Transfers'),
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          title: const Text('Share & Transfers'),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.radar_rounded),
+              tooltip: 'Receive / Waiting Mode',
+              onPressed: () => _showReceiveModal(context),
+            ),
+            IconButton(
+              icon: const Icon(Icons.qr_code_2_rounded),
+              tooltip: 'Web Share Portal',
+              onPressed: () {
+                final selectedPaths = _selectedFiles
+                    .where((f) => f.selected)
+                    .map((f) => f.path)
+                    .toList();
+                final stagedPaths = FileStagingService.instance.stagedFiles
+                    .where((f) => f.selected)
+                    .map((f) => f.path)
+                    .toList();
+                WebBeamModal.showLive(
+                  context,
+                  initialPaths: selectedPaths.isNotEmpty ? selectedPaths : stagedPaths,
+                );
+              },
+            ),
             IconButton(
               icon: const Icon(Icons.refresh_rounded),
               tooltip: 'Refresh Transfers',
@@ -751,8 +1284,12 @@ class _FilesScreenState extends State<FilesScreen> {
             ),
           ],
           bottom: const TabBar(
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
             tabs: [
               Tab(icon: Icon(Icons.send_rounded), text: 'SEND'),
+              Tab(icon: Icon(Icons.folder_special_rounded), text: 'FILE MANAGER'),
+              Tab(icon: Icon(Icons.folder_shared_rounded), text: 'BROWSE PEER'),
               Tab(icon: Icon(Icons.history_rounded), text: 'ACTIVE & HISTORY'),
             ],
           ),
@@ -785,11 +1322,153 @@ class _FilesScreenState extends State<FilesScreen> {
               child: TabBarView(
                 children: [
                   _buildSendTab(theme),
+                  const ReceivedVaultView(),
+                  _buildBrowsePeerTab(theme),
                   _buildHistoryTab(theme, sortedTransfers),
                 ],
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  void _showReceiveModal(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final devices = DeviceTrustService.instance.devices;
+    final localFingerprint = DeviceTrustService.instance.getLocalFingerprint(
+      _localAndroidPeerId ?? _client.currentState.peerId ?? 'peer_local',
+    );
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) => SizedBox(
+        height: MediaQuery.of(ctx).size.height * 0.72,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12.0),
+          child: Column(
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white24 : Colors.black12,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Waiting to Receive',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Text(
+                'Your device is visible to senders on local network',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: StreamBuilder<List<DiscoveredPeer>>(
+                  stream: AndroidNodeBridge.instance.discoveredPeersStream,
+                  initialData: AndroidNodeBridge.instance.activeDiscoveredPeers,
+                  builder: (context, snapshot) {
+                    final livePeers = snapshot.data ?? [];
+                    final List<RadarPeerInfo> peerInfos;
+                    if (PlatformCapabilities.isAndroid) {
+                      peerInfos = livePeers.map((p) {
+                        final isTrusted = DeviceTrustService.instance.devices
+                            .any((d) => d.id == p.peerId);
+                        return RadarPeerInfo(
+                          id: p.peerId,
+                          name: p.name.isNotEmpty ? p.name : p.peerId,
+                          deviceType: p.technology.contains('WIFI_DIRECT') ? 'phone' : 'desktop',
+                          isTrusted: isTrusted,
+                          ip: p.host,
+                          technology: p.technology,
+                          routeCount: p.routes.isNotEmpty ? p.routes.length : 1,
+                        );
+                      }).toList();
+                    } else {
+                      peerInfos = devices.map((d) => RadarPeerInfo(
+                        id: d.id,
+                        name: d.name,
+                        deviceType: d.deviceType,
+                        isTrusted: d.trustLevel == DeviceTrustLevel.trustedPeer,
+                        ip: '127.0.0.1',
+                        technology: 'Configured',
+                        routeCount: 1,
+                      )).toList();
+                    }
+
+                    return RadarSonarView(
+                      localDeviceName: PlatformCapabilities.isAndroid ? 'Android Peer' : 'Desktop PC',
+                      discoveredPeers: peerInfos,
+                      onAddManualEndpoint: (ip, port, name) async {
+                        final peerId = 'manual_${ip.replaceAll('.', '_')}';
+                        final effectiveName = name.isNotEmpty ? name : 'Manual Endpoint ($ip)';
+                        DeviceTrustService.instance.pairDevice(
+                          PairedDevice(
+                            id: peerId,
+                            name: effectiveName,
+                            deviceType: 'Manual',
+                            fingerprint: DeviceTrustService.instance.getLocalFingerprint(peerId),
+                            trustLevel: DeviceTrustLevel.trustedPeer,
+                            isOnline: true,
+                            lastSeen: 'Direct IP Route ($ip:$port)',
+                          ),
+                        );
+                        if (PlatformCapabilities.isAndroid) {
+                          await AndroidNodeBridge.instance.addManualPeer(
+                            peerId: peerId,
+                            name: effectiveName,
+                            host: ip,
+                            port: port,
+                          );
+                          await AndroidNodeBridge.instance.addTrustedPeer(
+                            peerId: peerId,
+                            fingerprint: DeviceTrustService.instance.getLocalFingerprint(peerId),
+                            name: effectiveName,
+                            host: ip,
+                            port: port,
+                          );
+                        }
+                      },
+                      onPeerSelected: (peer) {
+                        Navigator.pop(ctx);
+                        setState(() {
+                          _targetPeerController.text = peer.id;
+                        });
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Connected with ${peer.name}'),
+                            backgroundColor: const Color(0xFF10B981),
+                          ),
+                        );
+                      },
+                      onQrScanPressed: () {
+                        QrPairingSheet.show(
+                          context,
+                          deviceName: PlatformCapabilities.isAndroid ? 'Android Peer' : 'Desktop PC',
+                          peerId: _localAndroidPeerId ?? _client.currentState.peerId ?? 'peer_local',
+                          fingerprint: _localAndroidFingerprint ?? localFingerprint,
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -882,9 +1561,28 @@ class _FilesScreenState extends State<FilesScreen> {
                       discoveredPeers: peerInfos,
                       onAddManualEndpoint: (ip, port, name) async {
                         final peerId = 'manual_${ip.replaceAll('.', '_')}';
+                        final effectiveName = name.isNotEmpty ? name : 'Manual Endpoint ($ip)';
+                        DeviceTrustService.instance.pairDevice(
+                          PairedDevice(
+                            id: peerId,
+                            name: effectiveName,
+                            deviceType: 'Manual',
+                            fingerprint: DeviceTrustService.instance.getLocalFingerprint(peerId),
+                            trustLevel: DeviceTrustLevel.trustedPeer,
+                            isOnline: true,
+                            lastSeen: 'Direct IP Route ($ip:$port)',
+                          ),
+                        );
                         await AndroidNodeBridge.instance.addManualPeer(
                           peerId: peerId,
-                          name: name,
+                          name: effectiveName,
+                          host: ip,
+                          port: port,
+                        );
+                        await AndroidNodeBridge.instance.addTrustedPeer(
+                          peerId: peerId,
+                          fingerprint: DeviceTrustService.instance.getLocalFingerprint(peerId),
+                          name: effectiveName,
                           host: ip,
                           port: port,
                         );
@@ -894,15 +1592,24 @@ class _FilesScreenState extends State<FilesScreen> {
                         setState(() {
                           _targetPeerController.text = peer.id;
                         });
-                        _initiateSend();
+                        if (_selectedFiles.any((f) => f.selected)) {
+                          _initiateSend();
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Target set to ${peer.name}. Choose files to send!'),
+                              backgroundColor: const Color(0xFF2563EB),
+                            ),
+                          );
+                        }
                       },
                       onQrScanPressed: () {
                         Navigator.pop(ctx);
                         QrPairingSheet.show(
                           context,
                           deviceName: Platform.isAndroid ? 'Android Peer' : 'This PC',
-                          peerId: _client.currentState.peerId ?? 'peer_node_local',
-                          fingerprint: 'ed25519:peerlink...node',
+                          peerId: _localAndroidPeerId ?? _client.currentState.peerId ?? 'peer_node_local',
+                          fingerprint: _localAndroidFingerprint ?? 'ed25519:peerlink...node',
                           onQrScanned: (payload) {
                             String scannedId = payload;
                             try {
@@ -923,6 +1630,149 @@ class _FilesScreenState extends State<FilesScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildInFlightCard(ThemeData theme, bool isDark, TransferProgress t) {
+    final totalBytes = t.totalBytes.toInt();
+    final transferredBytes = t.transferredBytes.toInt();
+    final double? progress = totalBytes > 0
+        ? (transferredBytes / totalBytes).clamp(0.0, 1.0)
+        : null;
+    final percent = progress != null ? (progress * 100).toInt() : 0;
+    final model = _activeProgressModels[t.transferId];
+    final rateStr = model?.formattedRate ??
+        (t.speedBps > 0
+            ? '${(t.speedBps.toInt() / (1024 * 1024)).toStringAsFixed(1)} MB/s'
+            : '');
+    final etaStr = model?.formattedEta ?? '';
+    final fileName = t.currentFile.isNotEmpty
+        ? t.currentFile.split(RegExp(r'[\\/]')).last
+        : 'In-Flight Transfer';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: const Color(0xFFE5E7EB),
+          width: 1.0,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2563EB).withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.sync_rounded,
+                  color: Color(0xFF2563EB),
+                  size: 16,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      fileName,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      t.transferId.length > 16
+                          ? '${t.transferId.substring(0, 16)}...'
+                          : t.transferId,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isDark ? Colors.white54 : Colors.black45,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Builder(
+                builder: (ctx) => TextButton.icon(
+                  onPressed: () {
+                    DefaultTabController.of(ctx).animateTo(1);
+                  },
+                  icon: const Icon(Icons.open_in_new_rounded, size: 14),
+                  label: const Text('History', style: TextStyle(fontSize: 12)),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 6,
+              backgroundColor: isDark ? Colors.white12 : Colors.black12,
+              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF2563EB)),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '${_formatBytes(transferredBytes)} / ${_formatBytes(totalBytes)} ($percent%)',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white70 : Colors.black87,
+                ),
+              ),
+              if (rateStr.isNotEmpty || etaStr.isNotEmpty)
+                Text(
+                  [if (rateStr.isNotEmpty) rateStr, if (etaStr.isNotEmpty) etaStr].join(' • '),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFF2563EB),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () => _cancelTransfer(t.transferId),
+              icon: const Icon(Icons.close_rounded, size: 14, color: Colors.redAccent),
+              label: const Text(
+                'Cancel Transfer',
+                style: TextStyle(fontSize: 12, color: Colors.redAccent),
+              ),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -984,126 +1834,229 @@ class _FilesScreenState extends State<FilesScreen> {
               ),
             ),
 
-          // Real File Action Bar (Windows Desktop & Android File Pickers)
+          // Real File Action Bar (Responsive across Desktop & Android)
           Container(
             width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
               color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
               border: Border(
                 bottom: BorderSide(
-                  color: isDark ? Colors.white10 : Colors.black12,
+                  color: isDark ? const Color(0xFF263248) : const Color(0xFFE2E8F0),
                 ),
               ),
             ),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              child: Row(
-                children: [
-                  FilledButton.tonalIcon(
-                    onPressed: _pickFiles,
-                    icon: const Icon(Icons.file_open_rounded, size: 18),
-                    label: const Text('Add Files...'),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                // Primary Action: Add Files
+                FilledButton.icon(
+                  onPressed: _pickFiles,
+                  icon: const Icon(Icons.file_open_rounded, size: 16),
+                  label: const Text('Add Files...', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  style: FilledButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   ),
-                  const SizedBox(width: 8),
-                  FilledButton.tonalIcon(
-                    onPressed: _pickSafFile,
-                    icon: const Icon(Icons.sd_storage_rounded, size: 18),
-                    label: const Text('Pick SAF File'),
+                ),
+                // Complementary Action: Folder
+                OutlinedButton.icon(
+                  onPressed: _pickFolder,
+                  icon: const Icon(Icons.create_new_folder_outlined, size: 16),
+                  label: const Text('Add Folder...', style: TextStyle(fontSize: 12)),
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   ),
-                  const SizedBox(width: 8),
-                  FilledButton.icon(
-                    onPressed: _openMediaCategorySheet,
-                    icon: const Icon(Icons.category_rounded, size: 18),
-                    label: const Text('Categories...'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF8B5CF6),
-                      foregroundColor: Colors.white,
+                ),
+                // Complementary Action: Categories
+                OutlinedButton.icon(
+                  onPressed: _openMediaCategorySheet,
+                  icon: const Icon(Icons.category_rounded, size: 16),
+                  label: const Text('Categories...', style: TextStyle(fontSize: 12)),
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                ),
+                // Android SAF Document Selector
+                OutlinedButton.icon(
+                  onPressed: _pickSafFile,
+                  icon: const Icon(Icons.document_scanner_outlined, size: 16),
+                  label: const Text('Pick SAF File', style: TextStyle(fontSize: 12)),
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                ),
+                // Quick Text / Link
+                OutlinedButton.icon(
+                  onPressed: () => QuickTextShareModal.show(context),
+                  icon: const Icon(Icons.short_text_rounded, size: 16),
+                  label: const Text('Text / Link...', style: TextStyle(fontSize: 12)),
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                ),
+                // Paste from Clipboard
+                OutlinedButton.icon(
+                  onPressed: () => _handlePasteToSend(context),
+                  icon: const Icon(Icons.paste_rounded, size: 16),
+                  label: const Text('Paste', style: TextStyle(fontSize: 12)),
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                ),
+                if (_selectedFiles.isNotEmpty)
+                  TextButton.icon(
+                    onPressed: _clearSelectedFiles,
+                    icon: const Icon(Icons.clear_all_rounded, size: 16),
+                    label: const Text('Clear', style: TextStyle(fontSize: 12)),
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      foregroundColor: const Color(0xFFEF4444),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  FilledButton.tonalIcon(
-                    onPressed: _pickFolder,
-                    icon: const Icon(Icons.create_new_folder_rounded, size: 18),
-                    label: const Text('Add Folder...'),
-                  ),
-                  if (_selectedFiles.isNotEmpty) ...[
-                    const SizedBox(width: 12),
-                    TextButton.icon(
-                      onPressed: _clearSelectedFiles,
-                      icon: const Icon(Icons.clear_all_rounded, size: 18),
-                      label: const Text('Clear'),
-                    ),
-                  ],
-                ],
-              ),
+              ],
             ),
           ),
 
           // Discovered Recipients Quick-Send Shelf (Feature A: 2-tap sharing)
-          StreamBuilder<List<DiscoveredPeer>>(
-            stream: AndroidNodeBridge.instance.discoveredPeersStream,
-            initialData: AndroidNodeBridge.instance.activeDiscoveredPeers,
-            builder: (context, snapshot) {
-              final peers = snapshot.data ?? [];
-              if (peers.isEmpty) return const SizedBox.shrink();
-              return Container(
-                width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
-                  border: Border(
-                    bottom: BorderSide(
-                      color: isDark ? Colors.white10 : Colors.black12,
-                    ),
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Nearby Recipients (Tap to Send)',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
-                    ),
-                    const SizedBox(height: 6),
-                    SizedBox(
-                      height: 48,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: peers.length,
-                        separatorBuilder: (_, __) => const SizedBox(width: 8),
-                        itemBuilder: (context, index) {
-                          final p = peers[index];
-                          final isTrusted = DeviceTrustService.instance.devices.any((d) => d.id == p.peerId);
-                          return ActionChip(
-                            avatar: CircleAvatar(
-                              radius: 12,
-                              backgroundColor: isTrusted ? const Color(0xFF10B981) : const Color(0xFF2563EB),
-                              child: Icon(
-                                p.technology.contains('WIFI_DIRECT') ? Icons.phone_android_rounded : Icons.laptop_rounded,
-                                size: 14,
-                                color: Colors.white,
-                              ),
-                            ),
-                            label: Text(p.name.isNotEmpty ? p.name : p.peerId),
-                            onPressed: () {
-                              setState(() {
-                                _targetPeerController.text = p.peerId;
-                              });
-                              if (_selectedFiles.any((f) => f.selected)) {
-                                _initiateSend();
-                              } else {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Recipient set to ${p.name.isNotEmpty ? p.name : p.peerId}. Choose files to send!')),
-                                );
-                              }
-                            },
-                          );
-                        },
+          StreamBuilder<List<PairedDevice>>(
+            stream: DeviceTrustService.instance.devicesStream,
+            initialData: DeviceTrustService.instance.devices,
+            builder: (context, pairedSnapshot) {
+              return StreamBuilder<List<DiscoveredPeer>>(
+                stream: AndroidNodeBridge.instance.discoveredPeersStream,
+                initialData: AndroidNodeBridge.instance.activeDiscoveredPeers,
+                builder: (context, snapshot) {
+                  final paired = pairedSnapshot.data ?? DeviceTrustService.instance.devices;
+                  final discovered = snapshot.data ?? [];
+
+                  // Combine paired and discovered without duplicates
+                  final allRecipients = <Map<String, dynamic>>[];
+                  final seenIds = <String>{};
+
+                  for (final d in paired) {
+                    seenIds.add(d.id);
+                    allRecipients.add({
+                      'id': d.id,
+                      'name': d.name,
+                      'isPaired': true,
+                      'isPhone': d.deviceType.toLowerCase().contains('phone'),
+                    });
+                  }
+
+                  for (final p in discovered) {
+                    if (!seenIds.contains(p.peerId)) {
+                      seenIds.add(p.peerId);
+                      allRecipients.add({
+                        'id': p.peerId,
+                        'name': p.name.isNotEmpty ? p.name : p.peerId,
+                        'isPaired': false,
+                        'isPhone': p.technology.contains('WIFI_DIRECT'),
+                      });
+                    }
+                  }
+
+                  if (allRecipients.isEmpty) {
+                    return const SizedBox.shrink();
+                  }
+
+                  return Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                      border: Border(
+                        bottom: BorderSide(
+                          color: isDark ? Colors.white10 : Colors.black12,
+                        ),
                       ),
                     ),
-                  ],
-                ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              'Select Recipient (${allRecipients.length} available)',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: theme.colorScheme.primary,
+                              ),
+                            ),
+                            const Spacer(),
+                            GestureDetector(
+                              onTap: _openRadarPicker,
+                              child: Text(
+                                '+ Pair New (QR)',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: theme.colorScheme.primary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        SizedBox(
+                          height: 40,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: allRecipients.length,
+                            separatorBuilder: (_, __) => const SizedBox(width: 8),
+                            itemBuilder: (context, index) {
+                              final item = allRecipients[index];
+                              final id = item['id'] as String;
+                              final name = item['name'] as String;
+                              final isPaired = item['isPaired'] as bool;
+                              final isPhone = item['isPhone'] as bool;
+                              final isSelected = _targetPeerController.text == id;
+
+                              return FilterChip(
+                                selected: isSelected,
+                                selectedColor: const Color(0xFF2563EB).withValues(alpha: 0.2),
+                                checkmarkColor: const Color(0xFF2563EB),
+                                avatar: CircleAvatar(
+                                  radius: 10,
+                                  backgroundColor: isPaired ? const Color(0xFF10B981) : const Color(0xFF3B82F6),
+                                  child: Icon(
+                                    isPhone ? Icons.phone_android_rounded : Icons.laptop_rounded,
+                                    size: 12,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                label: Text(
+                                  name,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                    color: isSelected ? const Color(0xFF2563EB) : null,
+                                  ),
+                                ),
+                                onSelected: (_) {
+                                  setState(() {
+                                    _targetPeerController.text = id;
+                                  });
+                                  if (_selectedFiles.any((f) => f.selected)) {
+                                    _initiateSend();
+                                  }
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               );
             },
           ),
@@ -1113,6 +2066,78 @@ class _FilesScreenState extends State<FilesScreen> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 80),
               children: [
+                // Active Recipient Status & Selector Bar (Mobile / Android)
+                if (PlatformCapabilities.isAndroid)
+                  Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isDark ? Colors.white10 : Colors.black12,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _targetPeerController.text.isNotEmpty
+                            ? Icons.verified_user_rounded
+                            : Icons.person_search_rounded,
+                        size: 18,
+                        color: _targetPeerController.text.isNotEmpty
+                            ? const Color(0xFF10B981)
+                            : const Color(0xFF64748B),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _targetPeerController.text.isNotEmpty
+                              ? 'Target Peer: ${_targetPeerController.text}'
+                              : 'No recipient selected (Choose below or tap Radar)',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: _targetPeerController.text.isNotEmpty
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                            color: _targetPeerController.text.isNotEmpty
+                                ? (isDark ? Colors.white : Colors.black87)
+                                : (isDark ? Colors.white60 : Colors.black54),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (_targetPeerController.text.isNotEmpty)
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 16),
+                          tooltip: 'Clear Target Peer',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () {
+                            setState(() {
+                              _targetPeerController.clear();
+                            });
+                          },
+                        ),
+                      TextButton.icon(
+                        onPressed: _openRadarPicker,
+                        icon: const Icon(Icons.radar_rounded, size: 14),
+                        label: Text(
+                          _targetPeerController.text.isNotEmpty ? 'Change' : 'Select',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // Active In-Flight Transfers Section (Real-Time Progress)
+                ..._transfers.values
+                    .where((t) => t.state == TransferState.TRANSFER_STATE_TRANSFERRING)
+                    .map((t) => _buildInFlightCard(theme, isDark, t)),
                 if (_selectedFiles.isEmpty)
                   Container(
                     margin: const EdgeInsets.symmetric(vertical: 24),
@@ -1141,7 +2166,9 @@ class _FilesScreenState extends State<FilesScreen> {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'Drag & drop files from Windows File Explorer here, or click "Add Files..." above.',
+                          PlatformCapabilities.isAndroid
+                              ? 'Tap "Add Files...", "Pick SAF File", or "Categories..." above to choose files to send.'
+                              : 'Drag & drop files from Windows File Explorer here, or click "Add Files..." above.',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontSize: 12,
@@ -1156,7 +2183,7 @@ class _FilesScreenState extends State<FilesScreen> {
                     final isSelected = file.selected;
                     final fileColor = file.isDirectory ? Colors.amber : const Color(0xFF2563EB);
                     return InteractiveGlassCard(
-                      glowColor: fileColor,
+                      glowColor: null, // Minimal, clean, non-glowing
                       isSelected: isSelected,
                       borderRadius: BorderRadius.circular(18),
                       margin: const EdgeInsets.only(bottom: 10),
@@ -1199,7 +2226,7 @@ class _FilesScreenState extends State<FilesScreen> {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  file.isDirectory ? 'Folder' : _formatBytes(file.sizeBytes),
+                                  file.formattedSize,
                                   style: TextStyle(
                                     fontSize: 11,
                                     color: isDark ? Colors.white54 : Colors.black54,
@@ -1225,6 +2252,7 @@ class _FilesScreenState extends State<FilesScreen> {
                             icon: const Icon(Icons.close_rounded, size: 18),
                             tooltip: 'Remove file',
                             onPressed: () {
+                              FileStagingService.instance.removePath(file.path);
                               setState(() {
                                 _selectedFiles.remove(file);
                                 _syncController();
@@ -1327,85 +2355,103 @@ class _FilesScreenState extends State<FilesScreen> {
           ),
 
         // Sticky Bottom Batch Action Pill (AirDrop / Quick Share inspired)
-        AnimatedSlide(
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOutCubic,
-          offset: selectedCount > 0 ? Offset.zero : const Offset(0, 0.2),
-          child: AnimatedOpacity(
-            duration: const Duration(milliseconds: 200),
-            opacity: selectedCount > 0 ? 1.0 : 0.6,
+        if (selectedCount > 0)
+          AnimatedSlide(
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOutCubic,
+            offset: Offset.zero,
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 200),
+              opacity: 1.0,
             child: GlassContainer(
-              glowColor: const Color(0xFF2563EB),
+              glowColor: null, // Minimal, clean, zero-glow
               borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          '$selectedCount item(s) selected',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final isCompact = constraints.maxWidth < 380;
+                  return Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              isCompact ? '$selectedCount items' : '$selectedCount item(s) selected',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              _formatBytes(selectedBytes),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: isDark ? Colors.white60 : Colors.black54,
+                              ),
+                            ),
+                          ],
                         ),
-                        Text(
-                          _formatBytes(selectedBytes),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: isDark ? Colors.white60 : Colors.black54,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () async {
-                      final policy = await EphemeralPolicyModal.show(
-                        context,
-                        initialPolicy: _currentPolicy,
-                      );
-                      if (policy != null) {
-                        setState(() => _currentPolicy = policy);
-                      }
-                    },
-                    icon: Icon(
-                      Icons.local_fire_department_rounded,
-                      color: _currentPolicy.isEphemeral
-                          ? const Color(0xFFEF4444)
-                          : Colors.white54,
-                    ),
-                    tooltip: _currentPolicy.isEphemeral
-                        ? 'Ephemeral Mode Active (${_currentPolicy.burnAfterRead ? "1-View" : "${_currentPolicy.ttlSeconds}s TTL"})'
-                        : 'Configure Burn-After-Read Ephemeral Policy',
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton.icon(
-                    onPressed: selectedCount > 0 ? _openRadarPicker : null,
-                    icon: Icon(
-                      _currentPolicy.isEphemeral
-                          ? Icons.local_fire_department_rounded
-                          : Icons.radar_rounded,
-                      size: 18,
-                    ),
-                    label: Text(_currentPolicy.isEphemeral
-                        ? 'Burn Beam (1-Tap)'
-                        : 'Send via Radar (1-Tap)'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _currentPolicy.isEphemeral
-                          ? const Color(0xFFEF4444)
-                          : const Color(0xFF2563EB),
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
                       ),
-                    ),
-                  ),
-                ],
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () async {
+                          final policy = await EphemeralPolicyModal.show(
+                            context,
+                            initialPolicy: _currentPolicy,
+                          );
+                          if (policy != null) {
+                            setState(() => _currentPolicy = policy);
+                          }
+                        },
+                        icon: Icon(
+                          Icons.local_fire_department_rounded,
+                          color: _currentPolicy.isEphemeral
+                              ? const Color(0xFFEF4444)
+                              : (isDark ? Colors.white60 : Colors.black54),
+                        ),
+                        tooltip: _currentPolicy.isEphemeral
+                            ? 'Ephemeral Mode Active (${_currentPolicy.burnAfterRead ? "1-View" : "${_currentPolicy.ttlSeconds}s TTL"})'
+                            : 'Configure Burn-After-Read Ephemeral Policy',
+                      ),
+                      const SizedBox(width: 6),
+                      FilledButton.icon(
+                        onPressed: selectedCount > 0
+                            ? (_targetPeerController.text.isNotEmpty
+                                ? _initiateSend
+                                : _openRadarPicker)
+                            : null,
+                        icon: Icon(
+                          _currentPolicy.isEphemeral
+                              ? Icons.local_fire_department_rounded
+                              : (_targetPeerController.text.isNotEmpty
+                                  ? Icons.send_rounded
+                                  : Icons.radar_rounded),
+                          size: 16,
+                        ),
+                        label: Text(
+                          isCompact
+                              ? (_currentPolicy.isEphemeral ? 'Burn' : (_targetPeerController.text.isNotEmpty ? 'Send' : 'Radar'))
+                              : (_currentPolicy.isEphemeral ? 'Burn Beam' : (_targetPeerController.text.isNotEmpty ? 'Send to Recipient' : 'Send via Radar')),
+                        ),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: _currentPolicy.isEphemeral
+                              ? const Color(0xFFEF4444)
+                              : const Color(0xFF2563EB),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: isCompact ? 12 : 18,
+                            vertical: 10,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
           ),
@@ -1866,6 +2912,16 @@ class _FilesScreenState extends State<FilesScreen> {
                 ],
                 if (isCompleted && t.destinationPath.isNotEmpty) ...[
                   const SizedBox(width: 8),
+                  FilledButton.icon(
+                    onPressed: () => _openFile(t.destinationPath),
+                    icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                    label: const Text('Open File'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF10B981),
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   FilledButton.tonalIcon(
                     onPressed: () => _revealInFolder(t.destinationPath),
                     icon: const Icon(Icons.folder_open_rounded, size: 18),
@@ -1900,6 +2956,185 @@ class _FilesScreenState extends State<FilesScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildBrowsePeerTab(ThemeData theme) {
+    return StreamBuilder<List<PairedDevice>>(
+      stream: DeviceTrustService.instance.devicesStream,
+      initialData: DeviceTrustService.instance.devices,
+      builder: (context, snapshot) {
+        final devices = snapshot.data ?? [];
+
+        return ListView(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+          children: [
+            // ACCESS Mode Explanation Glass Container
+            GlassContainer(
+              glowColor: const Color(0xFF2563EB),
+              borderRadius: BorderRadius.circular(18),
+              padding: const EdgeInsets.all(16.0),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2563EB).withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.folder_shared_rounded,
+                        color: Color(0xFF2563EB), size: 22),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Remote Scoped Explorer (ACCESS Mode)',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'Browse and download shared files directly from your paired devices without transferring entire folders. Completely private and sandboxed.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Devices Section Header
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Online & Paired Peers (${devices.length})',
+                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            if (devices.isEmpty)
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: theme.dividerColor.withValues(alpha: 0.1)),
+                ),
+                child: Column(
+                  children: [
+                    Icon(Icons.devices_rounded, size: 40, color: theme.disabledColor),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'No Paired Devices',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Pair your phone, laptop, or desktop in the Devices tab to browse its shared folders here.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              )
+            else
+              ...devices.map((dev) {
+                final isGuest = dev.trustLevel == DeviceTrustLevel.temporaryGuest;
+                final glow = isGuest ? const Color(0xFFF59E0B) : const Color(0xFF10B981);
+
+                return InteractiveGlassCard(
+                  glowColor: glow,
+                  margin: const EdgeInsets.only(bottom: 10),
+                  borderRadius: BorderRadius.circular(16),
+                  padding: const EdgeInsets.all(14),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: glow.withValues(alpha: 0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          dev.deviceType.toLowerCase().contains('phone')
+                              ? Icons.smartphone_rounded
+                              : Icons.laptop_rounded,
+                          color: glow,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    dev.name,
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                  decoration: BoxDecoration(
+                                    color: glow.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    dev.isOnline ? 'Online' : 'Offline',
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold,
+                                      color: glow,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'ID: ${dev.id}',
+                              style: const TextStyle(fontSize: 11, color: Colors.grey),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      FilledButton.icon(
+                        onPressed: dev.isOnline
+                            ? () => RemoteScopedBrowserSheet.show(context, dev)
+                            : null,
+                        icon: const Icon(Icons.folder_shared_rounded, size: 15),
+                        label: const Text('Browse Files'),
+                        style: FilledButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          backgroundColor: const Color(0xFF2563EB),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+          ],
+        );
+      },
     );
   }
 }

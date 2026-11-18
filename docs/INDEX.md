@@ -22,8 +22,7 @@
 ## Development
 
 - `development/DEVELOPMENT-ENVIRONMENT.md` — local and multi-device lab.
-- `development/PHASE-WISE-PLAN.md` — complete implementation order.
-- `development/PHASE-GATES.md` — phase entry/exit rules.
+- `PHASES.md` — complete unified phase architecture, implementation & verification log.
 - `development/DEFINITION-OF-DONE.md` — feature completion standard.
 - `development/AI-AGENT-WORKFLOW.md` — Antigravity/Gemini workflow.
 - `development/IMPLEMENTATION-CHECKLIST.md` — master implementation checklist.

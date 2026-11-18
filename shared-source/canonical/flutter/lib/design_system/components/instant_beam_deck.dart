@@ -89,7 +89,7 @@ class _InstantBeamDeckState extends State<InstantBeamDeck>
     final isDark = theme.brightness == Brightness.dark;
 
     return GlassContainer(
-      glowColor: const Color(0xFF2563EB), // Subtle blue aura
+      glowColor: null, // Minimal, clean, non-glowing
       padding: const EdgeInsets.all(18),
       borderRadius: BorderRadius.circular(24),
       child: Column(
@@ -112,13 +112,10 @@ class _InstantBeamDeckState extends State<InstantBeamDeck>
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: const Color(0xFF10B981),
-                            boxShadow: [
-                              BoxShadow(
-                                color: const Color(0xFF10B981).withValues(alpha: 0.6),
-                                blurRadius: 8,
-                                spreadRadius: 1,
-                              ),
-                            ],
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.3),
+                              width: 1.0,
+                            ),
                           ),
                         ),
                       );
@@ -281,24 +278,15 @@ class _InstantBeamDeckState extends State<InstantBeamDeck>
                         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                         decoration: BoxDecoration(
                           color: isSelected
-                              ? const Color(0xFF2563EB).withValues(alpha: 0.16)
-                              : (isDark ? Colors.white.withValues(alpha: 0.05) : Colors.white),
-                          borderRadius: BorderRadius.circular(18),
+                              ? const Color(0xFFEFF6FF)
+                              : Colors.white,
+                          borderRadius: BorderRadius.circular(14),
                           border: Border.all(
                             color: isSelected
                                 ? const Color(0xFF2563EB)
-                                : (isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.08)),
-                            width: isSelected ? 1.8 : 1.0,
+                                : const Color(0xFFE5E7EB),
+                            width: isSelected ? 1.5 : 1.0,
                           ),
-                          boxShadow: isSelected
-                              ? [
-                                  BoxShadow(
-                                    color: const Color(0xFF2563EB).withValues(alpha: 0.25),
-                                    blurRadius: 12,
-                                    offset: const Offset(0, 4),
-                                  ),
-                                ]
-                              : null,
                         ),
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
@@ -308,36 +296,18 @@ class _InstantBeamDeckState extends State<InstantBeamDeck>
                               clipBehavior: Clip.none,
                               children: [
                                 Container(
-                                  width: 48,
-                                  height: 48,
+                                  width: 46,
+                                  height: 46,
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                      colors: peer.isPaired
-                                          ? [
-                                              const Color(0xFF2563EB),
-                                              const Color(0xFF3B82F6),
-                                            ]
-                                          : [
-                                              const Color(0xFF64748B),
-                                              const Color(0xFF475569),
-                                            ],
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: (peer.isPaired ? const Color(0xFF2563EB) : Colors.black)
-                                            .withValues(alpha: 0.25),
-                                        blurRadius: 8,
-                                        offset: const Offset(0, 4),
-                                      ),
-                                    ],
+                                    color: peer.isPaired
+                                        ? const Color(0xFF2563EB)
+                                        : const Color(0xFF64748B),
                                   ),
                                   child: Icon(
                                     _getDeviceIcon(peer.deviceType),
                                     color: Colors.white,
-                                    size: 24,
+                                    size: 22,
                                   ),
                                 ),
                                 // Paired / Verified Badge
@@ -347,10 +317,10 @@ class _InstantBeamDeckState extends State<InstantBeamDeck>
                                   child: Container(
                                     padding: const EdgeInsets.all(2.5),
                                     decoration: BoxDecoration(
-                                      color: peer.isPaired ? const Color(0xFF10B981) : Colors.amber.shade700,
+                                      color: peer.isPaired ? const Color(0xFF15803D) : const Color(0xFFD97706),
                                       shape: BoxShape.circle,
                                       border: Border.all(
-                                        color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                                        color: Colors.white,
                                         width: 1.5,
                                       ),
                                     ),

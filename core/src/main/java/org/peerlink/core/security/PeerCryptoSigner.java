@@ -28,9 +28,15 @@ public class PeerCryptoSigner {
 
     public static PeerCryptoSigner generate(String keyId) {
         try {
-            KeyPairGenerator kpg = KeyPairGenerator.getInstance(ALGORITHM);
+            KeyPairGenerator kpg;
+            try {
+                kpg = KeyPairGenerator.getInstance(ALGORITHM);
+            } catch (NoSuchAlgorithmException e) {
+                // If default JVM provider lacks Ed25519 (e.g. Android Conscrypt/ART), fallback to BouncyCastle
+                kpg = KeyPairGenerator.getInstance(ALGORITHM, "BC");
+            }
             return new PeerCryptoSigner(kpg.generateKeyPair(), keyId);
-        } catch (NoSuchAlgorithmException e) {
+        } catch (Exception e) {
             throw new IllegalStateException("JVM environment does not support Ed25519", e);
         }
     }
@@ -40,7 +46,12 @@ public class PeerCryptoSigner {
      */
     public static PeerCryptoSigner fromPrivateKeyBytes(String keyId, byte[] privateKeyBytes, byte[] publicKeyBytes) {
         try {
-            KeyFactory kf = KeyFactory.getInstance(ALGORITHM);
+            KeyFactory kf;
+            try {
+                kf = KeyFactory.getInstance(ALGORITHM);
+            } catch (NoSuchAlgorithmException e) {
+                kf = KeyFactory.getInstance(ALGORITHM, "BC");
+            }
             PrivateKey priv = kf.generatePrivate(new PKCS8EncodedKeySpec(privateKeyBytes));
             PublicKey pub = kf.generatePublic(new X509EncodedKeySpec(publicKeyBytes));
             return new PeerCryptoSigner(new KeyPair(pub, priv), keyId);

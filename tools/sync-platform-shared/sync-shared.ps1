@@ -1,7 +1,7 @@
 # PeerLink Platform Shared-Source Synchronization Tool (PowerShell)
 param(
     [switch]$DryRun = $false,
-    [string[]]$Platforms = @("windows", "linux", "macos", "android"),
+    [string[]]$Platforms = @("windows", "android"),
     [string]$CanonicalDir = "shared-source/canonical",
     [switch]$VerboseOutput = $false
 )

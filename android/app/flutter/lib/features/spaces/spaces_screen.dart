@@ -1,23 +1,49 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../core/sync_backup_service.dart';
 import '../../core/device_trust_service.dart';
-import '../../design_system/components/glass_container.dart';
-import '../../design_system/components/interactive_glass_card.dart';
+import '../../platform/android_node_bridge.dart';
+import '../../platform/windows_file_dialog.dart';
 
 export '../../core/sync_backup_service.dart'
     show SyncMode, SyncStatus, SyncSpace, BackupSnapshot, SyncDryRunDiff;
 
 class SpacesScreen extends StatefulWidget {
-  const SpacesScreen({super.key});
+  final void Function(int targetTabIndex)? onNavigate;
+  const SpacesScreen({super.key, this.onNavigate});
 
   @override
   State<SpacesScreen> createState() => _SpacesScreenState();
 }
 
 class _SpacesScreenState extends State<SpacesScreen> {
-  void _showAddSpaceDialog() {
-    final nameController = TextEditingController();
-    final pathController = TextEditingController();
+  @override
+  void initState() {
+    super.initState();
+    SyncBackupService.instance.loadPersistedSpaces().then((_) {
+      if (mounted) {
+        SyncBackupService.instance.startBackgroundWatcher();
+      }
+    });
+  }
+
+  Future<String?> _pickFolder() async {
+    if (Platform.isAndroid) {
+      return await AndroidNodeBridge.instance.pickDirectoryUri();
+    } else if (Platform.isWindows) {
+      return await WindowsFileDialog.pickDirectory();
+    }
+    return null;
+  }
+
+  void _showAddSpaceDialog() async {
+    final suggestedSpaceId = 'space_${DateTime.now().millisecondsSinceEpoch}';
+    final defaultPath = await SyncBackupService.instance.allocateDefaultSpacePath(suggestedSpaceId);
+    if (!mounted) return;
+
+    final nameController = TextEditingController(text: 'My Space');
+    final pathController = TextEditingController(text: defaultPath);
     SyncMode selectedMode = SyncMode.twoWaySync;
     final devices = DeviceTrustService.instance.devices;
     String selectedPeerId = devices.isNotEmpty ? devices.first.id : 'peer_local_network';
@@ -30,7 +56,12 @@ class _SpacesScreenState extends State<SpacesScreen> {
             children: [
               Icon(Icons.folder_shared_rounded, color: Colors.amber),
               SizedBox(width: 8),
-              Text('Configure New Sync Space'),
+              Expanded(
+                child: Text(
+                  'Configure Sync Space',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
             ],
           ),
           content: SingleChildScrollView(
@@ -39,7 +70,7 @@ class _SpacesScreenState extends State<SpacesScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Synchronize a local folder across trusted peers with causal versioning and mass-change protection.',
+                  'Synchronize a local folder across trusted peers with causal versioning and safety circuit breakers.',
                   style: TextStyle(fontSize: 12),
                 ),
                 const SizedBox(height: 14),
@@ -52,33 +83,82 @@ class _SpacesScreenState extends State<SpacesScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                TextField(
-                  controller: pathController,
-                  decoration: const InputDecoration(
-                    labelText: 'Local Folder Path',
-                    hintText: 'e.g. C:\\PeerLinkSync\\Folder',
-                    border: OutlineInputBorder(),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Theme.of(context).dividerColor.withValues(alpha: 0.2)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Expanded(
+                            child: Row(
+                              children: [
+                                Icon(Icons.folder_outlined, size: 16, color: Colors.amber),
+                                SizedBox(width: 6),
+                                Expanded(
+                                  child: Text('Folder Location:',
+                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          TextButton.icon(
+                            style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                            ),
+                            icon: const Icon(Icons.folder_open_rounded, size: 14),
+                            label: const Text('Change', style: TextStyle(fontSize: 12)),
+                            onPressed: () async {
+                              final picked = await _pickFolder();
+                              if (picked != null && picked.isNotEmpty) {
+                                setDialogState(() {
+                                  pathController.text = picked;
+                                });
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        pathController.text,
+                        style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Colors.grey),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 14),
-                const Text('Sync Reconciler Mode:',
+                const Text('Sync Mode:',
                     style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
                 DropdownButtonFormField<SyncMode>(
                   initialValue: selectedMode,
+                  isExpanded: true,
                   decoration: const InputDecoration(border: OutlineInputBorder()),
                   items: const [
                     DropdownMenuItem(
                       value: SyncMode.twoWaySync,
-                      child: Text('Two-Way Bidirectional Sync'),
+                      child: Text('Two-Way Bidirectional Sync', overflow: TextOverflow.ellipsis),
                     ),
                     DropdownMenuItem(
                       value: SyncMode.oneWayPush,
-                      child: Text('One-Way Push (Send Only)'),
+                      child: Text('One-Way Push (Send Only)', overflow: TextOverflow.ellipsis),
                     ),
                     DropdownMenuItem(
                       value: SyncMode.oneWayMirror,
-                      child: Text('One-Way Mirror (Replica)'),
+                      child: Text('One-Way Mirror (Replica)', overflow: TextOverflow.ellipsis),
                     ),
                   ],
                   onChanged: (val) {
@@ -87,6 +167,26 @@ class _SpacesScreenState extends State<SpacesScreen> {
                     }
                   },
                 ),
+                if (devices.length > 1) ...[
+                  const SizedBox(height: 12),
+                  const Text('Target Peer:',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedPeerId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(border: OutlineInputBorder()),
+                    items: devices.map((d) => DropdownMenuItem(
+                      value: d.id,
+                      child: Text('${d.name} (${d.id.length > 12 ? "${d.id.substring(0, 12)}..." : d.id})', overflow: TextOverflow.ellipsis),
+                    )).toList(),
+                    onChanged: (val) {
+                      if (val != null) {
+                        setDialogState(() => selectedPeerId = val);
+                      }
+                    },
+                  ),
+                ],
               ],
             ),
           ),
@@ -102,7 +202,7 @@ class _SpacesScreenState extends State<SpacesScreen> {
                 if (name.isNotEmpty && path.isNotEmpty) {
                   SyncBackupService.instance.addSpace(
                     SyncSpace(
-                      id: 'space_${DateTime.now().millisecondsSinceEpoch}',
+                      id: suggestedSpaceId,
                       name: name,
                       localPath: path,
                       remotePeerId: selectedPeerId,
@@ -144,10 +244,11 @@ class _SpacesScreenState extends State<SpacesScreen> {
         ),
         content: SizedBox(
           width: 500,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
@@ -196,6 +297,7 @@ class _SpacesScreenState extends State<SpacesScreen> {
             ],
           ),
         ),
+      ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -219,10 +321,11 @@ class _SpacesScreenState extends State<SpacesScreen> {
             Expanded(child: Text('Resolve Sync Conflict')),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
             const Text(
               'Conflicting edits detected on both devices while offline for:',
               style: TextStyle(fontSize: 13),
@@ -312,6 +415,7 @@ class _SpacesScreenState extends State<SpacesScreen> {
             ),
           ],
         ),
+      ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -333,10 +437,11 @@ class _SpacesScreenState extends State<SpacesScreen> {
             Expanded(child: Text('Mass-Change Circuit Breaker')),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
             const Text(
               'Mass-change protection was triggered to prevent accidental data loss!',
               style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
@@ -361,6 +466,7 @@ class _SpacesScreenState extends State<SpacesScreen> {
             ),
           ],
         ),
+      ),
         actions: [
           OutlinedButton(
             onPressed: () {
@@ -400,82 +506,167 @@ class _SpacesScreenState extends State<SpacesScreen> {
     );
   }
 
-  void _showCreateSnapshotDialog() {
-    final nameController = TextEditingController();
-    final pathController = TextEditingController();
+  void _showCreateSnapshotDialog() async {
+    final spaces = SyncBackupService.instance.spaces;
+    String defaultPath = '';
+    if (spaces.isNotEmpty) {
+      defaultPath = spaces.first.localPath;
+    } else if (Platform.isAndroid) {
+      final storage = await AndroidNodeBridge.instance.getAppStorageDirectory();
+      defaultPath = storage ?? Directory.systemTemp.path;
+    } else {
+      final home = Platform.environment['USERPROFILE'] ??
+          Platform.environment['HOME'] ??
+          Directory.systemTemp.path;
+      defaultPath = '$home/Documents';
+    }
+    if (!mounted) return;
+
+    final nameController = TextEditingController(
+      text: 'Snapshot ${DateTime.now().toLocal().toString().split(' ')[0]}',
+    );
+    final pathController = TextEditingController(text: defaultPath);
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.camera_alt_rounded, color: Color(0xFF7C3AED)),
-            SizedBox(width: 8),
-            Expanded(child: Text('Create Backup Snapshot')),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Generate an immutable point-in-time snapshot with SHA-256 Merkle root verification.',
-              style: TextStyle(fontSize: 12),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(
-                labelText: 'Snapshot Name',
-                hintText: 'e.g. Monthly Cold Backup',
-                border: OutlineInputBorder(),
+      builder: (ctx) => StatefulBuilder(
+        builder: (dialogCtx, setDialogState) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.camera_alt_rounded, color: Color(0xFF7C3AED)),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text('Create Backup Snapshot', overflow: TextOverflow.ellipsis),
               ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: pathController,
-              decoration: const InputDecoration(
-                labelText: 'Source Directory',
-                hintText: 'e.g. C:\\Projects',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            ],
           ),
-          FilledButton(
-            onPressed: () async {
-              final name = nameController.text.trim();
-              final path = pathController.text.trim();
-              if (name.isNotEmpty && path.isNotEmpty) {
-                Navigator.pop(ctx);
-                final snap = await SyncBackupService.instance
-                    .createSnapshot(name: name, folderPath: path);
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                          'Snapshot "${snap.name}" created with Merkle root ${snap.rootHash.substring(0, 16)}...'),
-                      backgroundColor: const Color(0xFF10B981),
-                    ),
-                  );
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Generate an immutable point-in-time snapshot with SHA-256 Merkle root verification.',
+                  style: TextStyle(fontSize: 12),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Snapshot Name',
+                    hintText: 'e.g. Monthly Cold Backup',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Theme.of(dialogCtx).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Theme.of(dialogCtx).dividerColor.withValues(alpha: 0.2)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Expanded(
+                            child: Row(
+                              children: [
+                                Icon(Icons.folder_outlined, size: 16, color: Color(0xFF7C3AED)),
+                                SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    'Source Folder:',
+                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          TextButton.icon(
+                            style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                            ),
+                            icon: const Icon(Icons.folder_open_rounded, size: 14),
+                            label: const Text('Change', style: TextStyle(fontSize: 12)),
+                            onPressed: () async {
+                              final picked = await _pickFolder();
+                              if (picked != null && picked.isNotEmpty) {
+                                setDialogState(() {
+                                  pathController.text = picked;
+                                });
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        pathController.text,
+                        style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Colors.grey),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final name = nameController.text.trim();
+                final path = pathController.text.trim();
+                if (name.isNotEmpty && path.isNotEmpty) {
+                  Navigator.pop(ctx);
+                  final snap = await SyncBackupService.instance
+                      .createSnapshot(name: name, folderPath: path);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                            'Snapshot "${snap.name}" created with Merkle root ${snap.rootHash.length >= 16 ? snap.rootHash.substring(0, 16) : snap.rootHash}...'),
+                        backgroundColor: const Color(0xFF10B981),
+                      ),
+                    );
+                  }
                 }
-              }
-            },
-            child: const Text('Create Snapshot'),
-          ),
-        ],
+              },
+              child: const Text('Create Snapshot'),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  void _showRestoreDialog(BackupSnapshot snap) {
-    final destController = TextEditingController(
-        text: 'C:\\Users\\User\\Restored_Backups\\${snap.id}');
+  void _showRestoreDialog(BackupSnapshot snap) async {
+    String defaultDest;
+    if (Platform.isAndroid) {
+      final appStorage = await AndroidNodeBridge.instance.getAppStorageDirectory();
+      defaultDest = (appStorage != null && appStorage.isNotEmpty)
+          ? '$appStorage/PeerLink/Restores/${snap.id}'
+          : '${Directory.systemTemp.path}/PeerLink/Restores/${snap.id}';
+    } else {
+      final home = Platform.environment['USERPROFILE'] ??
+          Platform.environment['HOME'] ??
+          Directory.systemTemp.path;
+      defaultDest = '$home/PeerLink/Restores/${snap.id}';
+    }
+    if (!mounted) return;
+    final destController = TextEditingController(text: defaultDest);
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -484,44 +675,47 @@ class _SpacesScreenState extends State<SpacesScreen> {
             Icon(Icons.settings_backup_restore_rounded,
                 color: Colors.deepPurple),
             SizedBox(width: 8),
-            Expanded(child: Text('Restore Snapshot')),
+            Expanded(child: Text('Restore Snapshot', overflow: TextOverflow.ellipsis)),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-                'Restore "${snap.name}" (${snap.totalSize}, ${snap.fileCount} files)',
-                style: const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            const Text(
-              'Important: Restoring creates a new historical copy in your chosen folder. It NEVER overwrites or deletes past backup snapshots.',
-              style: TextStyle(fontSize: 12, color: Colors.black87),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: destController,
-              decoration: const InputDecoration(
-                labelText: 'Destination Folder',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.folder_rounded),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                  'Restore "${snap.name}" (${snap.totalSize}, ${snap.fileCount} files)',
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              const Text(
+                'Important: Restoring creates a new historical copy in your chosen folder. It NEVER overwrites or deletes past backup snapshots.',
+                style: TextStyle(fontSize: 12, color: Colors.black87),
               ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                const Icon(Icons.verified_outlined,
-                    size: 16, color: Colors.green),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text('Merkle Root: ${snap.rootHash}',
-                      style: const TextStyle(
-                          fontSize: 10, fontFamily: 'monospace')),
+              const SizedBox(height: 16),
+              TextField(
+                controller: destController,
+                decoration: const InputDecoration(
+                  labelText: 'Destination Folder',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.folder_rounded),
                 ),
-              ],
-            ),
-          ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  const Icon(Icons.verified_outlined,
+                      size: 16, color: Colors.green),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text('Merkle Root: ${snap.rootHash}',
+                        style: const TextStyle(
+                            fontSize: 10, fontFamily: 'monospace'),
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -577,15 +771,91 @@ class _SpacesScreenState extends State<SpacesScreen> {
     return DefaultTabController(
       length: 2,
       child: Scaffold(
+        backgroundColor: const Color(0xFFF7F8FA),
         appBar: AppBar(
-          title: const Text('Sync & Backup Spaces'),
-          bottom: const TabBar(
-            tabs: [
-              Tab(icon: Icon(Icons.sync_rounded), text: 'SYNC SPACES'),
-              Tab(
-                  icon: Icon(Icons.history_rounded),
-                  text: 'BACKUPS & SNAPSHOTS'),
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          title: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFDBEAFE)),
+                ),
+                child: const Icon(Icons.sync_rounded, size: 17, color: Color(0xFF2563EB)),
+              ),
+              const SizedBox(width: 10),
+              const Flexible(
+                child: Text(
+                  'Sync & Backup',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Color(0xFF0F172A),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 18,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+              ),
             ],
+          ),
+          leading: widget.onNavigate != null
+              ? IconButton(
+                  icon: const Icon(Icons.arrow_back_rounded, color: Color(0xFF334155)),
+                  tooltip: 'Back to Home',
+                  onPressed: () {
+                    HapticFeedback.selectionClick();
+                    widget.onNavigate!(0);
+                  },
+                )
+              : null,
+          bottom: const PreferredSize(
+            preferredSize: Size.fromHeight(49),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TabBar(
+                  labelColor: Color(0xFF2563EB),
+                  unselectedLabelColor: Color(0xFF64748B),
+                  indicatorColor: Color(0xFF2563EB),
+                  indicatorWeight: 2.5,
+                  labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 0.3),
+                  unselectedLabelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                  tabs: [
+                    Tab(
+                      height: 48,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.folder_copy_outlined, size: 16),
+                          SizedBox(width: 6),
+                          Flexible(child: Text('SYNC SPACES', overflow: TextOverflow.ellipsis)),
+                        ],
+                      ),
+                    ),
+                    Tab(
+                      height: 48,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.inventory_2_outlined, size: 16),
+                          SizedBox(width: 6),
+                          Flexible(child: Text('BACKUPS', overflow: TextOverflow.ellipsis)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                Divider(height: 1, thickness: 1, color: Color(0xFFE5E7EB)),
+              ],
+            ),
           ),
         ),
         body: TabBarView(
@@ -598,6 +868,35 @@ class _SpacesScreenState extends State<SpacesScreen> {
     );
   }
 
+  ({IconData icon, Color color, Color bg, Color border, String label}) _syncModeVisual(SyncMode mode) {
+    switch (mode) {
+      case SyncMode.twoWaySync:
+        return (
+          icon: Icons.sync_alt_rounded,
+          color: const Color(0xFF2563EB),
+          bg: const Color(0xFFEFF6FF),
+          border: const Color(0xFFDBEAFE),
+          label: 'Two-Way Sync',
+        );
+      case SyncMode.oneWayPush:
+        return (
+          icon: Icons.upload_file_rounded,
+          color: const Color(0xFF0D9488),
+          bg: const Color(0xFFF0FDFA),
+          border: const Color(0xFF99F6E4),
+          label: 'One-Way Push',
+        );
+      case SyncMode.oneWayMirror:
+        return (
+          icon: Icons.content_copy_rounded,
+          color: const Color(0xFF7C3AED),
+          bg: const Color(0xFFF5F3FF),
+          border: const Color(0xFFDDD6FE),
+          label: 'One-Way Mirror',
+        );
+    }
+  }
+
   Widget _buildSyncTab(ThemeData theme) {
     return StreamBuilder<List<SyncSpace>>(
       stream: SyncBackupService.instance.spacesStream,
@@ -608,88 +907,152 @@ class _SpacesScreenState extends State<SpacesScreen> {
         return ListView(
           padding: const EdgeInsets.all(16.0),
           children: [
-            // Educational Sync Distinction Glass Container
-            GlassContainer(
-              glowColor: const Color(0xFFF59E0B),
-              padding: const EdgeInsets.all(16.0),
-              borderRadius: BorderRadius.circular(20),
-              child: Column(
+            // Compact Flat Light Info Banner
+            Container(
+              padding: const EdgeInsets.all(14.0),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFE5E7EB)),
+              ),
+              child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF59E0B).withValues(alpha: 0.18),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.sync_rounded,
-                            color: Color(0xFFF59E0B), size: 20),
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        'Continuous Sync Replicas',
-                        style: theme.textTheme.titleSmall
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                    ],
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEFF6FF),
+                      borderRadius: BorderRadius.circular(11),
+                      border: Border.all(color: const Color(0xFFDBEAFE)),
+                    ),
+                    child: const Icon(Icons.sync_alt_rounded, color: Color(0xFF2563EB), size: 20),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Sync continuously reconciles file changes between paired devices. When a file is updated or deleted on one peer, the change is mirrored when devices connect. Destructive actions have built-in mass-change circuit breakers.',
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Content-Hash Folder Sync',
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF0F172A),
+                          ),
+                        ),
+                        SizedBox(height: 3),
+                        Text(
+                          'Reconciles real SHA-256 content changes across trusted Android & Windows devices with automatic mass-deletion safety holds.',
+                          style: TextStyle(fontSize: 12, color: Color(0xFF64748B), height: 1.35),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Configured Sync Spaces (${spaces.length})',
-                  style: theme.textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.bold),
-                ),
-                FilledButton.tonalIcon(
-                  onPressed: _showAddSpaceDialog,
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final titleWidget = Row(
+                  children: [
+                    const Icon(Icons.folder_copy_outlined, size: 16, color: Color(0xFF475569)),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Configured Sync Spaces (${spaces.length})',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF0F172A),
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                );
+                final addBtn = FilledButton.icon(
+                  onPressed: () {
+                    HapticFeedback.selectionClick();
+                    _showAddSpaceDialog();
+                  },
                   icon: const Icon(Icons.add_rounded, size: 16),
-                  label: const Text('New Sync Space'),
-                  style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
-                ),
-              ],
+                  label: const Text('New Sync Space', style: TextStyle(fontSize: 12)),
+                  style: FilledButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    backgroundColor: const Color(0xFF2563EB),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                );
+                if (constraints.maxWidth < 360) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      titleWidget,
+                      const SizedBox(height: 8),
+                      addBtn,
+                    ],
+                  );
+                }
+                return Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(child: titleWidget),
+                    const SizedBox(width: 8),
+                    addBtn,
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 12),
             if (spaces.isEmpty)
               Container(
-                padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
+                padding: const EdgeInsets.symmetric(vertical: 34, horizontal: 20),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                  color: Colors.white,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: theme.dividerColor.withValues(alpha: 0.1)),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
                 ),
                 child: Column(
                   children: [
-                    Icon(Icons.folder_shared_outlined, size: 40, color: theme.disabledColor),
-                    const SizedBox(height: 12),
+                    Container(
+                      width: 56,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEFF6FF),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFDBEAFE)),
+                      ),
+                      child: const Icon(Icons.folder_copy_outlined, size: 28, color: Color(0xFF2563EB)),
+                    ),
+                    const SizedBox(height: 14),
                     const Text(
                       'No sync spaces configured',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5, color: Color(0xFF0F172A)),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      'Add a directory to keep folders automatically in sync across your paired devices.',
+                    const Text(
+                      'Link a local folder to keep documents and media automatically synchronized with your Windows PC or paired phone.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+                      style: TextStyle(fontSize: 12, color: Color(0xFF64748B), height: 1.4),
                     ),
                     const SizedBox(height: 16),
                     FilledButton.icon(
-                      onPressed: _showAddSpaceDialog,
-                      icon: const Icon(Icons.add_circle_outline_rounded, size: 16),
+                      onPressed: () {
+                        HapticFeedback.selectionClick();
+                        _showAddSpaceDialog();
+                      },
+                      icon: const Icon(Icons.add_rounded, size: 18),
                       label: const Text('Add a Sync Space'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF2563EB),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
                     ),
                   ],
                 ),
@@ -703,96 +1066,156 @@ class _SpacesScreenState extends State<SpacesScreen> {
   }
 
   Widget _buildSyncSpaceCard(ThemeData theme, SyncSpace space) {
+    final modeVis = _syncModeVisual(space.mode);
     Color statusColor;
+    Color statusBg;
+    Color statusBorder;
     String statusLabel;
     IconData statusIcon;
 
     switch (space.status) {
       case SyncStatus.inSync:
-        statusColor = const Color(0xFF10B981);
+        statusColor = const Color(0xFF15803D);
+        statusBg = const Color(0xFFF0FDF4);
+        statusBorder = const Color(0xFFBBF7D0);
         statusLabel = 'IN SYNC';
-        statusIcon = Icons.check_circle_rounded;
+        statusIcon = Icons.check_circle_outline_rounded;
         break;
       case SyncStatus.syncing:
         statusColor = const Color(0xFF2563EB);
+        statusBg = const Color(0xFFEFF6FF);
+        statusBorder = const Color(0xFFBFDBFE);
         statusLabel = 'SYNCING';
         statusIcon = Icons.sync_rounded;
         break;
       case SyncStatus.conflictDetected:
-        statusColor = const Color(0xFFF59E0B);
+        statusColor = const Color(0xFFB45309);
+        statusBg = const Color(0xFFFFFBEB);
+        statusBorder = const Color(0xFFFDE68A);
         statusLabel = 'CONFLICT (${space.pendingConflicts})';
         statusIcon = Icons.warning_amber_rounded;
         break;
       case SyncStatus.massChangePaused:
-        statusColor = const Color(0xFFEF4444);
+        statusColor = const Color(0xFFDC2626);
+        statusBg = const Color(0xFFFEF2F2);
+        statusBorder = const Color(0xFFFECACA);
         statusLabel = 'MASS-CHANGE PAUSED';
-        statusIcon = Icons.shield_rounded;
+        statusIcon = Icons.shield_outlined;
         break;
     }
 
-    return InteractiveGlassCard(
-      glowColor: statusColor,
-      margin: const EdgeInsets.only(bottom: 16),
-      borderRadius: BorderRadius.circular(20),
-      padding: const EdgeInsets.all(18.0),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16.0),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: modeVis.bg,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: modeVis.border),
+                ),
+                child: Icon(modeVis.icon, color: modeVis.color, size: 21),
+              ),
+              const SizedBox(width: 12),
               Expanded(
-                child: Text(
-                  space.name,
-                  style: theme.textTheme.titleMedium
-                      ?.copyWith(fontWeight: FontWeight.bold),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      space.name,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF0F172A),
+                        letterSpacing: -0.2,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      modeVis.label,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: modeVis.color,
+                      ),
+                    ),
+                  ],
                 ),
               ),
+              const SizedBox(width: 8),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                 decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: statusColor),
+                  color: statusBg,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: statusBorder),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(statusIcon, size: 14, color: statusColor),
+                    Icon(statusIcon, size: 13, color: statusColor),
                     const SizedBox(width: 4),
                     Text(
                       statusLabel,
                       style: TextStyle(
-                          color: statusColor,
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold),
+                        color: statusColor,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Text('Local Path: ${space.localPath}',
-              style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          Text(
-              'Target Peer: ${space.remotePeerId} • Mode: ${space.mode.name}',
-              style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          Text(
-              'Files: ${space.fileCount} • Last Reconciled: ${space.lastSyncTime}',
-              style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          const Divider(height: 24),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFE5E7EB)),
+            ),
+            child: Column(
+              children: [
+                _buildSpaceMetaRow(Icons.folder_outlined, space.localPath),
+                const SizedBox(height: 5),
+                _buildSpaceMetaRow(Icons.devices_rounded, 'Target Peer: ${space.remotePeerId}'),
+                const SizedBox(height: 5),
+                _buildSpaceMetaRow(Icons.schedule_rounded, '${space.fileCount} files • ${space.lastSyncTime}'),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            alignment: WrapAlignment.end,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
             children: [
               if (space.status == SyncStatus.massChangePaused)
                 FilledButton.icon(
                   onPressed: () => _showMassChangeWarning(space),
-                  icon: const Icon(Icons.shield_rounded, size: 16),
+                  icon: const Icon(Icons.shield_outlined, size: 16),
                   label: const Text('Review Mass Changes'),
                   style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFFEF4444)),
+                    backgroundColor: const Color(0xFFDC2626),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
                 )
               else if (space.status == SyncStatus.conflictDetected)
                 FilledButton.icon(
@@ -800,15 +1223,98 @@ class _SpacesScreenState extends State<SpacesScreen> {
                   icon: const Icon(Icons.call_split_rounded, size: 16),
                   label: Text('Resolve Conflict (${space.pendingConflicts})'),
                   style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFFF59E0B)),
+                    backgroundColor: const Color(0xFFD97706),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
                 )
-              else
+              else ...[
                 OutlinedButton.icon(
-                  onPressed: () => _showDryRunPreview(space),
-                  icon: const Icon(Icons.preview_rounded, size: 16),
-                  label: const Text('Preview Dry-Run'),
+                  onPressed: () {
+                    HapticFeedback.selectionClick();
+                    _showDryRunPreview(space);
+                  },
+                  icon: const Icon(Icons.difference_outlined, size: 16),
+                  label: const Text('Preview Dry-Run', style: TextStyle(fontSize: 12)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF334155),
+                    side: const BorderSide(color: Color(0xFFE5E7EB)),
+                    visualDensity: VisualDensity.compact,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
                 ),
+                FilledButton.icon(
+                  onPressed: () async {
+                    HapticFeedback.selectionClick();
+                    final ok = await SyncBackupService.instance.performAutomatedSync(space.id);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(ok
+                              ? 'Space "${space.name}" synchronized successfully.'
+                              : 'Sync hold active on "${space.name}".'),
+                          backgroundColor: ok ? const Color(0xFF15803D) : const Color(0xFFD97706),
+                        ),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.sync_rounded, size: 16),
+                  label: const Text('Sync Now', style: TextStyle(fontSize: 12)),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF2563EB),
+                    foregroundColor: Colors.white,
+                    visualDensity: VisualDensity.compact,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ],
+              IconButton(
+                tooltip: 'Remove sync space',
+                icon: const Icon(Icons.delete_outline_rounded, size: 19, color: Color(0xFF64748B)),
+                onPressed: () => _confirmRemoveSpace(space),
+              ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpaceMetaRow(IconData icon, String text) {
+    return Row(
+      children: [
+        Icon(icon, size: 14, color: const Color(0xFF64748B)),
+        const SizedBox(width: 7),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(fontSize: 11.5, color: Color(0xFF475569)),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _confirmRemoveSpace(SyncSpace space) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove Sync Space?'),
+        content: Text(
+          'Stop syncing "${space.name}"? Your local files on disk will NOT be deleted.',
+          style: const TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFDC2626)),
+            onPressed: () {
+              SyncBackupService.instance.removeSpace(space.id);
+              Navigator.pop(ctx);
+            },
+            child: const Text('Remove'),
           ),
         ],
       ),
@@ -825,95 +1331,152 @@ class _SpacesScreenState extends State<SpacesScreen> {
         return ListView(
           padding: const EdgeInsets.all(16.0),
           children: [
-            // Backup Distinction Callout
-            GlassContainer(
-              glowColor: const Color(0xFF7C3AED),
-              padding: const EdgeInsets.all(16.0),
-              borderRadius: BorderRadius.circular(20),
-              child: Column(
+            // Flat Light Backup Callout
+            Container(
+              padding: const EdgeInsets.all(14.0),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFE5E7EB)),
+              ),
+              child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF7C3AED).withValues(alpha: 0.18),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.history_edu_rounded,
-                            color: Color(0xFF7C3AED), size: 20),
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        'Immutable Merkle Preservation',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF5F3FF),
+                      borderRadius: BorderRadius.circular(11),
+                      border: Border.all(color: const Color(0xFFDDD6FE)),
+                    ),
+                    child: const Icon(Icons.verified_user_outlined, color: Color(0xFF7C3AED), size: 20),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '• Sync propagates live updates and deletions between active devices.\n'
-                    '• Backup creates immutable, point-in-time preservation snapshots with SHA-256 deduplication.\n'
-                    '• Restoring creates a new historical copy without overwriting past backups.',
-                    style: theme.textTheme.bodySmall?.copyWith(height: 1.4),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Immutable Merkle Preservation',
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF0F172A),
+                          ),
+                        ),
+                        SizedBox(height: 3),
+                        Text(
+                          'Point-in-time snapshots verified by SHA-256 Merkle roots. Restoring always writes to a safe copy without overwriting history.',
+                          style: TextStyle(fontSize: 12, color: Color(0xFF64748B), height: 1.35),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Historical Snapshots (${snapshots.length})',
-                  style: theme.textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.bold),
-                ),
-                FilledButton.tonalIcon(
-                  onPressed: _showCreateSnapshotDialog,
-                  icon: const Icon(Icons.camera_alt_rounded, size: 16),
-                  label: const Text('Take Snapshot Now'),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final titleWidget = Row(
+                  children: [
+                    const Icon(Icons.inventory_2_outlined, size: 16, color: Color(0xFF475569)),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Historical Snapshots (${snapshots.length})',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF0F172A),
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                );
+                final snapBtn = FilledButton.icon(
+                  onPressed: () {
+                    HapticFeedback.selectionClick();
+                    _showCreateSnapshotDialog();
+                  },
+                  icon: const Icon(Icons.add_a_photo_outlined, size: 15),
+                  label: const Text('Take Snapshot Now', style: TextStyle(fontSize: 12)),
                   style: FilledButton.styleFrom(
                     visualDensity: VisualDensity.compact,
-                    backgroundColor:
-                        const Color(0xFF7C3AED).withValues(alpha: 0.18),
-                    foregroundColor: const Color(0xFF7C3AED),
+                    backgroundColor: const Color(0xFF7C3AED),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
-                ),
-              ],
+                );
+                if (constraints.maxWidth < 360) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      titleWidget,
+                      const SizedBox(height: 8),
+                      snapBtn,
+                    ],
+                  );
+                }
+                return Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(child: titleWidget),
+                    const SizedBox(width: 8),
+                    snapBtn,
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 12),
             if (snapshots.isEmpty)
               Container(
-                padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
+                padding: const EdgeInsets.symmetric(vertical: 34, horizontal: 20),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                  color: Colors.white,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: theme.dividerColor.withValues(alpha: 0.1)),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
                 ),
                 child: Column(
                   children: [
-                    Icon(Icons.history_outlined, size: 40, color: theme.disabledColor),
-                    const SizedBox(height: 12),
+                    Container(
+                      width: 56,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF5F3FF),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFDDD6FE)),
+                      ),
+                      child: const Icon(Icons.inventory_2_outlined, size: 28, color: Color(0xFF7C3AED)),
+                    ),
+                    const SizedBox(height: 14),
                     const Text(
                       'No backup snapshots yet',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5, color: Color(0xFF0F172A)),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      'Create a point-in-time snapshot with verifiable Merkle root hash for disaster recovery.',
+                    const Text(
+                      'Create a point-in-time snapshot with verifiable SHA-256 Merkle root hash for instant non-destructive recovery.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+                      style: TextStyle(fontSize: 12, color: Color(0xFF64748B), height: 1.4),
                     ),
                     const SizedBox(height: 16),
                     FilledButton.icon(
-                      onPressed: _showCreateSnapshotDialog,
-                      icon: const Icon(Icons.add_rounded, size: 16),
+                      onPressed: () {
+                        HapticFeedback.selectionClick();
+                        _showCreateSnapshotDialog();
+                      },
+                      icon: const Icon(Icons.add_rounded, size: 18),
                       label: const Text('Create First Snapshot'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF7C3AED),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
                     ),
                   ],
                 ),
@@ -927,48 +1490,100 @@ class _SpacesScreenState extends State<SpacesScreen> {
   }
 
   Widget _buildSnapshotCard(ThemeData theme, BackupSnapshot snap) {
-    return InteractiveGlassCard(
-      glowColor: const Color(0xFF7C3AED),
+    return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      borderRadius: BorderRadius.circular(20),
       padding: const EdgeInsets.all(16.0),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                snap.name,
-                style: theme.textTheme.titleSmall
-                    ?.copyWith(fontWeight: FontWeight.bold),
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF5F3FF),
+                  borderRadius: BorderRadius.circular(11),
+                  border: Border.all(color: const Color(0xFFDDD6FE)),
+                ),
+                child: const Icon(Icons.inventory_2_outlined, color: Color(0xFF7C3AED), size: 20),
               ),
-              Text(snap.timestamp,
-                  style: const TextStyle(fontSize: 11, color: Colors.grey)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      snap.name,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF0F172A),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${snap.fileCount} files • ${snap.totalSize} • ${snap.timestamp}',
+                      style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            'Files: ${snap.fileCount} • Total Size: ${snap.totalSize}',
-            style: theme.textTheme.bodySmall,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Root Hash: ${snap.rootHash}',
-            style: const TextStyle(
-                fontFamily: 'monospace', fontSize: 10, color: Colors.grey),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFE5E7EB)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.verified_outlined, size: 14, color: Color(0xFF15803D)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Root: ${snap.rootHash}',
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 10.5,
+                      color: Color(0xFF475569),
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              FilledButton.tonalIcon(
-                onPressed: () => _showRestoreDialog(snap),
-                icon: const Icon(Icons.settings_backup_restore_rounded,
-                    size: 16),
-                label: const Text('Restore Snapshot'),
-                style: FilledButton.styleFrom(
+              OutlinedButton.icon(
+                onPressed: () {
+                  HapticFeedback.selectionClick();
+                  _showRestoreDialog(snap);
+                },
+                icon: const Icon(Icons.restore_rounded, size: 16),
+                label: const Text('Restore Snapshot', style: TextStyle(fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF7C3AED),
+                  side: const BorderSide(color: Color(0xFFDDD6FE)),
+                  backgroundColor: const Color(0xFFF5F3FF),
                   visualDensity: VisualDensity.compact,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
               ),
             ],

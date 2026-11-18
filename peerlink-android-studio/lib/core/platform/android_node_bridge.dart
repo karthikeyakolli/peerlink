@@ -1,5 +1,8 @@
 import 'dart:async';
 import 'package:flutter/services.dart';
+import '../file_staging_service.dart';
+import '../quick_text_service.dart';
+import '../pairing_invitation.dart';
 
 enum AndroidNodeStateEnum {
   active,
@@ -218,7 +221,14 @@ class AndroidNodeBridge {
         final args = call.arguments as Map<dynamic, dynamic>?;
         final uris = (args?['uris'] as List<dynamic>?)?.cast<String>() ?? [];
         if (uris.isNotEmpty) {
+          FileStagingService.instance.addPaths(uris);
           _sharedFilesController.add(uris);
+        }
+      } else if (call.method == 'onTextSharedViaIntent') {
+        final args = call.arguments as Map<dynamic, dynamic>?;
+        final text = args?['text'] as String?;
+        if (text != null && text.isNotEmpty) {
+          QuickTextService.instance.addSnippet(text);
         }
       } else if (call.method == 'onIncomingTransferIntent') {
         final args = call.arguments as Map<dynamic, dynamic>?;
@@ -433,10 +443,37 @@ class AndroidNodeBridge {
     required String targetPeerId,
     required List<String> contentUris,
   }) async {
+    var cleanTarget = targetPeerId.trim();
+    if (cleanTarget.startsWith('{') && cleanTarget.contains('"peerId"')) {
+      try {
+        final invitation = PairingInvitation.parse(cleanTarget);
+        cleanTarget = invitation.peerId;
+        String? hintHost;
+        int hintPort = 8765;
+        if (invitation.connectionHints.isNotEmpty) {
+          final hint = invitation.connectionHints.first;
+          if (hint.contains(':')) {
+            final parts = hint.split(':');
+            hintHost = parts[0];
+            hintPort = int.tryParse(parts[1]) ?? 8765;
+          } else {
+            hintHost = hint;
+          }
+        }
+        await addTrustedPeer(
+          peerId: invitation.peerId,
+          fingerprint: invitation.fingerprint,
+          name: invitation.name,
+          host: hintHost,
+          port: hintPort,
+        );
+      } catch (_) {}
+    }
+
     final transferId = await _methodChannel.invokeMethod<String>(
       'initiateSend',
       {
-        'targetPeerId': targetPeerId,
+        'targetPeerId': cleanTarget,
         'contentUris': contentUris,
       },
     );
@@ -567,6 +604,91 @@ class AndroidNodeBridge {
       final res = await _methodChannel.invokeMethod<bool>(
         'setReceiverConsentMode',
         {'mode': mode},
+      );
+      return res ?? false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> openFile(String path) async {
+    try {
+      final res = await _methodChannel.invokeMethod<bool>('openFile', {'path': path});
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> revealInFolder(String path) async {
+    try {
+      final res = await _methodChannel.invokeMethod<bool>('revealInFolder', {'path': path});
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> shareFile(String path) async {
+    try {
+      final res = await _methodChannel.invokeMethod<bool>('shareFile', {'path': path});
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> scanMediaFile(String path) async {
+    try {
+      final res = await _methodChannel.invokeMethod<bool>('scanMediaFile', {'path': path});
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<Map<String, int>> getStorageSpaceInfo() async {
+    try {
+      final res = await _methodChannel.invokeMapMethod<String, dynamic>('getStorageSpaceInfo');
+      if (res != null) {
+        return {
+          'totalBytes': (res['totalBytes'] as num?)?.toInt() ?? 0,
+          'freeBytes': (res['freeBytes'] as num?)?.toInt() ?? 0,
+          'usedBytes': (res['usedBytes'] as num?)?.toInt() ?? 0,
+        };
+      }
+    } catch (_) {}
+    return {'totalBytes': 0, 'freeBytes': 0, 'usedBytes': 0};
+  }
+
+  Future<bool> addTrustedPeer({
+    required String peerId,
+    required String fingerprint,
+    String? host,
+    int? port,
+    String? name,
+  }) async {
+    try {
+      final args = <String, dynamic>{
+        'peerId': peerId,
+        'fingerprint': fingerprint,
+      };
+      if (host != null && host.isNotEmpty) args['host'] = host;
+      if (port != null) args['port'] = port;
+      if (name != null && name.isNotEmpty) args['name'] = name;
+
+      final res = await _methodChannel.invokeMethod<bool>('addTrustedPeer', args);
+      return res ?? false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> revokeTrustedPeer(String peerId) async {
+    try {
+      final res = await _methodChannel.invokeMethod<bool>(
+        'revokeTrustedPeer',
+        {'peerId': peerId},
       );
       return res ?? false;
     } catch (e) {

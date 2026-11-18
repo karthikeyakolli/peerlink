@@ -22,8 +22,6 @@ REF_PROJECT = os.path.join(REPO_ROOT, "peerlink-android-studio")
 
 TARGET_PROJECTS = {
     "windows_flutter": os.path.join(REPO_ROOT, "windows", "app", "flutter"),
-    "linux_flutter": os.path.join(REPO_ROOT, "linux", "app", "flutter"),
-    "macos_flutter": os.path.join(REPO_ROOT, "macos", "app", "flutter"),
     "android_flutter": os.path.join(REPO_ROOT, "android", "app", "flutter"),
     "canonical_flutter": os.path.join(REPO_ROOT, "shared-source", "canonical", "flutter")
 }
@@ -51,7 +49,7 @@ def classify_file(rel_path: str) -> str:
         return "8. Tests and fixtures"
     elif "android_node_bridge" in norm or "android_node_status" in norm:
         return "3. Android-specific bridge or implementation"
-    elif "windows_file_dialog" in norm:
+    elif "windows_file_dialog" in norm or "windows_node_manager" in norm:
         return "4. Windows-specific bridge or implementation"
     elif "linux" in norm and not norm.startswith("lib/design_system"):
         return "5. Linux-specific bridge or implementation"

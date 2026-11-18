@@ -14,7 +14,7 @@ import java.util.Objects;
  */
 public final class NodeConfiguration {
     public static final int DEFAULT_IPC_PORT = 50051;
-    public static final int DEFAULT_P2P_PORT = 50052;
+    public static final int DEFAULT_P2P_PORT = 8765;
     public static final String DEFAULT_HOST = "127.0.0.1";
 
     private final Path dataDirectory;

@@ -5,6 +5,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../core/pairing_invitation.dart';
 import '../../core/device_trust_service.dart';
+import '../../core/network_utils.dart';
 import '../../core/platform/platform_capabilities.dart';
 import '../../platform/android_node_bridge.dart';
 
@@ -61,6 +62,7 @@ class _QrPairingSheetState extends State<QrPairingSheet> {
   late int _activeTab;
   late PairingInvitation _currentInvitation;
   Timer? _countdownTimer;
+  String? _effectiveIp;
 
   // Scanner state
   MobileScannerController? _scannerController;
@@ -69,14 +71,23 @@ class _QrPairingSheetState extends State<QrPairingSheet> {
   bool _isProcessingScan = false;
   bool _showManualInput = false;
 
-  // Hotspot state
-  bool _isHotspotActive = false;
-
   @override
   void initState() {
     super.initState();
     _activeTab = widget.initialTab;
+    _effectiveIp = widget.localIp != '192.168.1.100' ? widget.localIp : null;
     _generateFreshInvitation();
+
+    if (_effectiveIp == null) {
+      NetworkUtils.getLocalIpAddress().then((resolved) {
+        if (mounted && resolved != '127.0.0.1' && resolved != '192.168.1.100') {
+          setState(() {
+            _effectiveIp = resolved;
+            _generateFreshInvitation();
+          });
+        }
+      });
+    }
 
     // Start 1-second countdown timer for invitation expiry UI
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -89,16 +100,20 @@ class _QrPairingSheetState extends State<QrPairingSheet> {
   }
 
   void _generateFreshInvitation() {
+    final ipToUse = _effectiveIp ?? (widget.localIp != '192.168.1.100' ? widget.localIp : '127.0.0.1');
     _currentInvitation = PairingInvitation.create(
       peerId: widget.peerId,
       name: widget.deviceName,
       fingerprint: widget.fingerprint,
-      connectionHints: [widget.localIp],
+      connectionHints: [ipToUse],
       securityLevel: 'STRONGBOX',
     );
   }
 
   void _initScanner() {
+    if (PlatformCapabilities.isAndroid) {
+      AndroidNodeBridge.instance.requestPermissions(['camera']);
+    }
     _scannerController ??= MobileScannerController(
       detectionSpeed: DetectionSpeed.normal,
       facing: CameraFacing.back,
@@ -221,6 +236,19 @@ class _QrPairingSheetState extends State<QrPairingSheet> {
                 // 1. Mark invitation consumed against replays
                 candidate.markConsumed();
 
+                String? hintHost;
+                int hintPort = 8765;
+                if (candidate.connectionHints.isNotEmpty) {
+                  final hint = candidate.connectionHints.first;
+                  if (hint.contains(':')) {
+                    final parts = hint.split(':');
+                    hintHost = parts[0];
+                    hintPort = int.tryParse(parts[1]) ?? 8765;
+                  } else {
+                    hintHost = hint;
+                  }
+                }
+
                 // 2. Persist device to authoritative trust service
                 DeviceTrustService.instance.pairDevice(
                   PairedDevice(
@@ -232,6 +260,8 @@ class _QrPairingSheetState extends State<QrPairingSheet> {
                     isOnline: true,
                     lastSeen: 'Active now',
                   ),
+                  host: hintHost,
+                  port: hintPort,
                 );
 
                 // 3. Confirm with Android native node facade if on Android
@@ -240,9 +270,18 @@ class _QrPairingSheetState extends State<QrPairingSheet> {
                     sessionId: candidate.sessionId,
                     accept: true,
                   );
+                  if (hintHost != null && hintHost.isNotEmpty) {
+                    AndroidNodeBridge.instance.addTrustedPeer(
+                      peerId: candidate.peerId,
+                      fingerprint: candidate.fingerprint,
+                      host: hintHost,
+                      port: hintPort,
+                      name: candidate.name,
+                    );
+                  }
                 }
 
-                // 4. Fire callback
+                // 4. Fire callback with raw payload (callers like devices_screen/files_screen parse invitation.peerId)
                 widget.onQrScanned?.call(rawPayload);
 
                 Navigator.pop(ctx); // close dialog
@@ -367,13 +406,8 @@ class _QrPairingSheetState extends State<QrPairingSheet> {
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
-                    blurRadius: 16,
-                  ),
-                ],
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFE5E7EB), width: 1.0),
               ),
               child: _currentInvitation.isExpired
                   ? SizedBox(
@@ -605,7 +639,7 @@ class _QrPairingSheetState extends State<QrPairingSheet> {
             ],
           ]
 
-          // TAB 2: WI-FI HOTSPOT DIRECT MODE (OFFLINE SHARING)
+          // TAB 2: WI-FI HOTSPOT DIRECT MODE (PLANNED / OS APIS PENDING)
           else if (_activeTab == 2) ...[
             Container(
               padding: const EdgeInsets.all(16),
@@ -613,7 +647,7 @@ class _QrPairingSheetState extends State<QrPairingSheet> {
                 color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: _isHotspotActive ? const Color(0xFF10B981) : Colors.grey.withValues(alpha: 0.3),
+                  color: Colors.amber.shade700.withValues(alpha: 0.5),
                   width: 1.5,
                 ),
               ),
@@ -623,15 +657,15 @@ class _QrPairingSheetState extends State<QrPairingSheet> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Row(
+                      const Row(
                         children: [
                           Icon(
-                            Icons.wifi_tethering_rounded,
-                            color: _isHotspotActive ? const Color(0xFF10B981) : Colors.grey,
+                            Icons.wifi_tethering_off_rounded,
+                            color: Colors.amber,
                             size: 22,
                           ),
-                          const SizedBox(width: 8),
-                          const Text(
+                          SizedBox(width: 8),
+                          Text(
                             'Direct Wi-Fi Hotspot',
                             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                           ),
@@ -640,15 +674,15 @@ class _QrPairingSheetState extends State<QrPairingSheet> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color: (_isHotspotActive ? const Color(0xFF10B981) : Colors.grey).withValues(alpha: 0.15),
+                          color: Colors.amber.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Text(
-                          _isHotspotActive ? 'BROADCASTING' : 'OFFLINE',
+                        child: const Text(
+                          'PLANNED / OS API PENDING',
                           style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
-                            color: _isHotspotActive ? const Color(0xFF10B981) : Colors.grey,
+                            color: Colors.amber,
                           ),
                         ),
                       ),
@@ -656,45 +690,54 @@ class _QrPairingSheetState extends State<QrPairingSheet> {
                   ),
                   const SizedBox(height: 14),
 
-                  if (_isHotspotActive) ...[
-                    Center(
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: QrImageView(
-                          data: 'WIFI:T:WPA;S:PeerLink-${widget.peerId.take(6).toUpperCase()};P:peerlink-${_currentInvitation.nonce.take(8)};;',
-                          version: QrVersions.auto,
-                          size: 130,
-                          backgroundColor: Colors.white,
-                          errorCorrectionLevel: QrErrorCorrectLevel.M,
-                          padding: const EdgeInsets.all(4),
-                        ),
-                      ),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.amber.withValues(alpha: 0.2)),
                     ),
-                    const SizedBox(height: 12),
-                  ],
+                    child: const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.info_outline_rounded, size: 16, color: Colors.amber),
+                            SizedBox(width: 6),
+                            Text(
+                              'Architectural Status',
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.amber),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 6),
+                        Text(
+                          'Local-only Hotspot tethering requires Android LocalOnlyHotspotManager OS integration, which is currently planned. Software-only simulation has been removed to prevent false connectivity claims.',
+                          style: TextStyle(fontSize: 11, height: 1.4),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
 
                   _buildHotspotDetailRow(
-                    Icons.wifi_rounded,
-                    'Network SSID:',
-                    'PeerLink-${widget.peerId.take(6).toUpperCase()}',
-                    context,
-                  ),
-                  const SizedBox(height: 8),
-                  _buildHotspotDetailRow(
-                    Icons.key_rounded,
-                    'WPA2 Password:',
-                    'peerlink-${_currentInvitation.nonce.take(8)}',
+                    Icons.wifi_tethering_rounded,
+                    'Recommended Direct Mode:',
+                    'Wi-Fi Direct (P2P Group)',
                     context,
                   ),
                   const SizedBox(height: 8),
                   _buildHotspotDetailRow(
                     Icons.lan_rounded,
-                    'Direct Listening Port:',
-                    '8765 (TLS/Ed25519)',
+                    'Direct Port:',
+                    '8765 (TLS / Ed25519)',
+                    context,
+                  ),
+                  const SizedBox(height: 8),
+                  _buildHotspotDetailRow(
+                    Icons.shield_outlined,
+                    'Security Requirement:',
+                    'Zero Router Dependency via P2P',
                     context,
                   ),
                   const SizedBox(height: 12),
@@ -706,11 +749,11 @@ class _QrPairingSheetState extends State<QrPairingSheet> {
                     ),
                     child: const Row(
                       children: [
-                        Icon(Icons.shield_outlined, size: 16, color: Color(0xFF10B981)),
+                        Icon(Icons.check_circle_outline_rounded, size: 16, color: Color(0xFF10B981)),
                         SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'AP Isolation Bypass: Zero router dependency. Devices connect directly via Wi-Fi Direct socket.',
+                            'Active routerless transfers: Use the Devices tab to connect and transfer directly over Wi-Fi Direct without an internet router.',
                             style: TextStyle(fontSize: 11, height: 1.3),
                           ),
                         ),
@@ -722,23 +765,10 @@ class _QrPairingSheetState extends State<QrPairingSheet> {
             ),
             const SizedBox(height: 16),
             FilledButton.icon(
-              onPressed: () {
-                setState(() => _isHotspotActive = !_isHotspotActive);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      _isHotspotActive
-                          ? 'Hotspot broadcasting on SSID PeerLink-${widget.peerId.take(6).toUpperCase()} (Port 8765)'
-                          : 'Direct Hotspot stopped.',
-                    ),
-                    backgroundColor: _isHotspotActive ? const Color(0xFF10B981) : Colors.grey.shade700,
-                  ),
-                );
-              },
-              icon: Icon(_isHotspotActive ? Icons.stop_circle_outlined : Icons.wifi_tethering_rounded, size: 18),
-              label: Text(_isHotspotActive ? 'Stop Direct Hotspot' : 'Start Direct Hotspot (Offline Mode)'),
+              onPressed: null,
+              icon: const Icon(Icons.wifi_tethering_off_rounded, size: 18),
+              label: const Text('Direct Hotspot (Planned — Use Wi-Fi Direct)'),
               style: FilledButton.styleFrom(
-                backgroundColor: _isHotspotActive ? Colors.red.shade600 : const Color(0xFF10B981),
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
@@ -808,19 +838,9 @@ class _SegmentTab extends StatelessWidget {
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-          color: isActive
-              ? (isDark ? const Color(0xFF334155) : Colors.white)
-              : Colors.transparent,
+          color: isActive ? Colors.white : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
-          boxShadow: isActive
-              ? [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.08),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
-                  ),
-                ]
-              : null,
+          border: isActive ? Border.all(color: const Color(0xFFE5E7EB)) : null,
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,

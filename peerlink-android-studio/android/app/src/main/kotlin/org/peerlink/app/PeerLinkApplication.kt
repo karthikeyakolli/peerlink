@@ -43,8 +43,25 @@ class PeerLinkApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        initializeNode()
-        PeerLinkSyncWorker.schedulePeriodicSync(this)
+        try {
+            // Register BouncyCastle provider for Ed25519 support on Android Conscrypt / ART runtime
+            java.security.Security.removeProvider("BC")
+            java.security.Security.insertProviderAt(org.bouncycastle.jce.provider.BouncyCastleProvider(), 1)
+        } catch (t: Throwable) {
+            android.util.Log.e("PeerLink", "Failed to register BouncyCastle security provider", t)
+        }
+
+        try {
+            initializeNode()
+        } catch (t: Throwable) {
+            android.util.Log.e("PeerLink", "Recoverable error during Android node startup", t)
+        }
+
+        try {
+            PeerLinkSyncWorker.schedulePeriodicSync(this)
+        } catch (t: Throwable) {
+            android.util.Log.w("PeerLink", "Non-fatal: WorkManager periodic sync scheduling deferred", t)
+        }
     }
 
     private fun initializeNode() {
@@ -52,21 +69,26 @@ class PeerLinkApplication : Application() {
         val initialContext = buildCurrentContext(inForeground = false)
         val stateMachine = AndroidNodeStateMachine(initialContext)
 
-        // 2. Ed25519 Identity protected at rest by AndroidKeyStore AES-256
-        val masterKeyProvider = AndroidKeyStoreProvider()
-        val secureKeyStore = AndroidKeyStoreSecureKeyStore(filesDir, masterKeyProvider, "peerlink_master_key")
-        val metadataStore = FileIdentityMetadataStore(filesDir)
-        val isHw = masterKeyProvider.isMasterKeyHardwareBacked("peerlink_master_key")
-        val secLevel = masterKeyProvider.getSecurityLevel("peerlink_master_key")
-        val keystoreManager = AndroidKeystoreManager.createOrLoad(
-            secureKeyStore,
-            metadataStore,
-            "Android Device",
-            "Android " + Build.VERSION.RELEASE,
-            "0.1.0",
-            isHw,
-            "Software Ed25519 (Protected at rest by Keystore $secLevel)"
-        )
+        // 2. Ed25519 Identity protected at rest by AndroidKeyStore AES-256 (with graceful fallback)
+        val keystoreManager = try {
+            val masterKeyProvider = AndroidKeyStoreProvider()
+            val secureKeyStore = AndroidKeyStoreSecureKeyStore(filesDir, masterKeyProvider, "peerlink_master_key")
+            val metadataStore = FileIdentityMetadataStore(filesDir)
+            val isHw = masterKeyProvider.isMasterKeyHardwareBacked("peerlink_master_key")
+            val secLevel = masterKeyProvider.getSecurityLevel("peerlink_master_key")
+            AndroidKeystoreManager.createOrLoad(
+                secureKeyStore,
+                metadataStore,
+                "Android Device",
+                "Android " + Build.VERSION.RELEASE,
+                "0.1.0",
+                isHw,
+                "Software Ed25519 (Protected at rest by Keystore $secLevel)"
+            )
+        } catch (t: Throwable) {
+            android.util.Log.w("PeerLink", "Hardware Keystore unavailable; using software Ed25519 identity", t)
+            AndroidKeystoreManager.createInMemoryTestManager("Android Device")
+        }
 
         // 3. Storage Abstraction (SAF)
         val storageProvider = SafStorageProvider(this)
@@ -101,17 +123,23 @@ class PeerLinkApplication : Application() {
             stateMachine
         )
 
-        // 5. Discovery Adapters
+        // 5. Transport, Session Manager, and Route Selection
+        val transportProvider = StandardTcpTransportProvider("0.0.0.0")
+
+        // 6. Discovery Adapters
         val nsdAdapter = AndroidNsdAdapter(this)
-        val wifiDirectAdapter = AndroidWifiDirectAdapter(this)
+        val wifiDirectAdapter = AndroidWifiDirectAdapter(this) {
+            val port = transportProvider.getListeningPort()
+            if (port > 0) port else 8765
+        }
         val wifiAwareAdapter = AndroidWifiAwareAdapter(this)
         val discoveryEngine = AndroidDiscoveryEngine(listOf(nsdAdapter, wifiDirectAdapter, wifiAwareAdapter))
 
-        // 6. Notification Controller
+        // 7. Notification Controller
         val notificationBridge = AndroidNotificationBridge(this)
         val notificationController = AndroidNotificationController(notificationBridge)
 
-        // 7. Authoritative Persistent SQLite Operation Journal & Startup Recovery (Rule 9)
+        // 8. Authoritative Persistent SQLite Operation Journal & Startup Recovery (Rule 9)
         val operationJournal = AndroidSqliteOperationJournal(this)
         val recoveryManager = AndroidStartupRecoveryManager(operationJournal)
         this.recoveryManager = recoveryManager
@@ -121,9 +149,6 @@ class PeerLinkApplication : Application() {
         recoveryManager.reconcileOnStartup(stagingRoot, destRoot)
 
         val transferEngine = PeerTransferEngine(operationJournal, stagingRoot)
-
-        // 8. Transport, Session Manager, and Route Selection
-        val transportProvider = StandardTcpTransportProvider("0.0.0.0")
         val trustStoreFile = File(filesDir, "security/trust_store.pb").toPath()
         val trustStore = PersistentTrustStore(trustStoreFile)
         val protocolVersion = ProtocolVersion.newBuilder().setMajor(1).setMinor(0).setPatch(0).build()

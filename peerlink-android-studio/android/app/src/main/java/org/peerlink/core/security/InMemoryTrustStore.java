@@ -47,22 +47,47 @@ public class InMemoryTrustStore implements TrustStore {
         }
         String peerId = peer.getPeerId().getValue();
 
+        PeerIdentity.Builder updatedBuilder = peer.toBuilder()
+                .setTrustLevel(TrustLevel.TRUST_LEVEL_TRUSTED_PAIRED)
+                .setPairedAtUtcMs(peer.getPairedAtUtcMs() > 0 ? peer.getPairedAtUtcMs() : System.currentTimeMillis());
+
         // Detect cloned / conflicting identity key
         PeerIdentity existing = peers.get(peerId);
-        if (existing != null && existing.hasIdentityKey() && peer.hasIdentityKey()) {
-            byte[] existingKey = existing.getIdentityKey().getPublicKeyBytes().toByteArray();
-            byte[] newKey = peer.getIdentityKey().getPublicKeyBytes().toByteArray();
-            if (!Arrays.equals(existingKey, newKey)) {
-                throw new SecurityException("Cloned identity detected! Peer ID " + peerId +
-                        " attempted to replace existing cryptographic public key");
+        if (existing != null) {
+            boolean existingHasKey = existing.hasIdentityKey();
+            byte[] existingKey = existingHasKey ? existing.getIdentityKey().getPublicKeyBytes().toByteArray() : new byte[0];
+            boolean isExistingPlaceholder = isAllZeros(existingKey) || existingKey.length == 0;
+
+            boolean newHasKey = peer.hasIdentityKey();
+            byte[] newKey = newHasKey ? peer.getIdentityKey().getPublicKeyBytes().toByteArray() : new byte[0];
+            boolean isNewPlaceholder = isAllZeros(newKey) || newKey.length == 0;
+
+            if (!isExistingPlaceholder) {
+                // Existing key is an authentic key
+                if (isNewPlaceholder || !newHasKey) {
+                    // Refuse silent downgrade or key wipe: preserve authentic existing key
+                    updatedBuilder.setIdentityKey(existing.getIdentityKey());
+                } else if (!Arrays.equals(existingKey, newKey)) {
+                    throw new SecurityException("Cloned identity detected! Peer ID " + peerId +
+                            " attempted to replace existing cryptographic public key");
+                }
+            } else {
+                // Existing key is a placeholder
+                if (!isNewPlaceholder) {
+                    // Validating placeholder-to-authentic transition
+                    String existingFp = existing.getFingerprintHex();
+                    if (existingFp != null && !existingFp.isBlank() && existingFp.startsWith("SHA256:")) {
+                        String computedFp = PeerCryptoSigner.computeFingerprint(newKey);
+                        if (!existingFp.equalsIgnoreCase(computedFp)) {
+                            throw new SecurityException("Fingerprint mismatch on key upgrade for peer " + peerId +
+                                    "! Expected " + existingFp + " but received key with " + computedFp);
+                        }
+                    }
+                }
             }
         }
 
-        PeerIdentity updated = peer.toBuilder()
-                .setTrustLevel(TrustLevel.TRUST_LEVEL_TRUSTED_PAIRED)
-                .setPairedAtUtcMs(peer.getPairedAtUtcMs() > 0 ? peer.getPairedAtUtcMs() : System.currentTimeMillis())
-                .build();
-
+        PeerIdentity updated = updatedBuilder.build();
         peers.put(peerId, updated);
         revocations.remove(peerId);
     }
@@ -185,5 +210,13 @@ public class InMemoryTrustStore implements TrustStore {
         } catch (Exception e) {
             throw new IOException("Failed to import trust snapshot: " + e.getMessage(), e);
         }
+    }
+
+    public static boolean isAllZeros(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) return true;
+        for (byte b : bytes) {
+            if (b != 0) return false;
+        }
+        return true;
     }
 }

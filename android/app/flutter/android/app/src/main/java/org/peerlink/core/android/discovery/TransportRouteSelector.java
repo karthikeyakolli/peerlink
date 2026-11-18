@@ -73,7 +73,7 @@ public class TransportRouteSelector {
 
         InetSocketAddress socketAddress = new InetSocketAddress(route.getHostAddress(), route.getPort());
 
-        CompletableFuture<TransportConnection> connectFuture = transportProvider.connectAsync(socketAddress);
+        CompletableFuture<TransportConnection> connectFuture = transportProvider.connectAsync(socketAddress, route.getSocketBinder());
 
         // Bounded per-route timeout
         CompletableFuture<TransportConnection> timedFuture = connectFuture.orTimeout(perRouteTimeoutMs, TimeUnit.MILLISECONDS);

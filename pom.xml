@@ -14,8 +14,6 @@
 
     <modules>
         <module>windows</module>
-        <module>linux</module>
-        <module>macos</module>
     </modules>
 
     <properties>

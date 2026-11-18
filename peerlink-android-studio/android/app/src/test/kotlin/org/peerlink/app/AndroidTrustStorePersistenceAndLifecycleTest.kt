@@ -6,6 +6,8 @@ import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.peerlink.core.operation.InMemoryOperationJournal
+import org.peerlink.core.security.InMemoryTrustStore
+import org.peerlink.core.security.PeerCryptoSigner
 import org.peerlink.core.security.PersistentTrustStore
 import org.peerlink.core.transfer.PeerTransferEngine
 import org.peerlink.core.transfer.TransferSessionReceiver
@@ -215,5 +217,120 @@ class AndroidTrustStorePersistenceAndLifecycleTest {
         val wire3 = TransferWireMessage.parseFrom(session3.sentPayloads[0])
         assertFalse("Revoked peer offer must be rejected", wire3.response.accepted)
         assertTrue(wire3.response.rejectionReason.contains("revoked", ignoreCase = true))
+    }
+
+    @Test
+    fun testPlaceholderKeyUpgradeWithMatchingFingerprintSucceeds() {
+        val store = InMemoryTrustStore()
+        val peerId = "peer_upgrade_valid"
+        val realKey = ByteArray(32) { 0x42 }
+        val matchingFp = PeerCryptoSigner.computeFingerprint(realKey)
+        val placeholderKey = ByteArray(32) { 0x00 }
+
+        // Initial provisional pairing with placeholder all-zero key and anticipated fingerprint
+        store.addTrustedPeer(peerId, matchingFp, placeholderKey)
+        assertTrue(store.isTrusted(peerId))
+        assertTrue(InMemoryTrustStore.isAllZeros(store.getPeer(peerId).get().identityKey.publicKeyBytes.toByteArray()))
+
+        // Authentic key upgrade during authenticated handshake
+        store.addTrustedPeer(peerId, matchingFp, realKey)
+        assertTrue(store.isTrusted(peerId))
+        val upgradedKey = store.getPeer(peerId).get().identityKey.publicKeyBytes.toByteArray()
+        assertFalse(InMemoryTrustStore.isAllZeros(upgradedKey))
+        assertArrayEquals(realKey, upgradedKey)
+    }
+
+    @Test
+    fun testPlaceholderKeyUpgradeWithMismatchedFingerprintThrowsSecurityException() {
+        val store = InMemoryTrustStore()
+        val peerId = "peer_upgrade_mismatch"
+        val realKey = ByteArray(32) { 0x42 }
+        val fakeFp = "SHA256:0000111122223333444455556666777788889999aaaabbbbccccddddeeeeffff"
+        val placeholderKey = ByteArray(32) { 0x00 }
+
+        // Provisional peer registered with expected fingerprint fakeFp
+        store.addTrustedPeer(peerId, fakeFp, placeholderKey)
+        assertTrue(store.isTrusted(peerId))
+
+        // Upgrade attempt with key that doesn't match fakeFp must be rejected
+        assertThrows(SecurityException::class.java) {
+            store.addTrustedPeer(peerId, fakeFp, realKey)
+        }
+    }
+
+    @Test
+    fun testAuthenticKeyCannotBeDowngradedOrWipedByPlaceholder() {
+        val store = InMemoryTrustStore()
+        val peerId = "peer_downgrade_target"
+        val authenticKey = ByteArray(32) { 0x33 }
+        val fp = PeerCryptoSigner.computeFingerprint(authenticKey)
+
+        store.addTrustedPeer(peerId, fp, authenticKey)
+        assertTrue(store.isTrusted(peerId))
+
+        // Attempting to downgrade by supplying all-zero placeholder key
+        val zeroKey = ByteArray(32) { 0x00 }
+        store.addTrustedPeer(peerId, fp, zeroKey)
+
+        // The authentic key must be preserved, not overwritten with zeros
+        val retainedKey = store.getPeer(peerId).get().identityKey.publicKeyBytes.toByteArray()
+        assertArrayEquals(authenticKey, retainedKey)
+
+        // Attempting to overwrite with empty key must also preserve authentic key
+        val emptyKey = ByteArray(0)
+        store.addTrustedPeer(peerId, fp, emptyKey)
+        val retainedKey2 = store.getPeer(peerId).get().identityKey.publicKeyBytes.toByteArray()
+        assertArrayEquals(authenticKey, retainedKey2)
+    }
+
+    @Test
+    fun testUnknownPeerWithUnverifiedKeyIsNotTrusted() {
+        val store = InMemoryTrustStore()
+        val unknownPeerId = "peer_unknown_actor"
+        assertFalse(store.isTrusted(unknownPeerId))
+        assertFalse(store.getPeer(unknownPeerId).isPresent)
+    }
+
+    @Test
+    fun testFabricatedZeroKeyIdentity() {
+        val allZeros = ByteArray(32) { 0x00 }
+        val empty = ByteArray(0)
+        val authentic = ByteArray(32) { (it + 1).toByte() }
+
+        assertTrue(InMemoryTrustStore.isAllZeros(allZeros))
+        assertTrue(InMemoryTrustStore.isAllZeros(empty))
+        assertFalse(InMemoryTrustStore.isAllZeros(authentic))
+    }
+
+    @Test
+    fun testLegitimateTrustedPeerReconnectsSuccessfully() {
+        val store = InMemoryTrustStore()
+        val peerId = "peer_reconnect"
+        val authenticKey = ByteArray(32) { 0x7A }
+        val fp = PeerCryptoSigner.computeFingerprint(authenticKey)
+
+        // First pairing
+        store.addTrustedPeer(peerId, fp, authenticKey)
+        assertTrue(store.isTrusted(peerId))
+
+        // Reconnect presenting same authentic key should succeed idempotently
+        store.addTrustedPeer(peerId, fp, authenticKey)
+        assertTrue(store.isTrusted(peerId))
+        assertArrayEquals(authenticKey, store.getPeer(peerId).get().identityKey.publicKeyBytes.toByteArray())
+    }
+
+    @Test
+    fun testRevokedPeerCannotBeTrusted() {
+        val store = InMemoryTrustStore()
+        val peerId = "peer_revoked_test"
+        val authenticKey = ByteArray(32) { 0x88.toByte() }
+        val fp = PeerCryptoSigner.computeFingerprint(authenticKey)
+
+        store.addTrustedPeer(peerId, fp, authenticKey)
+        assertTrue(store.isTrusted(peerId))
+
+        store.revokeTrust(peerId, "Security compromised", ByteArray(0))
+        assertTrue(store.isRevoked(peerId))
+        assertFalse(store.isTrusted(peerId))
     }
 }

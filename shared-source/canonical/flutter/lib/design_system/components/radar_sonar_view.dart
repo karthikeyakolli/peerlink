@@ -248,20 +248,9 @@ class _RadarSonarViewState extends State<RadarSonarView>
                           width: 60,
                           height: 60,
                           decoration: BoxDecoration(
-                            gradient: const LinearGradient(
-                              colors: [Color(0xFF2563EB), Color(0xFF1D4ED8)],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
+                            color: const Color(0xFF2563EB),
                             shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: const Color(0xFF2563EB)
-                                    .withValues(alpha: 0.4),
-                                blurRadius: 16,
-                                spreadRadius: 2,
-                              ),
-                            ],
+                            border: Border.all(color: Colors.white, width: 2.0),
                           ),
                           child: const Icon(
                             Icons.phonelink_ring_rounded,
@@ -274,12 +263,10 @@ class _RadarSonarViewState extends State<RadarSonarView>
                           padding: const EdgeInsets.symmetric(
                               horizontal: 10, vertical: 3),
                           decoration: BoxDecoration(
-                            color: isDark
-                                ? const Color(0xFF1E293B)
-                                : Colors.white.withValues(alpha: 0.9),
+                            color: Colors.white,
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
-                              color: isDark ? Colors.white12 : Colors.black12,
+                              color: const Color(0xFFE5E7EB),
                             ),
                           ),
                           child: Text(
@@ -287,6 +274,7 @@ class _RadarSonarViewState extends State<RadarSonarView>
                             style: const TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
+                              color: Color(0xFF0F172A),
                             ),
                           ),
                         ),
@@ -376,22 +364,14 @@ class _PeerOrbitBubble extends StatelessWidget {
                 width: 52,
                 height: 52,
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: peer.isTrusted
-                        ? [const Color(0xFF059669), const Color(0xFF047857)]
-                        : [const Color(0xFF6366F1), const Color(0xFF4F46E5)],
-                  ),
+                  color: peer.isTrusted
+                      ? const Color(0xFF15803D)
+                      : const Color(0xFF2563EB),
                   shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: (peer.isTrusted
-                              ? const Color(0xFF059669)
-                              : const Color(0xFF6366F1))
-                          .withValues(alpha: 0.4),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
+                  border: Border.all(
+                    color: Colors.white,
+                    width: 2.0,
+                  ),
                 ),
                 child: Icon(icon, color: Colors.white, size: 24),
               ),
@@ -407,7 +387,7 @@ class _PeerOrbitBubble extends StatelessWidget {
                     ),
                     child: const Icon(
                       Icons.verified_rounded,
-                      color: Color(0xFF059669),
+                      color: Color(0xFF15803D),
                       size: 16,
                     ),
                   ),
@@ -419,14 +399,9 @@ class _PeerOrbitBubble extends StatelessWidget {
             constraints: const BoxConstraints(maxWidth: 80),
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF0F172A) : Colors.white,
+              color: Colors.white,
               borderRadius: BorderRadius.circular(8),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.1),
-                  blurRadius: 4,
-                ),
-              ],
+              border: Border.all(color: const Color(0xFFE5E7EB)),
             ),
             child: Text(
               peer.name,
@@ -466,12 +441,12 @@ class _RadarWavePainter extends CustomPainter {
     for (int i = 0; i < 3; i++) {
       final ringProgress = (progress + (i / 3.0)) % 1.0;
       final currentRadius = maxRadius * ringProgress;
-      final opacity = (1.0 - ringProgress) * 0.45;
+      final opacity = (1.0 - ringProgress) * 0.30;
 
       final paint = Paint()
         ..color = waveColor.withValues(alpha: opacity)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.6;
+        ..strokeWidth = 1.0;
 
       canvas.drawCircle(center, currentRadius, paint);
     }

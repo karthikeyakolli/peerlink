@@ -89,108 +89,7 @@ jobs:
       - name: Collect Windows Diagnostics
         run: powershell -ExecutionPolicy Bypass -File windows/scripts/collect-diagnostics.ps1
 
-  # ── 3. Linux Standalone Project ─────────────────────────────────────────────
-  linux-project:
-    name: Linux Platform (Local Node & GTK3 UI)
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Linux Native Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config \
-              libgtk-3-dev libglib2.0-dev libsecret-1-dev libsystemd-dev dbus-x11
-
-      - name: Set up Pinned JDK 21
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.PINNED_JDK_DESKTOP }}
-          distribution: 'temurin'
-          cache: 'maven'
-
-      - name: Set up Pinned Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.PINNED_FLUTTER_VERSION }}
-          cache: true
-
-      - name: Make scripts executable
-        run: chmod +x linux/scripts/*.sh
-
-      - name: Check Linux Prerequisites
-        run: ./linux/scripts/check-prerequisites.sh
-
-      - name: Build & Test Linux Local Node
-        run: mvn test -B -f linux/pom.xml
-
-      - name: Run Linux Flutter Tests
-        working-directory: linux/app/flutter
-        run: |
-          flutter pub get
-          flutter test
-
-      - name: Build Flutter Linux Desktop Application
-        working-directory: linux/app/flutter
-        run: flutter build linux --release
-
-      - name: Package Linux Distribution Tarball
-        run: ./linux/scripts/package-linux.sh --version ${{ github.sha }}
-
-      - name: Collect Linux Diagnostics
-        run: ./linux/scripts/collect-diagnostics.sh
-
-  # ── 4. macOS Standalone Project ─────────────────────────────────────────────
-  macos-project:
-    name: macOS Platform (Local Node & Cocoa UI)
-    runs-on: macos-14
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Pinned JDK 21
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.PINNED_JDK_DESKTOP }}
-          distribution: 'temurin'
-          cache: 'maven'
-
-      - name: Set up Pinned Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.PINNED_FLUTTER_VERSION }}
-          cache: true
-
-      - name: Make scripts executable
-        run: chmod +x macos/scripts/*.sh
-
-      - name: Check macOS Prerequisites
-        run: ./macos/scripts/check-prerequisites.sh
-
-      - name: Verify Native Xcode Workspace
-        run: ./macos/scripts/open-xcode.sh
-
-      - name: Build & Test macOS Local Node
-        run: mvn test -B -f macos/pom.xml
-
-      - name: Run macOS Flutter Tests
-        working-directory: macos/app/flutter
-        run: |
-          flutter pub get
-          flutter test
-
-      - name: Build Flutter macOS Desktop Application
-        working-directory: macos/app/flutter
-        run: flutter build macos --release --no-codesign
-
-      - name: Package macOS Distribution Archive
-        run: ./macos/scripts/package-macos.sh --version ${{ github.sha }}
-
-      - name: Collect macOS Diagnostics
-        run: ./macos/scripts/collect-diagnostics.sh
-
-  # ── 5. Android Standalone Project ───────────────────────────────────────────
+  # ── 3. Android Standalone Project ───────────────────────────────────────────
   android-project:
     name: Android Platform (Service Layer & Mobile UI)
     runs-on: ubuntu-latest
@@ -205,11 +104,11 @@ jobs:
           distribution: 'temurin'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install Pinned Android NDK & Build Tools
         run: |
-          yes | ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager --install "ndk;${{ env.PINNED_ANDROID_NDK }}" "build-tools;${{ env.PINNED_ANDROID_BUILD_TOOLS }}"
+          yes | sdkmanager --install "ndk;${{ env.PINNED_ANDROID_NDK }}" "build-tools;${{ env.PINNED_ANDROID_BUILD_TOOLS }}"
 
       - name: Set up Pinned Flutter
         uses: subosito/flutter-action@v2
@@ -242,11 +141,11 @@ jobs:
           distribution: 'temurin'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install Pinned Android NDK & Build Tools
         run: |
-          yes | ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager --install "ndk;${{ env.PINNED_ANDROID_NDK }}" "build-tools;${{ env.PINNED_ANDROID_BUILD_TOOLS }}"
+          yes | sdkmanager --install "ndk;${{ env.PINNED_ANDROID_NDK }}" "build-tools;${{ env.PINNED_ANDROID_BUILD_TOOLS }}"
 
       - name: Set up Pinned Flutter
         uses: subosito/flutter-action@v2

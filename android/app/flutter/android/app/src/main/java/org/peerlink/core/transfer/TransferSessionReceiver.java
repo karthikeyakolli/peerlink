@@ -200,7 +200,7 @@ public class TransferSessionReceiver {
                 long transferred = counter.addAndGet(chunk.getData().size());
                 TransferManifest m = engine.getActiveManifest(chunk.getTransferId());
                 long total = (m != null && m.getTotalBytes() > 0) ? m.getTotalBytes() : transferred;
-                int percent = (int) Math.min(100, Math.max(0, (transferred * 100) / total));
+                int percent = total > 0 ? (int) Math.min(100, Math.max(0, (transferred * 100) / total)) : 100;
                 String fileName = (m != null && m.getItemsCount() > chunk.getItemIndex())
                         ? m.getItems(chunk.getItemIndex()).getRelativePath() : "file";
                 for (ReceiverTransferEventListener l : listeners) {

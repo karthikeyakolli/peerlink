@@ -2,7 +2,7 @@
 # Redirects to the peer-to-peer read-only platform parity verifier.
 
 param(
-    [string[]]$Platforms = @("windows", "linux", "macos", "android"),
+    [string[]]$Platforms = @("windows", "android"),
     [string]$ManifestPath = "tools/platform-parity/PARITY-MANIFEST.json",
     [switch]$FailFast = $false
 )

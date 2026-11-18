@@ -5,8 +5,6 @@
   "description": "Read-only manifest defining cross-platform invariant modules and paths across retained platforms (windows, linux, macos, android) without a canonical source tree.",
   "platforms": [
     "windows",
-    "linux",
-    "macos",
     "android"
   ],
   "invariantModules": [
@@ -97,15 +95,11 @@
       "allowDifferentAdapters": true,
       "mappings": {
         "windows": "org.peerlink.core.platform.windows.WindowsPlatformAdapter",
-        "linux": "org.peerlink.core.platform.linux.LinuxPlatformAdapter",
-        "macos": "org.peerlink.core.platform.macos.MacPlatformAdapter",
         "android": "org.peerlink.core.platform.android.AndroidPlatformAdapter"
       }
     },
     "nativeRunners": {
       "windows": "app/flutter/windows (C++ CMake runner)",
-      "linux": "app/flutter/linux (C++ GTK CMake runner)",
-      "macos": "app/flutter/macos (Xcode Runner.xcworkspace & Runner.xcodeproj)",
       "android": "app/flutter/android (Gradle Android host project)"
     },
     "platformSpecificFlutterCode": {
@@ -116,8 +110,6 @@
     },
     "platformSubsystemJava": {
       "windows": "Windows DPAPI credentials, netsh firewall diagnostics, shell associations",
-      "linux": "LinuxPosixFileProvider, LinuxSecretStore, XdgDesktopIntegration, LinuxPowerManager, LinuxNotificationManager",
-      "macos": "MacApfsFileProvider, MacKeychainStore, MacPowerManager, MacFinderIntegration, MacNotificationManager",
       "android": "AndroidNodeService, AndroidKeystoreStorage, SafStorageProvider"
     }
   },

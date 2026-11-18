@@ -3,7 +3,7 @@
 # without requiring an authoritative canonical source tree or selecting one platform as truth.
 
 param(
-    [string[]]$Platforms = @("windows", "linux", "macos", "android"),
+    [string[]]$Platforms = @("windows", "android"),
     [string]$ManifestPath = "tools/platform-parity/PARITY-MANIFEST.json",
     [switch]$FailFast = $false
 )

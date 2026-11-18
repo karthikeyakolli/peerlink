@@ -81,6 +81,8 @@ public class StandardTcpTransportProvider implements TransportProvider {
                 SocketChannel clientChannel = serverChannel.accept();
                 if (clientChannel != null) {
                     clientChannel.setOption(StandardSocketOptions.TCP_NODELAY, true);
+                    clientChannel.setOption(StandardSocketOptions.SO_RCVBUF, 256 * 1024);
+                    clientChannel.setOption(StandardSocketOptions.SO_SNDBUF, 256 * 1024);
                     StandardTcpTransportConnection connection = new StandardTcpTransportConnection(
                             clientChannel, TransportType.TRANSPORT_TYPE_DIRECT_TCP_TLS);
                     connection.startReading();
@@ -106,10 +108,20 @@ public class StandardTcpTransportProvider implements TransportProvider {
 
     @Override
     public CompletableFuture<TransportConnection> connectAsync(InetSocketAddress remoteAddress) {
+        return connectAsync(remoteAddress, null);
+    }
+
+    @Override
+    public CompletableFuture<TransportConnection> connectAsync(InetSocketAddress remoteAddress, PreConnectSocketBinder socketBinder) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 SocketChannel channel = SocketChannel.open();
                 channel.setOption(StandardSocketOptions.TCP_NODELAY, true);
+                channel.setOption(StandardSocketOptions.SO_RCVBUF, 256 * 1024);
+                channel.setOption(StandardSocketOptions.SO_SNDBUF, 256 * 1024);
+                if (socketBinder != null) {
+                    socketBinder.bind(channel.socket());
+                }
                 channel.connect(remoteAddress);
                 StandardTcpTransportConnection connection = new StandardTcpTransportConnection(
                         channel, TransportType.TRANSPORT_TYPE_DIRECT_TCP_TLS);

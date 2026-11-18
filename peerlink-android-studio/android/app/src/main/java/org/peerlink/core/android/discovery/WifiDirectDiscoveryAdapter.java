@@ -65,6 +65,24 @@ public class WifiDirectDiscoveryAdapter implements DiscoveryAdapter {
         log.info("Stopped Wi-Fi Direct advertising");
     }
 
+    public void notifyPeerDiscovered(PeerId peerId, String name) {
+        if (discovering.get() && activeCallback != null) {
+            activeCallback.onPeerFound(new DiscoveredPeerRecord(
+                    peerId, name, getTechnologyName()
+            ));
+        }
+    }
+
+    public void notifyRouteUpdated(PeerId peerId, String displayName, PeerTransportRoute route) {
+        if (discovering.get() && activeCallback != null) {
+            DiscoveredPeerRecord record = new DiscoveredPeerRecord(peerId, displayName, getTechnologyName());
+            if (route != null) {
+                record.addOrMergeRoute(route);
+            }
+            activeCallback.onPeerFound(record);
+        }
+    }
+
     public void notifyPeerDiscovered(PeerId peerId, String name, String host, int port, List<String> transports) {
         if (discovering.get() && activeCallback != null) {
             activeCallback.onPeerFound(new DiscoveredPeerRecord(
@@ -76,6 +94,12 @@ public class WifiDirectDiscoveryAdapter implements DiscoveryAdapter {
     public void notifyPeerLost(PeerId peerId) {
         if (discovering.get() && activeCallback != null) {
             activeCallback.onPeerLost(peerId);
+        }
+    }
+
+    public void notifyRoutesInvalidated() {
+        if (activeCallback != null) {
+            activeCallback.onRoutesInvalidated(getTechnologyName());
         }
     }
 

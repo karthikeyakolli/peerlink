@@ -16,6 +16,7 @@ void main() {
       // Find the expansion tile to expose manual inputs
       final advancedTile = find.text('Advanced Manual Paths & Policy');
       expect(advancedTile, findsOneWidget);
+      await tester.ensureVisible(advancedTile);
       await tester.tap(advancedTile);
       await tester.pumpAndSettle();
 
@@ -60,6 +61,7 @@ void main() {
 
       // Verify destination policy options are exposed
       final advancedTile = find.text('Advanced Manual Paths & Policy');
+      await tester.ensureVisible(advancedTile);
       await tester.tap(advancedTile);
       await tester.pumpAndSettle();
 

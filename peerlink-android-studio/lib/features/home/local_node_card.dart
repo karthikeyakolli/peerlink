@@ -5,6 +5,7 @@ import '../../core/app_constants.dart';
 import '../../core/node_ipc_client.dart';
 import '../../core/platform/platform_capabilities.dart';
 import '../../platform/android_node_bridge.dart';
+import '../../platform/windows_node_manager.dart';
 
 class LocalNodeCard extends StatefulWidget {
   final NodeIpcClient? client;
@@ -59,6 +60,35 @@ class _LocalNodeCardState extends State<LocalNodeCard> {
     } else {
       _ipcClient = NodeIpcClient();
       _ownsClient = true;
+    }
+    _initWindowsNodeAutoStart();
+  }
+
+  Future<void> _initWindowsNodeAutoStart() async {
+    if (WindowsNodeManager.isTestEnvironment &&
+        WindowsNodeManager.overridePortOpenForTesting == null) {
+      return;
+    }
+    try {
+      final token = await WindowsNodeManager.instance.getOrCreateAuthToken();
+      if (mounted) {
+        _tokenController.text = token;
+        _portController.text = '${WindowsNodeManager.instance.port}';
+      }
+      if (_ipcClient.currentState.status == IpcConnectionStatus.disconnected) {
+        await WindowsNodeManager.instance.autoStartAndAuthenticate(client: _ipcClient);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _handleDesktopRestart() async {
+    setState(() => _isActionInProgress = true);
+    try {
+      await WindowsNodeManager.instance.restartNode(client: _ipcClient);
+    } finally {
+      if (mounted) {
+        setState(() => _isActionInProgress = false);
+      }
     }
   }
 
@@ -192,7 +222,7 @@ class _LocalNodeCardState extends State<LocalNodeCard> {
   String _getAndroidStatusLabel(NodeLifecycleStateEnum state) {
     switch (state) {
       case NodeLifecycleStateEnum.ready:
-        return 'READY (ONLINE)';
+        return 'READY (LOCAL P2P ACTIVE)';
       case NodeLifecycleStateEnum.connected:
         return 'CONNECTED';
       case NodeLifecycleStateEnum.transferring:
@@ -237,10 +267,10 @@ class _LocalNodeCardState extends State<LocalNodeCard> {
     final securityTier = _securityLevel ?? 'Ed25519 (Protected by Android Keystore)';
 
     return Card(
-      elevation: 2,
+      elevation: 0,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
-        side: BorderSide(color: statusColor.withValues(alpha: 0.35), width: 1.5),
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: statusColor.withValues(alpha: 0.35), width: 1.0),
       ),
       child: Padding(
         padding: const EdgeInsets.all(20.0),
@@ -516,59 +546,73 @@ class _LocalNodeCardState extends State<LocalNodeCard> {
         final statusColor = _getDesktopStatusColor(state.status);
 
         return Card(
-          elevation: 2,
+          elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: statusColor.withValues(alpha: 0.3), width: 1.5),
+            side: BorderSide(color: statusColor.withValues(alpha: 0.35), width: 1.0),
           ),
           child: Padding(
-            padding: const EdgeInsets.all(20.0),
+            padding: const EdgeInsets.all(14.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Row(
-                      children: [
-                        Icon(Icons.developer_board_rounded,
-                            color: theme.colorScheme.primary, size: 24),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Desktop Local Node IPC',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: statusColor.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: statusColor, width: 1),
-                      ),
+                    Expanded(
                       child: Row(
-                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: statusColor,
-                            ),
-                          ),
+                          Icon(Icons.developer_board_rounded,
+                              color: theme.colorScheme.primary, size: 22),
                           const SizedBox(width: 6),
-                          Text(
-                            _getDesktopStatusLabel(state.status),
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: statusColor,
-                              fontWeight: FontWeight.bold,
+                          Flexible(
+                            child: Text(
+                              'Desktop Local Node IPC',
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                         ],
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: statusColor.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: statusColor, width: 1),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: statusColor,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                _getDesktopStatusLabel(state.status),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: statusColor,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 9,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -707,9 +751,7 @@ class _LocalNodeCardState extends State<LocalNodeCard> {
                       label: const Text('Query Status'),
                     ),
                     OutlinedButton.icon(
-                      onPressed: state.status == IpcConnectionStatus.connected
-                          ? () => _ipcClient.restartNode()
-                          : null,
+                      onPressed: _isActionInProgress ? null : _handleDesktopRestart,
                       icon: const Icon(Icons.restart_alt_rounded, size: 18),
                       label: const Text('Restart Node'),
                     ),
