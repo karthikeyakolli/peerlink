@@ -15,6 +15,8 @@ import '../../design_system/components/contextual_share_sheet.dart';
 import '../../design_system/components/safe_folder_sheet.dart';
 import '../../design_system/components/auto_sort_rules_sheet.dart';
 import '../../design_system/components/batch_rename_dialog.dart';
+import '../../design_system/components/storage_cleaner_sheet.dart';
+import '../../design_system/components/batch_renamer_modal.dart';
 import '../../design_system/components/file_hash_diff_sheet.dart';
 import '../../design_system/components/remote_stream_browser_sheet.dart';
 import '../../design_system/components/universal_clipboard_sheet.dart';
@@ -22,6 +24,12 @@ import '../../design_system/components/content_search_sheet.dart';
 import '../../design_system/components/document_scanner_sheet.dart';
 import '../../design_system/components/smart_photo_cleaner_sheet.dart';
 import '../../design_system/components/file_converter_sheet.dart';
+import '../../core/ephemeral_burner_share_service.dart';
+import '../../core/hotspot_tether_qr_service.dart';
+import '../../core/network_diagnostic_service.dart';
+import '../../design_system/components/burner_viewer_modal.dart';
+import '../../design_system/components/hotspot_tether_qr_sheet.dart';
+import '../../design_system/components/network_diagnostic_card.dart';
 
 class _FolderTabState {
   bool browseInternalStorage;
@@ -1173,7 +1181,7 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
             ),
           ),
           SizedBox(
-            height: (MediaQuery.textScalerOf(context).scale(22) + 84).clamp(112.0, 160.0),
+            height: (MediaQuery.textScalerOf(context).scale(34) + 86).clamp(120.0, 170.0),
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -1200,23 +1208,25 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              _buildFileThumbnail(
-                                file,
-                                size: 36,
-                                radius: 10,
-                                fallbackColor: catColor,
-                              ),
-                              PopupMenuButton<String>(
-                                icon: Icon(Icons.more_vert_rounded, size: 16, color: isDark ? Colors.white60 : Colors.black45),
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                                onSelected: (action) => _handleFileAction(action, file),
-                                itemBuilder: (ctx) => _buildMenuItems(file),
-                              ),
-                            ],
+                          Flexible(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                _buildFileThumbnail(
+                                  file,
+                                  size: 34,
+                                  radius: 10,
+                                  fallbackColor: catColor,
+                                ),
+                                PopupMenuButton<String>(
+                                  icon: Icon(Icons.more_vert_rounded, size: 16, color: isDark ? Colors.white60 : Colors.black45),
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                  onSelected: (action) => _handleFileAction(action, file),
+                                  itemBuilder: (ctx) => _buildMenuItems(file),
+                                ),
+                              ],
+                            ),
                           ),
                           const Spacer(),
                           Text(
@@ -1415,9 +1425,9 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
               icon: const Icon(Icons.drive_file_rename_outline_rounded, size: 18),
               tooltip: 'Batch Rename',
               onPressed: () {
-                BatchRenameDialog.show(
+                BatchRenamerModal.show(
                   context,
-                  paths: _selectedPaths.toList(),
+                  filePaths: _selectedPaths.toList(),
                   onRenamed: () {
                     setState(() {
                       _isMultiSelect = false;
@@ -2102,6 +2112,21 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
                 UniversalClipboardSheet.show(context);
               } else if (val == 'open_safe_folder') {
                 SafeFolderSheet.show(context, onVaultChanged: _loadData);
+              } else if (val == 'open_storage_cleaner') {
+                StorageCleanerSheet.show(context, onCleaned: _loadData);
+              } else if (val == 'open_hotspot_tether') {
+                HotspotTetherQrSheet.show(context);
+              } else if (val == 'open_network_diagnostic') {
+                showDialog(
+                  context: context,
+                  builder: (ctx) => Dialog(
+                    backgroundColor: Colors.transparent,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 420),
+                      child: const NetworkDiagnosticCard(),
+                    ),
+                  ),
+                );
               } else if (val == 'open_trash') {
                 _showTrashSheet(context);
               } else {
@@ -2203,6 +2228,42 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
                     const SizedBox(width: 8),
                     const Expanded(
                       child: Text('Show Hidden Files', overflow: TextOverflow.ellipsis),
+                    ),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'open_storage_cleaner',
+                child: Row(
+                  children: [
+                    Icon(Icons.cleaning_services_rounded, size: 16, color: Color(0xFF2563EB)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text('Deep Storage Cleaner', overflow: TextOverflow.ellipsis),
+                    ),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'open_hotspot_tether',
+                child: Row(
+                  children: [
+                    Icon(Icons.wifi_tethering_rounded, size: 16, color: Color(0xFF2563EB)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text('Hotspot Auto-Tether QR', overflow: TextOverflow.ellipsis),
+                    ),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'open_network_diagnostic',
+                child: Row(
+                  children: [
+                    Icon(Icons.network_check_rounded, size: 16, color: Color(0xFF2563EB)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text('Wi-Fi 6 Link Diagnostic', overflow: TextOverflow.ellipsis),
                     ),
                   ],
                 ),
@@ -2349,11 +2410,11 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 3,
               crossAxisSpacing: 10,
               mainAxisSpacing: 10,
-              childAspectRatio: 0.85,
+              childAspectRatio: MediaQuery.textScalerOf(context).scale(1.0) > 1.3 ? 0.70 : 0.85,
             ),
             itemCount: displayItems.length,
             itemBuilder: (context, index) {
@@ -2378,7 +2439,7 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
                 child: Stack(
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
                         color: isSelected
                             ? const Color(0xFF2563EB).withValues(alpha: isDark ? 0.25 : 0.1)
@@ -2392,13 +2453,15 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          _buildFileThumbnail(
-                            file,
-                            size: file.isImage ? 62 : 46,
-                            radius: 12,
-                            fallbackColor: catColor,
+                          Flexible(
+                            child: _buildFileThumbnail(
+                              file,
+                              size: file.isImage ? 56 : 42,
+                              radius: 12,
+                              fallbackColor: catColor,
+                            ),
                           ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 6),
                           Text(
                             file.name,
                             style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 11),
@@ -2410,6 +2473,8 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
                           Text(
                             isDir ? '${file.childCount} items' : file.formattedSize,
                             style: TextStyle(fontSize: 10, color: isDark ? Colors.white54 : Colors.black45),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ],
                       ),
@@ -2634,7 +2699,17 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
           ],
         ),
       ),
-      if (!isDir)
+      if (!isDir) ...[
+        const PopupMenuItem(
+          value: 'burner_share',
+          child: Row(
+            children: [
+              Icon(Icons.local_fire_department_rounded, size: 16, color: Color(0xFFDC2626)),
+              SizedBox(width: 8),
+              Expanded(child: Text('One-Time Burner Share')),
+            ],
+          ),
+        ),
         const PopupMenuItem(
           value: 'move_safe_folder',
           child: Row(
@@ -2645,6 +2720,7 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
             ],
           ),
         ),
+      ],
       PopupMenuItem(
         value: 'delete',
         child: Row(
@@ -2747,6 +2823,9 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
           }
         }
         break;
+      case 'burner_share':
+        _showCreateBurnerShareDialog(file);
+        break;
       case 'rename':
         _showRenameDialog(file);
         break;
@@ -2775,6 +2854,65 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
       initialIndex: idx >= 0 ? idx : 0,
       openInEditMode: openInEditMode,
     );
+  }
+
+  /// Creates a one-time ephemeral burner share token and launches the self-destructing viewer modal.
+  Future<void> _showCreateBurnerShareDialog(ReceivedFileItem file) async {
+    final pinController = TextEditingController();
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        title: const Row(
+          children: [
+            Icon(Icons.local_fire_department_rounded, color: Color(0xFFDC2626), size: 22),
+            SizedBox(width: 8),
+            Text('Create Burner Share', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'One-time self-destructing file share for "${file.name}". Permanently wipes from memory upon modal dismissal or after single view.',
+              style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: pinController,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              decoration: const InputDecoration(
+                labelText: 'Optional 4-digit PIN (leave empty for none)',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFDC2626)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Create & Launch Burner'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      final pin = pinController.text.trim();
+      final token = EphemeralBurnerShareService.instance.createBurnerShare(
+        filePath: file.path,
+        pin: pin.isNotEmpty ? pin : null,
+      );
+      pinController.dispose();
+      await BurnerViewerModal.show(context, token: token);
+    } else {
+      pinController.dispose();
+    }
   }
 
   /// Creates a new .txt or .md note in the current directory and opens the in-app editor.

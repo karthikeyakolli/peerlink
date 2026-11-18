@@ -38,6 +38,8 @@ class VideoEngineController extends ChangeNotifier {
   bool isMuted;
   double brightness;
   bool isLocked;
+  bool isPipActive;
+  bool backgroundAudioEnabled;
   String? gestureHudMessage;
   Timer? _hudTimer;
   VideoAspectRatioMode aspectRatioMode;
@@ -54,11 +56,25 @@ class VideoEngineController extends ChangeNotifier {
     this.isMuted = false,
     this.brightness = 1.0,
     this.isLocked = false,
+    this.isPipActive = false,
+    this.backgroundAudioEnabled = true,
     this.gestureHudMessage,
     this.aspectRatioMode = VideoAspectRatioMode.fit,
     List<SubtitleCue>? subtitles,
     this.subtitleSourcePath,
   }) : subtitles = subtitles ?? [];
+
+  void togglePip() {
+    isPipActive = !isPipActive;
+    setGestureHud(isPipActive ? '🪟 Picture-in-Picture Active' : 'Picture-in-Picture Closed');
+    notifyListeners();
+  }
+
+  void toggleBackgroundAudio() {
+    backgroundAudioEnabled = !backgroundAudioEnabled;
+    setGestureHud(backgroundAudioEnabled ? '🎧 Background Audio: ON' : '🎧 Background Audio: OFF');
+    notifyListeners();
+  }
 
   String? get activeSubtitleText => getSubtitleAt(currentPosition);
 

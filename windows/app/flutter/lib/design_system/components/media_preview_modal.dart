@@ -21,6 +21,8 @@ import 'archive_studio_sheet.dart';
 import 'apk_inspector_sheet.dart';
 import 'pdf_suite_sheet.dart';
 import 'expiring_beam_link_sheet.dart';
+import 'video_trimmer_sheet.dart';
+import 'floating_video_pip_overlay.dart';
 
 /// Universal In-App File & Media Viewer Engine (Minimalist Light-Only Surface).
 /// Brings every file type to life directly inside PeerLink:
@@ -2383,6 +2385,113 @@ class _MediaPreviewModalState extends State<MediaPreviewModal> {
                                   style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: _videoController.subtitles.isNotEmpty ? const Color(0xFF15803D) : const Color(0xFF64748B)),
                                 ),
                               ],
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          // Trim / Audio Extraction
+                          InkWell(
+                            key: const Key('video_trim_sheet_button'),
+                            onTap: () {
+                              VideoTrimmerSheet.show(
+                                context,
+                                fileItem: item,
+                                videoDuration: _videoController.duration,
+                                onExported: () => ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Media processed successfully')),
+                                ),
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: const Color(0xFFCBD5E1)),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.content_cut_rounded, size: 14, color: Color(0xFF2563EB)),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'Trim / Audio',
+                                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          // Picture-in-Picture (PiP)
+                          InkWell(
+                            key: const Key('video_pip_button'),
+                            onTap: () => setState(() => _videoController.togglePip()),
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: _videoController.isPipActive ? const Color(0xFFEFF6FF) : Colors.white,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: _videoController.isPipActive ? const Color(0xFF93C5FD) : const Color(0xFFCBD5E1),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.picture_in_picture_alt_rounded,
+                                    size: 14,
+                                    color: _videoController.isPipActive ? const Color(0xFF2563EB) : const Color(0xFF475569),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    _videoController.isPipActive ? 'PiP: ON' : 'PiP',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: _videoController.isPipActive ? const Color(0xFF1D4ED8) : const Color(0xFF475569),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          // Background Audio
+                          InkWell(
+                            key: const Key('video_bg_audio_button'),
+                            onTap: () => setState(() => _videoController.toggleBackgroundAudio()),
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: _videoController.backgroundAudioEnabled ? const Color(0xFFF0FDF4) : Colors.white,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: _videoController.backgroundAudioEnabled ? const Color(0xFFBBF7D0) : const Color(0xFFCBD5E1),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.headphones_rounded,
+                                    size: 14,
+                                    color: _videoController.backgroundAudioEnabled ? const Color(0xFF16A34A) : const Color(0xFF475569),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    _videoController.backgroundAudioEnabled ? 'BG Audio: ON' : 'BG Audio',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: _videoController.backgroundAudioEnabled ? const Color(0xFF15803D) : const Color(0xFF475569),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ],
