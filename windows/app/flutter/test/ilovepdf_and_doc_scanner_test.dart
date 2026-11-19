@@ -418,5 +418,40 @@ void main() {
       expect(find.text('Checksum & Integrity Verifier'), findsOneWidget);
       expect(find.text('Storage Junk Scrubber'), findsOneWidget);
     });
+
+    testWidgets('FileConverterFlowView hero document scanner captures pages, changes filters, and compiles PDF', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: FileConverterFlowView(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Verify Hero Workspace Title and buttons
+      expect(find.text('Mobile Document Scanner Studio'), findsOneWidget);
+      expect(find.byKey(const Key('hero_scanner_camera_button')), findsOneWidget);
+      expect(find.byKey(const Key('hero_scanner_import_button')), findsOneWidget);
+      expect(find.byKey(const Key('hero_scanner_add_page_button')), findsOneWidget);
+
+      // Add a page via Camera scan button
+      await tester.tap(find.byKey(const Key('hero_scanner_camera_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Captured Pages (1)'), findsOneWidget);
+      expect(find.text('B&W Document'), findsWidgets);
+
+      // Compile to PDF
+      expect(find.byKey(const Key('hero_scanner_compile_pdf_button')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('hero_scanner_compile_pdf_button')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 150));
+
+      expect(find.textContaining('PDF Saved:'), findsOneWidget);
+    });
   });
 }

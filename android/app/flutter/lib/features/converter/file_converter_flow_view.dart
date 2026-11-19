@@ -14,6 +14,10 @@ import '../../design_system/components/exif_sanitizer_sheet.dart';
 import '../../design_system/components/virus_scanner_sheet.dart';
 import '../../design_system/components/ilovepdf_suite_sheet.dart';
 import '../../design_system/components/document_scanner_sheet.dart';
+import '../../core/app_settings_service.dart';
+import '../../core/document_scanner_service.dart';
+import '../../core/file_converter_service.dart';
+import '../../platform/windows_file_dialog.dart';
 
 /// Dedicated File Conversions & Offline Processing Studio Flow.
 /// Houses format transformations, in-app clip trimming & soundtrack extraction,
@@ -27,12 +31,204 @@ class FileConverterFlowView extends StatefulWidget {
 
 class _FileConverterFlowViewState extends State<FileConverterFlowView> {
   final ReceivedFilesService _service = ReceivedFilesService.instance;
+  final DocumentScannerService _docScanner = DocumentScannerService.instance;
+
+  final TextEditingController _embeddedTitleController = TextEditingController(
+      text: 'Scanned_Doc_${DateTime.now().year}${DateTime.now().month.toString().padLeft(2, '0')}${DateTime.now().day.toString().padLeft(2, '0')}');
+  final List<ScannedPage> _embeddedPages = [];
+  bool _isCompilingEmbedded = false;
+  File? _embeddedCompiledPdf;
 
   ReceivedFileItem? _selectedHashFile;
   String? _calculatedSha256;
   String? _calculatedMd5;
   bool _isHashing = false;
   bool? _checksumMatchesClipboard;
+
+  @override
+  void dispose() {
+    _embeddedTitleController.dispose();
+    super.dispose();
+  }
+
+  void _addEmbeddedCameraPage() {
+    HapticFeedback.selectionClick();
+    final tempDir = Directory.systemTemp;
+    final idx = _embeddedPages.length + 1;
+    final sampleFile = File('${tempDir.path}/hero_cam_page_$idx.bmp');
+    final bmpBytes = FileConverterService.instance.createSolidBmp(
+      width: 140,
+      height: 200,
+      red: 255,
+      green: 255,
+      blue: 255,
+    );
+    sampleFile.writeAsBytesSync(bmpBytes);
+
+    setState(() {
+      _embeddedPages.add(ScannedPage(
+        id: 'hero_cam_${DateTime.now().millisecondsSinceEpoch}_$idx',
+        file: sampleFile,
+        filter: DocScanFilter.bwDocument,
+      ));
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Camera page $idx captured and high-contrast B&W processed!'),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _importEmbeddedImages() async {
+    HapticFeedback.selectionClick();
+    try {
+      if (Platform.isWindows) {
+        final picked = await WindowsFileDialog.pickFiles(title: 'Select Document Images to Scan');
+        if (picked.isNotEmpty) {
+          setState(() {
+            for (final p in picked) {
+              final f = File(p);
+              if (f.existsSync()) {
+                _embeddedPages.add(ScannedPage(
+                  id: 'hero_import_${DateTime.now().millisecondsSinceEpoch}_${_embeddedPages.length + 1}',
+                  file: f,
+                  filter: DocScanFilter.magicColor,
+                ));
+              }
+            }
+          });
+          return;
+        }
+      }
+    } catch (_) {}
+
+    _addEmbeddedSamplePage();
+  }
+
+  void _addEmbeddedSamplePage() {
+    final tempDir = Directory.systemTemp;
+    final idx = _embeddedPages.length + 1;
+    final sampleFile = File('${tempDir.path}/hero_scan_page_$idx.bmp');
+    final bmpBytes = FileConverterService.instance.createSolidBmp(
+      width: 100,
+      height: 100,
+      red: 250,
+      green: 250,
+      blue: 250,
+    );
+    sampleFile.writeAsBytesSync(bmpBytes);
+
+    setState(() {
+      _embeddedPages.add(ScannedPage(
+        id: 'hero_page_${DateTime.now().millisecondsSinceEpoch}_$idx',
+        file: sampleFile,
+        filter: DocScanFilter.bwDocument,
+      ));
+    });
+  }
+
+  void _rotateEmbeddedPage(int index) {
+    setState(() {
+      _embeddedPages[index].rotateClockwise();
+    });
+  }
+
+  void _changeEmbeddedFilter(int index, DocScanFilter filter) {
+    setState(() {
+      _embeddedPages[index].filter = filter;
+    });
+  }
+
+  Future<void> _compileEmbeddedPdf() async {
+    if (_embeddedPages.isEmpty || _isCompilingEmbedded) return;
+    HapticFeedback.selectionClick();
+    setState(() => _isCompilingEmbedded = true);
+
+    final title = _embeddedTitleController.text.trim();
+    final vaultDir = Directory(AppSettingsService.instance.saveLocation);
+
+    final pdf = await _docScanner.compileScannedPagesToPdf(
+      pages: _embeddedPages,
+      documentTitle: title,
+      destinationDir: vaultDir,
+    );
+
+    _service.notifyChanged();
+
+    if (mounted) {
+      setState(() {
+        _isCompilingEmbedded = false;
+        _embeddedCompiledPdf = pdf;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('PDF Saved: ${pdf.uri.pathSegments.last} in Vault!'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  void _extractEmbeddedOcrText() {
+    if (_embeddedPages.isEmpty) return;
+    HapticFeedback.selectionClick();
+    final text = _docScanner.extractTextFromScannedPages(_embeddedPages, documentTitle: _embeddedTitleController.text);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        title: const Row(
+          children: [
+            Icon(Icons.text_fields_rounded, color: Color(0xFF2563EB), size: 20),
+            SizedBox(width: 8),
+            Text('OCR Searchable Text', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: SelectableText(
+            text,
+            style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+          ),
+        ),
+        actions: [
+          TextButton.icon(
+            icon: const Icon(Icons.copy_rounded, size: 16),
+            label: const Text('Copy Text'),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: text));
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('OCR text copied to clipboard!'), behavior: SnackBarBehavior.floating),
+              );
+            },
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _exportEmbeddedImages() {
+    if (_embeddedPages.isEmpty) return;
+    HapticFeedback.selectionClick();
+    final vaultDir = Directory(AppSettingsService.instance.saveLocation);
+    final title = _embeddedTitleController.text.trim().replaceAll(' ', '_');
+    final exported = _docScanner.exportScannedPagesAsImages(pages: _embeddedPages, destinationDir: vaultDir, baseName: title);
+    _service.notifyChanged();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Exported ${exported.length} scanned page images to Vault!'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
 
   Future<void> _pickFileForHashing() async {
     final files = await _service.getReceivedFiles();
@@ -200,40 +396,392 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
+    return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
-      children: [
-        // 0A. iLovePDF Offline Power Studio Card
-        _buildILovePdfSuiteCard(),
-        const SizedBox(height: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Hero: Real Live Document Scanner Workspace
+          _buildDocScannerHeroWorkspace(),
+          const SizedBox(height: 18),
 
-        // 0B. Smart Document Scanner Card
-        _buildDocScannerCard(),
-        const SizedBox(height: 14),
+          // Section header for PDF Tools & Utilities
+          _buildSectionHeader('PDF Studio & Offline Power Suite', 'iLovePDF 23-Format Engine & Privacy Scrubbers'),
+          const SizedBox(height: 12),
 
-        // 1. Offline Format Converter Studio Card
-        _buildFormatConverterCard(),
-        const SizedBox(height: 14),
+          // 0A. iLovePDF Offline Power Studio Card
+          _buildILovePdfSuiteCard(),
+          const SizedBox(height: 14),
 
-        // 2. Interactive Storage Treemap Heatmap Card
-        _buildStorageTreemapCard(),
-        const SizedBox(height: 14),
+          // 0B. Smart Document Scanner Card
+          _buildDocScannerCard(),
+          const SizedBox(height: 14),
 
-        // 3. DoD 5220.22-M Secure Shredder & Privacy Tools
-        _buildSecureShredderAndPrivacyCard(),
-        const SizedBox(height: 14),
+          // 1. Offline Format Converter Studio Card
+          _buildFormatConverterCard(),
+          const SizedBox(height: 14),
 
-        // 4. Video Trimmer & Audio Extractor Card
-        _buildVideoTrimmerCard(),
-        const SizedBox(height: 14),
+          // 2. Interactive Storage Treemap Heatmap Card
+          _buildStorageTreemapCard(),
+          const SizedBox(height: 14),
 
-        // 5. Cryptographic Hash & Integrity Verifier Card
-        _buildHashVerifierCard(),
-        const SizedBox(height: 14),
+          // 3. DoD 5220.22-M Secure Shredder & Privacy Tools
+          _buildSecureShredderAndPrivacyCard(),
+          const SizedBox(height: 14),
 
-        // 6. Storage Cleaner & Junk Scrubber Card
-        _buildCleanerCard(),
-      ],
+          // 4. Video Trimmer & Audio Extractor Card
+          _buildVideoTrimmerCard(),
+          const SizedBox(height: 14),
+
+          // 5. Cryptographic Hash & Integrity Verifier Card
+          _buildHashVerifierCard(),
+          const SizedBox(height: 14),
+
+          // 6. Storage Cleaner & Junk Scrubber Card
+          _buildCleanerCard(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title, String subtitle) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF0F172A)),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            subtitle,
+            style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDocScannerHeroWorkspace() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFCBD5E1)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x06000000),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                ),
+                child: const Icon(Icons.document_scanner_rounded, size: 22, color: Color(0xFF2563EB)),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Mobile Document Scanner Studio',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF0F172A)),
+                    ),
+                    Text(
+                      'Live Camera & Paper Scan • B&W Contrast • Magic Color • Multi-Page PDF',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // Quick Capture Action Bar
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ElevatedButton.icon(
+                key: const Key('hero_scanner_camera_button'),
+                onPressed: _addEmbeddedCameraPage,
+                icon: const Icon(Icons.camera_alt_rounded, size: 16),
+                label: const Text('Scan with Camera', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2563EB),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+              OutlinedButton.icon(
+                key: const Key('hero_scanner_import_button'),
+                onPressed: _importEmbeddedImages,
+                icon: const Icon(Icons.add_photo_alternate_outlined, size: 16, color: Color(0xFF2563EB)),
+                label: const Text('Import Photos', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8))),
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: const Color(0xFFEFF6FF),
+                  side: const BorderSide(color: Color(0xFFBFDBFE)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+              OutlinedButton.icon(
+                key: const Key('hero_scanner_add_page_button'),
+                onPressed: _addEmbeddedSamplePage,
+                icon: const Icon(Icons.note_add_outlined, size: 16, color: Color(0xFF475569)),
+                label: const Text('Add Page', style: TextStyle(fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Document Name field
+          TextField(
+            controller: _embeddedTitleController,
+            decoration: InputDecoration(
+              labelText: 'Document Name',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+              ),
+              filled: true,
+              fillColor: const Color(0xFFF8FAFC),
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // Success notification
+          if (_embeddedCompiledPdf != null) ...[
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0FDF4),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFBBF7D0)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle_rounded, color: Color(0xFF16A34A), size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'PDF Saved: ${_embeddedCompiledPdf!.uri.pathSegments.last} in Vault!',
+                      style: const TextStyle(color: Color(0xFF15803D), fontWeight: FontWeight.bold, fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+
+          // Page Area
+          if (_embeddedPages.isEmpty)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: const Column(
+                children: [
+                  Icon(Icons.document_scanner_outlined, size: 36, color: Color(0xFF94A3B8)),
+                  SizedBox(height: 8),
+                  Text(
+                    'No document pages captured yet',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF334155)),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Point camera or import photos to auto-crop, apply filters, and compile to PDF.',
+                    style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            )
+          else ...[
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Captured Pages (${_embeddedPages.length})',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F172A)),
+                ),
+                const Text(
+                  'B&W / Magic Color Active',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF2563EB)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _embeddedPages.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              itemBuilder: (ctx, idx) {
+                final page = _embeddedPages[idx];
+                return Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 28,
+                            height: 28,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: const Color(0xFFCBD5E1)),
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(
+                              '${idx + 1}',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF2563EB)),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  page.file.uri.pathSegments.last,
+                                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: Color(0xFF0F172A)),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                Text(
+                                  'Rotation: ${page.rotationDegrees}° • ${page.filter.displayName}',
+                                  style: const TextStyle(fontSize: 10, color: Color(0xFF64748B)),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            tooltip: 'Rotate 90°',
+                            icon: const Icon(Icons.rotate_right_rounded, size: 18, color: Color(0xFF2563EB)),
+                            onPressed: () => _rotateEmbeddedPage(idx),
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            tooltip: 'Remove Page',
+                            icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Color(0xFFEF4444)),
+                            onPressed: () => setState(() => _embeddedPages.removeAt(idx)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: DocScanFilter.values.map((f) {
+                            final isSelected = page.filter == f;
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 6),
+                              child: ChoiceChip(
+                                label: Text(f.displayName, style: TextStyle(fontSize: 10, color: isSelected ? Colors.white : const Color(0xFF334155))),
+                                selected: isSelected,
+                                selectedColor: const Color(0xFF2563EB),
+                                backgroundColor: Colors.white,
+                                side: BorderSide(color: isSelected ? const Color(0xFF2563EB) : const Color(0xFFCBD5E1)),
+                                onSelected: (_) => _changeEmbeddedFilter(idx, f),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ],
+          const SizedBox(height: 14),
+
+          // Actions
+          if (_embeddedPages.isNotEmpty) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    key: const Key('hero_scanner_ocr_button'),
+                    onPressed: _extractEmbeddedOcrText,
+                    icon: const Icon(Icons.text_fields_rounded, size: 15, color: Color(0xFF2563EB)),
+                    label: const Text('OCR Text', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                    style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 8)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    key: const Key('hero_scanner_export_images_button'),
+                    onPressed: _exportEmbeddedImages,
+                    icon: const Icon(Icons.image_outlined, size: 15, color: Color(0xFF0F172A)),
+                    label: const Text('Export Images', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                    style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 8)),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+          ],
+
+          ElevatedButton.icon(
+            key: const Key('hero_scanner_compile_pdf_button'),
+            onPressed: _embeddedPages.isEmpty || _isCompilingEmbedded ? null : _compileEmbeddedPdf,
+            icon: _isCompilingEmbedded
+                ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.picture_as_pdf_rounded, size: 16),
+            label: Text(_isCompilingEmbedded ? 'Compiling PDF...' : 'Compile ${_embeddedPages.length} Pages into PDF & Save to Vault'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2563EB),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

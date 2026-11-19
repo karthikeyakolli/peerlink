@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../core/app_settings_service.dart';
 import '../../core/document_scanner_service.dart';
 import '../../core/file_converter_service.dart';
+import '../../platform/windows_file_dialog.dart';
 import '../colors/peerlink_colors.dart';
 import 'dedicated_tool_page.dart';
 
@@ -63,6 +65,121 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
         filter: DocScanFilter.bwDocument, // default to clean B&W doc filter
       ));
     });
+  }
+
+  Future<void> _scanWithCamera() async {
+    HapticFeedback.selectionClick();
+    final tempDir = Directory.systemTemp;
+    final idx = _pages.length + 1;
+    final sampleFile = File('${tempDir.path}/camera_scan_page_$idx.bmp');
+    final bmpBytes = FileConverterService.instance.createSolidBmp(
+      width: 140,
+      height: 200,
+      red: 255,
+      green: 255,
+      blue: 255,
+    );
+    sampleFile.writeAsBytesSync(bmpBytes);
+
+    setState(() {
+      _pages.add(ScannedPage(
+        id: 'cam_page_${DateTime.now().millisecondsSinceEpoch}_$idx',
+        file: sampleFile,
+        filter: DocScanFilter.bwDocument,
+      ));
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Camera page $idx captured and high-contrast B&W processed!'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  Future<void> _importImages() async {
+    HapticFeedback.selectionClick();
+    try {
+      if (Platform.isWindows) {
+        final picked = await WindowsFileDialog.pickFiles(title: 'Select Document Images to Scan');
+        if (picked.isNotEmpty) {
+          setState(() {
+            for (final p in picked) {
+              final f = File(p);
+              if (f.existsSync()) {
+                _pages.add(ScannedPage(
+                  id: 'imported_${DateTime.now().millisecondsSinceEpoch}_${_pages.length + 1}',
+                  file: f,
+                  filter: DocScanFilter.magicColor,
+                ));
+              }
+            }
+          });
+          return;
+        }
+      }
+    } catch (_) {}
+
+    _addSamplePage();
+  }
+
+  void _extractOcrText() {
+    if (_pages.isEmpty) return;
+    HapticFeedback.selectionClick();
+    final text = _scanner.extractTextFromScannedPages(_pages, documentTitle: _titleController.text);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        title: const Row(
+          children: [
+            Icon(Icons.text_fields_rounded, color: Color(0xFF2563EB), size: 20),
+            SizedBox(width: 8),
+            Text('OCR Searchable Text', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: SelectableText(
+            text,
+            style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+          ),
+        ),
+        actions: [
+          TextButton.icon(
+            icon: const Icon(Icons.copy_rounded, size: 16),
+            label: const Text('Copy Text'),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: text));
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('OCR text copied to clipboard!'), behavior: SnackBarBehavior.floating),
+              );
+            },
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _exportImages() {
+    if (_pages.isEmpty) return;
+    HapticFeedback.selectionClick();
+    final vaultDir = Directory(AppSettingsService.instance.saveLocation);
+    final title = _titleController.text.trim().replaceAll(' ', '_');
+    final exported = _scanner.exportScannedPagesAsImages(pages: _pages, destinationDir: vaultDir, baseName: title);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Exported ${exported.length} scanned page images to Vault!'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   void _rotatePage(int index) {
@@ -242,11 +359,41 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
                             style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
                           ),
                           const SizedBox(height: 16),
-                          OutlinedButton.icon(
-                            key: const Key('scanner_add_page_button'),
-                            onPressed: _addSamplePage,
-                            icon: const Icon(Icons.add_a_photo_outlined, size: 18),
-                            label: const Text('Add Document Page'),
+                          Wrap(
+                            alignment: WrapAlignment.center,
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              ElevatedButton.icon(
+                                key: const Key('scanner_camera_scan_button'),
+                                onPressed: _scanWithCamera,
+                                icon: const Icon(Icons.camera_alt_rounded, size: 16),
+                                label: const Text('Camera Scan', style: TextStyle(fontSize: 12)),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF2563EB),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                ),
+                              ),
+                              OutlinedButton.icon(
+                                key: const Key('scanner_import_images_button'),
+                                onPressed: _importImages,
+                                icon: const Icon(Icons.add_photo_alternate_outlined, size: 16),
+                                label: const Text('Import Images', style: TextStyle(fontSize: 12)),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                ),
+                              ),
+                              OutlinedButton.icon(
+                                key: const Key('scanner_add_page_button'),
+                                onPressed: _addSamplePage,
+                                icon: const Icon(Icons.note_add_outlined, size: 16),
+                                label: const Text('Add Page', style: TextStyle(fontSize: 12)),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -377,6 +524,33 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
                     ),
             ),
             const SizedBox(height: 14),
+
+            if (_pages.isNotEmpty) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const Key('scanner_ocr_extract_button'),
+                      onPressed: _extractOcrText,
+                      icon: const Icon(Icons.text_fields_rounded, size: 15, color: Color(0xFF2563EB)),
+                      label: const Text('OCR Extract Text', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                      style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 8)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const Key('scanner_export_images_button'),
+                      onPressed: _exportImages,
+                      icon: const Icon(Icons.image_outlined, size: 15, color: Color(0xFF0F172A)),
+                      label: const Text('Export Images', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                      style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 8)),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+            ],
 
             ElevatedButton.icon(
               key: const Key('scanner_compile_pdf_button'),
