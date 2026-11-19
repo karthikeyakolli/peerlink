@@ -116,6 +116,149 @@ void main() {
     });
   });
 
+  group('Convert TO PDF (16 Formats) Engine Tests', () {
+    final pdfService = PdfPowerSuiteService.instance;
+
+    test('1. Word to PDF (.doc, .docx)', () async {
+      final f = File('${tempDir.path}/test_doc.docx')..writeAsStringSync('Word document corporate memo');
+      final out = '${tempDir.path}/word_test.pdf';
+      final res = await pdfService.convertWordToPdf(f.path, out);
+      expect(res.pageCount, greaterThanOrEqualTo(1));
+      expect(File(out).existsSync(), isTrue);
+    });
+
+    test('2. PowerPoint to PDF (.ppt, .pptx)', () async {
+      final f = File('${tempDir.path}/test_pres.pptx')..writeAsStringSync('Slide 1: Intro\nSlide 2: Roadmap');
+      final out = '${tempDir.path}/ppt_test.pdf';
+      final res = await pdfService.convertPowerPointToPdf(f.path, out);
+      expect(res.pageCount, greaterThanOrEqualTo(1));
+      expect(File(out).existsSync(), isTrue);
+    });
+
+    test('3. Excel to PDF (.xls, .xlsx)', () async {
+      final f = File('${tempDir.path}/test_sheet.xlsx')..writeAsStringSync('Item,Qty,Price\nWidget,10,\$5.00');
+      final out = '${tempDir.path}/excel_test.pdf';
+      final res = await pdfService.convertExcelToPdf(f.path, out);
+      expect(res.pageCount, greaterThanOrEqualTo(1));
+      expect(File(out).existsSync(), isTrue);
+    });
+
+    test('4-11. Raster and Vector Images to PDF (JPG, PNG, TIFF, SVG, BMP, RAW, HEIC, WEBP)', () async {
+      final formats = ['jpg', 'png', 'tiff', 'svg', 'bmp', 'raw', 'heic', 'webp'];
+      for (final fmt in formats) {
+        final img = File('${tempDir.path}/test_image.$fmt')..writeAsStringSync('sample_bytes_$fmt');
+        final out = '${tempDir.path}/img_out_$fmt.pdf';
+        final res = await pdfService.convertImageFormatToPdf(img.path, out, formatHint: fmt);
+        expect(res.pageCount, equals(1));
+        expect(File(out).existsSync(), isTrue);
+      }
+    });
+
+    test('12. HTML to PDF (web page via URL & local HTML)', () async {
+      final outUrl = '${tempDir.path}/web_article.pdf';
+      final resUrl = await pdfService.convertHtmlToPdf('https://example.com/article', outUrl);
+      expect(resUrl.pageCount, equals(1));
+      expect(File(outUrl).existsSync(), isTrue);
+
+      final localHtml = File('${tempDir.path}/index.html')..writeAsStringSync('<h1>Title</h1><p>Paragraph</p>');
+      final outLocal = '${tempDir.path}/html_local.pdf';
+      final resLocal = await pdfService.convertHtmlToPdf(localHtml.path, outLocal);
+      expect(resLocal.pageCount, equals(1));
+      expect(File(outLocal).existsSync(), isTrue);
+    });
+
+    test('13-15. OpenDocument to PDF (ODT, ODP, ODS)', () async {
+      for (final fmt in ['odt', 'odp', 'ods']) {
+        final f = File('${tempDir.path}/doc.$fmt')..writeAsStringSync('OpenDocument content');
+        final out = '${tempDir.path}/odf_$fmt.pdf';
+        final res = await pdfService.convertOpenDocumentToPdf(f.path, out, format: fmt);
+        expect(res.pageCount, equals(1));
+        expect(File(out).existsSync(), isTrue);
+      }
+    });
+
+    test('16. Adobe Illustrator to PDF (.ai)', () async {
+      final ai = File('${tempDir.path}/vector_art.ai')..writeAsStringSync('%PDF-1.4\nIllustrator Vector Stream');
+      final out = '${tempDir.path}/illustrator_test.pdf';
+      final res = await pdfService.convertIllustratorToPdf(ai.path, out);
+      expect(res.pageCount, equals(1));
+      expect(File(out).existsSync(), isTrue);
+    });
+  });
+
+  group('Convert FROM PDF (7 Formats) Engine Tests', () {
+    final pdfService = PdfPowerSuiteService.instance;
+    late File samplePdf;
+
+    setUp(() {
+      samplePdf = File('${tempDir.path}/sample_source.pdf')
+        ..writeAsStringSync('%PDF-1.4\n1 0 obj\nSample Source Document Text\nendobj\n%%EOF');
+    });
+
+    test('1. PDF to Word (.docx)', () async {
+      final out = '${tempDir.path}/extracted_doc.docx';
+      final file = await pdfService.convertPdfToWord(samplePdf.path, out);
+      expect(file.existsSync(), isTrue);
+      final bytes = file.readAsBytesSync();
+      expect(bytes.length, greaterThan(100));
+      expect(bytes[0], equals(0x50)); // PK
+      expect(bytes[1], equals(0x4B)); // PK
+    });
+
+    test('2. PDF to PowerPoint (.pptx)', () async {
+      final out = '${tempDir.path}/extracted_pres.pptx';
+      final file = await pdfService.convertPdfToPowerPoint(samplePdf.path, out);
+      expect(file.existsSync(), isTrue);
+      final bytes = file.readAsBytesSync();
+      expect(bytes[0], equals(0x50)); // PK
+      expect(bytes[1], equals(0x4B));
+    });
+
+    test('3. PDF to Excel (.xlsx)', () async {
+      final out = '${tempDir.path}/extracted_sheet.xlsx';
+      final file = await pdfService.convertPdfToExcel(samplePdf.path, out);
+      expect(file.existsSync(), isTrue);
+      final bytes = file.readAsBytesSync();
+      expect(bytes[0], equals(0x50)); // PK
+      expect(bytes[1], equals(0x4B));
+    });
+
+    test('4. PDF to JPG (.jpg)', () async {
+      final out = '${tempDir.path}/extracted_page.jpg';
+      final file = await pdfService.convertPdfToJpg(samplePdf.path, out);
+      expect(file.existsSync(), isTrue);
+      final bytes = file.readAsBytesSync();
+      expect(bytes[0], equals(0xFF)); // SOI
+      expect(bytes[1], equals(0xD8));
+    });
+
+    test('5. PDF to PDF/A (Archival Standard)', () async {
+      final out = '${tempDir.path}/archival.pdf';
+      final res = await pdfService.convertPdfToPdfA(samplePdf.path, out);
+      expect(res.isPdfA, isTrue);
+      expect(File(out).existsSync(), isTrue);
+      final content = File(out).readAsStringSync();
+      expect(content, contains('/GTS_PDFA1'));
+    });
+
+    test('6. PDF to Markdown (.md)', () async {
+      final out = '${tempDir.path}/extracted_notes.md';
+      final file = await pdfService.convertPdfToMarkdown(samplePdf.path, out);
+      expect(file.existsSync(), isTrue);
+      final text = file.readAsStringSync();
+      expect(text, contains('#'));
+    });
+
+    test('7. Scanned PDF to Searchable PDF (OCR)', () async {
+      final out = '${tempDir.path}/searchable_ocr.pdf';
+      final res = await pdfService.convertScannedPdfToSearchableOcr(samplePdf.path, out);
+      expect(res.isSearchableOcr, isTrue);
+      expect(File(out).existsSync(), isTrue);
+      final content = File(out).readAsStringSync();
+      expect(content, contains('3 Tr')); // Invisible OCR text rendering mode
+    });
+  });
+
   group('DocumentScannerService Tests', () {
     final scanner = DocumentScannerService.instance;
     final converter = FileConverterService.instance;
@@ -179,12 +322,26 @@ void main() {
       expect(find.text('Convert'), findsOneWidget);
       expect(find.text('Security'), findsOneWidget);
 
-      // Tap Merge Documents button
+      // Verify Convert Tab has sub-filters and buttons
+      expect(find.text('All (23)'), findsOneWidget);
+      expect(find.text('To PDF (16)'), findsOneWidget);
+      expect(find.text('From PDF (7)'), findsOneWidget);
+
+      // Tap Convert to Word button
+      expect(find.byKey(const Key('convert_word_to_pdf_button')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('convert_word_to_pdf_button')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.textContaining('Converted Word (.docx) to PDF!'), findsOneWidget);
+
+      // Tap Organize Tab
+      await tester.tap(find.text('Organize'));
+      await tester.pumpAndSettle();
+
       expect(find.byKey(const Key('ilovepdf_merge_button')), findsOneWidget);
       await tester.tap(find.byKey(const Key('ilovepdf_merge_button')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
-
       expect(find.textContaining('Merged 2 documents successfully!'), findsOneWidget);
 
       // Switch to Security Tab
