@@ -1,21 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dedicated_tool_page.dart';
 
 /// Modal sheet for P2P Local Encrypted Walkie-Talkie & Push-to-Talk (PTT) Intercom.
 class LocalWalkieTalkieSheet extends StatefulWidget {
   final String peerName;
+  final bool isPage;
 
   const LocalWalkieTalkieSheet({
     super.key,
     this.peerName = 'Paired Laptop (DESKTOP-OMEN)',
+    this.isPage = false,
   });
 
   static Future<void> show(BuildContext context, {String peerName = 'Paired Laptop (DESKTOP-OMEN)'}) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => LocalWalkieTalkieSheet(peerName: peerName),
+    return DedicatedToolPage.open(
+      context,
+      title: 'Local Encrypted Walkie-Talkie',
+      subtitle: 'Zero-Latency Push-to-Talk (PTT) Audio Intercom',
+      icon: Icons.mic_rounded,
+      child: LocalWalkieTalkieSheet(peerName: peerName, isPage: true),
     );
   }
 
@@ -40,19 +44,21 @@ class _LocalWalkieTalkieSheetState extends State<LocalWalkieTalkieSheet> {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(24),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 36,
-            height: 4,
-            decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(2)),
-          ),
-          const SizedBox(height: 12),
+          if (!widget.isPage) ...[
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(2)),
+            ),
+            const SizedBox(height: 12),
+          ],
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [

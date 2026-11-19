@@ -1,21 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dedicated_tool_page.dart';
 
 /// Modal sheet for inspecting modern split-APK bundles (.apks, .xapk) and APK ABIs.
 class SplitApkInspectorSheet extends StatelessWidget {
   final String bundleName;
+  final bool isPage;
 
   const SplitApkInspectorSheet({
     super.key,
     this.bundleName = 'com.example.app_release.apks',
+    this.isPage = false,
   });
 
   static Future<void> show(BuildContext context, {String bundleName = 'com.example.app_release.apks'}) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => SplitApkInspectorSheet(bundleName: bundleName),
+    return DedicatedToolPage.open(
+      context,
+      title: 'Split-APK & Bundle Inspector',
+      subtitle: 'Inspection of .apks, .xapk & Native ABI Architectures',
+      icon: Icons.android_rounded,
+      child: SplitApkInspectorSheet(bundleName: bundleName, isPage: true),
     );
   }
 
@@ -29,11 +33,11 @@ class SplitApkInspectorSheet extends StatelessWidget {
     ];
 
     return Container(
-      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+      constraints: isPage ? null : BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
       padding: const EdgeInsets.all(20),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

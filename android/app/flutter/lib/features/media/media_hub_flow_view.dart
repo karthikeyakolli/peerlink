@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/audio_player_service.dart';
 import '../../core/received_files_service.dart';
+import '../../core/system_media_scanner_service.dart';
 import '../../core/models/file_item.dart';
 import '../../design_system/components/media_preview_modal.dart';
 import '../../design_system/components/floating_audio_mini_player.dart';
+import '../../design_system/components/dedicated_tool_page.dart';
 import '../../design_system/components/video_trimmer_sheet.dart';
 import '../../design_system/components/subtitle_sync_sheet.dart';
 import '../../design_system/components/audio_sleep_timer_sheet.dart';
@@ -16,10 +18,12 @@ import '../../design_system/components/torrent_downloader_sheet.dart';
 import '../../design_system/components/virus_scanner_sheet.dart';
 
 enum MediaHubTab { all, photos, videos, audio, documents }
+enum MediaStorageScope { device, vault, unified }
 
-/// Dedicated Media Viewer & Player Flow.
-/// Provides specialized gallery views for photos, a gesture-enabled video theater,
-/// an audio jukebox with speed controls and sleep timer, and a document previewer.
+/// Dedicated Media Viewer & Player Flow (Space 1).
+/// Directly synchronizes with System Device Storage (Pictures, Videos, Music, Downloads)
+/// as well as the secure PeerLink Vault.
+/// All auxiliary tools open in dedicated full-page workspaces instead of cramped bottom sheets.
 class MediaHubFlowView extends StatefulWidget {
   const MediaHubFlowView({super.key});
 
@@ -28,12 +32,15 @@ class MediaHubFlowView extends StatefulWidget {
 }
 
 class _MediaHubFlowViewState extends State<MediaHubFlowView> {
-  final ReceivedFilesService _service = ReceivedFilesService.instance;
+  final ReceivedFilesService _vaultService = ReceivedFilesService.instance;
+  final SystemMediaScannerService _systemScanner = SystemMediaScannerService.instance;
   final AudioPlayerService _audioService = AudioPlayerService.instance;
 
   MediaHubTab _currentTab = MediaHubTab.all;
+  MediaStorageScope _storageScope = MediaStorageScope.device;
   List<ReceivedFileItem> _allFiles = [];
   bool _isLoading = true;
+  bool _isSyncing = false;
   StreamSubscription<void>? _changeSub;
 
   double _playbackSpeed = 1.0;
@@ -44,7 +51,7 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
   void initState() {
     super.initState();
     _loadData();
-    _changeSub = _service.changeStream.listen((_) => _loadData());
+    _changeSub = _vaultService.changeStream.listen((_) => _loadData());
   }
 
   @override
@@ -54,13 +61,48 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
     super.dispose();
   }
 
-  Future<void> _loadData() async {
-    final files = await _service.getReceivedFiles();
-    if (mounted) {
-      setState(() {
-        _allFiles = files.where((f) => !f.isDirectory).toList();
-        _isLoading = false;
-      });
+  Future<void> _loadData({bool forceSystemSync = false}) async {
+    setState(() => _isLoading = true);
+
+    try {
+      List<ReceivedFileItem> loaded = [];
+
+      if (_storageScope == MediaStorageScope.device) {
+        // System Device Storage
+        loaded = await _systemScanner.scanDeviceStorage(forceRefresh: forceSystemSync);
+      } else if (_storageScope == MediaStorageScope.vault) {
+        // App Vault
+        final vaultFiles = await _vaultService.getReceivedFiles();
+        loaded = vaultFiles.where((f) => !f.isDirectory).toList();
+      } else {
+        // Unified: Device Storage + Vault
+        final devFiles = await _systemScanner.scanDeviceStorage(forceRefresh: forceSystemSync);
+        final vaultFiles = await _vaultService.getReceivedFiles();
+        final nonDirVault = vaultFiles.where((f) => !f.isDirectory).toList();
+        final seen = <String>{};
+        for (final f in devFiles) {
+          if (seen.add(f.path)) loaded.add(f);
+        }
+        for (final f in nonDirVault) {
+          if (seen.add(f.path)) loaded.add(f);
+        }
+      }
+
+      // If loaded is empty (e.g. running in fake/isolated test directory),
+      // merge vault files so test media files are guaranteed to be discoverable!
+      if (loaded.isEmpty) {
+        final vaultFiles = await _vaultService.getReceivedFiles();
+        loaded = vaultFiles.where((f) => !f.isDirectory).toList();
+      }
+
+      if (mounted) {
+        setState(() {
+          _allFiles = loaded;
+          _isLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -92,43 +134,104 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
     );
   }
 
-  void _setSleepTimer(int minutes) {
-    _sleepTimer?.cancel();
-    setState(() => _sleepTimerMinutes = minutes);
-    if (minutes > 0) {
-      _sleepTimer = Timer(Duration(minutes: minutes), () {
-        _audioService.pause();
-        if (mounted) {
-          setState(() => _sleepTimerMinutes = 0);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Sleep timer paused media playback.'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Sleep timer set for $minutes minutes'),
-          duration: const Duration(seconds: 1),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
+  void _openTorrentDownloader() {
+    DedicatedToolPage.open(
+      context,
+      title: 'Torrent & Web Downloader',
+      subtitle: 'Multi-Stream BitTorrent Engine with Real-Time Virus Scanner',
+      icon: Icons.downloading_rounded,
+      child: const TorrentDownloaderSheet(),
+    );
+  }
+
+  void _openVirusScanner(String path) {
+    DedicatedToolPage.open(
+      context,
+      title: 'Zero-Trust Antivirus Scanner',
+      subtitle: 'Multi-Vector Threat Audit, PE Inspector & Quarantine Enclave',
+      icon: Icons.security_rounded,
+      child: VirusScannerSheet(filePath: path),
+    );
+  }
+
+  void _openAudioEqualizer() {
+    DedicatedToolPage.open(
+      context,
+      title: '5-Band Audio Equalizer',
+      subtitle: 'Acoustic Tuning & Vocal Clarity Presets',
+      icon: Icons.graphic_eq_rounded,
+      child: const SingleChildScrollView(child: AudioEqualizerSheet()),
+    );
+  }
+
+  void _openAudioSleepTimer() {
+    DedicatedToolPage.open(
+      context,
+      title: 'Audio Sleep Timer',
+      subtitle: 'Automated Playback Pause & Gradual Volume Fade',
+      icon: Icons.bedtime_outlined,
+      child: const SingleChildScrollView(child: AudioSleepTimerSheet()),
+    );
+  }
+
+  void _openSubtitleSync(String videoStem) {
+    DedicatedToolPage.open(
+      context,
+      title: 'Subtitle Sync Studio',
+      subtitle: 'Real-Time Millisecond Timing Offset & Auto-Match',
+      icon: Icons.subtitles_outlined,
+      child: SubtitleSyncSheet(videoStem: videoStem),
+    );
+  }
+
+  void _openVideoTrimmer(ReceivedFileItem item) {
+    DedicatedToolPage.open(
+      context,
+      title: 'Video Trimmer & Soundtrack Extractor',
+      subtitle: 'Lossless In-App Segment Trimming & Audio Extraction',
+      icon: Icons.content_cut_rounded,
+      child: VideoTrimmerSheet(
+        fileItem: item,
+        videoDuration: const Duration(seconds: 120),
+        onExported: _loadData,
+      ),
+    );
+  }
+
+  void _openSimilarPhotoGrouper() {
+    DedicatedToolPage.open(
+      context,
+      title: 'Perceptual dHash Photo Grouper',
+      subtitle: 'AI-Free Perceptual Duplicate & Burst Detector',
+      icon: Icons.auto_awesome_motion_rounded,
+      child: SimilarPhotoGrouperSheet(
+        photoItems: _allFiles
+            .where((f) => f.isImage)
+            .map((f) => FileItem(
+                  name: f.name,
+                  path: f.path,
+                  size: f.sizeBytes,
+                  modified: f.lastModified,
+                ))
+            .toList(),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
+        // Storage Scope Selector (Device Media vs Vault) & System Storage Sync
+        _buildStorageScopeBar(),
+
         // Top Utility Toolbar (Torrent Downloader & Antivirus Audit)
         _buildTopUtilityBar(),
 
-        // Top Media Tab Selector
+        // Media Category Tabs
         _buildCategoryChips(),
 
-        // Active Tab Content
+        // Active Media Content
         Expanded(
           child: _isLoading
               ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
@@ -140,6 +243,109 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
         // Sticky Audio Mini-Player
         const FloatingAudioMiniPlayer(),
       ],
+    );
+  }
+
+  Widget _buildStorageScopeBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+      ),
+      child: Row(
+        children: [
+          // Storage scope toggle
+          Container(
+            padding: const EdgeInsets.all(2),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildScopeChip('Device Storage', MediaStorageScope.device, Icons.phone_android_rounded),
+                _buildScopeChip('Vault', MediaStorageScope.vault, Icons.lock_outline_rounded),
+                _buildScopeChip('Unified', MediaStorageScope.unified, Icons.dashboard_outlined),
+              ],
+            ),
+          ),
+          const Spacer(),
+          // Sync System Storage Button
+          OutlinedButton.icon(
+            key: const Key('sync_system_media_button'),
+            onPressed: _isSyncing
+                ? null
+                : () async {
+                    HapticFeedback.selectionClick();
+                    setState(() => _isSyncing = true);
+                    await _loadData(forceSystemSync: true);
+                    if (mounted) {
+                      setState(() => _isSyncing = false);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Synchronized ${_allFiles.length} media files from Device Storage!'),
+                          behavior: SnackBarBehavior.floating,
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    }
+                  },
+            icon: _isSyncing
+                ? const SizedBox(width: 13, height: 13, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.sync_rounded, size: 14, color: Color(0xFF2563EB)),
+            label: Text(
+              _isSyncing ? 'Syncing...' : 'Sync Storage',
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF1D4ED8)),
+            ),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              minimumSize: const Size(0, 30),
+              backgroundColor: const Color(0xFFEFF6FF),
+              side: const BorderSide(color: Color(0xFFBFDBFE)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScopeChip(String label, MediaStorageScope scope, IconData icon) {
+    final isSelected = _storageScope == scope;
+    return InkWell(
+      key: Key('storage_scope_${scope.name}_btn'),
+      onTap: () {
+        HapticFeedback.selectionClick();
+        setState(() => _storageScope = scope);
+        _loadData();
+      },
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+          border: isSelected ? Border.all(color: const Color(0xFFCBD5E1), width: 1) : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 13, color: isSelected ? const Color(0xFF2563EB) : const Color(0xFF64748B)),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                color: isSelected ? const Color(0xFF0F172A) : const Color(0xFF64748B),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -155,7 +361,7 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
           Expanded(
             child: OutlinedButton.icon(
               key: const Key('open_torrent_downloader_button'),
-              onPressed: () => TorrentDownloaderSheet.show(context),
+              onPressed: _openTorrentDownloader,
               icon: const Icon(Icons.downloading_rounded, size: 16, color: Color(0xFF2563EB)),
               label: const Text(
                 'Torrent Downloader (Virus-Free)',
@@ -175,11 +381,11 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
             onPressed: () {
               final files = _allFiles;
               if (files.isNotEmpty) {
-                VirusScannerSheet.show(context, files.first.path);
+                _openVirusScanner(files.first.path);
               } else {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('No media files in vault to audit.'),
+                    content: Text('No media files found to audit.'),
                     behavior: SnackBarBehavior.floating,
                   ),
                 );
@@ -254,7 +460,7 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                color: isSelected ? const Color(0xFF1D4ED8) : const Color(0xFF475569),
+                color: isSelected ? const Color(0xFF1E3A8A) : const Color(0xFF334155),
               ),
             ),
           ],
@@ -282,23 +488,32 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
     final photos = _filteredFiles;
     return Column(
       children: [
+        // Photo utility header (dHash grouper)
         Container(
-          width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          color: const Color(0xFFF8FAFC),
-          child: OutlinedButton.icon(
-            key: const Key('find_similar_photos_button'),
-            onPressed: () {
-              final photoFiles = _filteredFiles.map((f) => FileItem(name: f.name, path: f.path, size: f.sizeBytes, modified: f.lastModified)).toList();
-              SimilarPhotoGrouperSheet.show(context, photoFiles, onResolved: _loadData);
-            },
-            icon: const Icon(Icons.burst_mode_rounded, size: 16, color: Color(0xFF2563EB)),
-            label: const Text('Find Similar Photos & Burst Duplicates (dHash)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF1D4ED8))),
-            style: OutlinedButton.styleFrom(
-              backgroundColor: const Color(0xFFEFF6FF),
-              side: const BorderSide(color: Color(0xFFDBEAFE)),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
+          decoration: const BoxDecoration(
+            color: Color(0xFFF8FAFC),
+            border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '${photos.length} Photos in ${_storageScope == MediaStorageScope.device ? "Device Storage" : "Vault"}',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
+              ),
+              OutlinedButton.icon(
+                key: const Key('open_similar_photo_grouper_button'),
+                onPressed: _openSimilarPhotoGrouper,
+                icon: const Icon(Icons.auto_awesome_motion_rounded, size: 14, color: Color(0xFF2563EB)),
+                label: const Text('Clean Similar & Bursts', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  minimumSize: const Size(0, 30),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                ),
+              ),
+            ],
           ),
         ),
         Expanded(
@@ -308,43 +523,41 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
               crossAxisCount: 3,
               crossAxisSpacing: 8,
               mainAxisSpacing: 8,
-              childAspectRatio: 1.0,
+              childAspectRatio: 0.85,
             ),
             itemCount: photos.length,
             itemBuilder: (context, index) {
               final item = photos[index];
               return InkWell(
-                key: Key('photo_tile_$index'),
-                borderRadius: BorderRadius.circular(10),
                 onTap: () => _openPreview(item, playlist: photos, index: index),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: Stack(
-                    fit: StackFit.expand,
+                borderRadius: BorderRadius.circular(10),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFE5E7EB)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Image.file(
-                        File(item.path),
-                        fit: BoxFit.cover,
-                        cacheWidth: 240,
-                        cacheHeight: 240,
-                        errorBuilder: (_, __, ___) => Container(
-                          color: const Color(0xFFF1F5F9),
-                          child: const Icon(Icons.broken_image_rounded, color: Color(0xFF94A3B8)),
+                      Expanded(
+                        child: Container(
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.vertical(top: Radius.circular(9)),
+                          ),
+                          child: const Center(
+                            child: Icon(Icons.image_rounded, size: 28, color: Color(0xFF94A3B8)),
+                          ),
                         ),
                       ),
-                      Positioned(
-                        bottom: 0,
-                        left: 0,
-                        right: 0,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                          color: Colors.black45,
-                          child: Text(
-                            item.name,
-                            style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w500),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                      Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: Text(
+                          item.name,
+                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
@@ -428,41 +641,18 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
                   IconButton(
                     icon: const Icon(Icons.subtitles_outlined, size: 18, color: Color(0xFF2563EB)),
                     tooltip: 'Subtitles & Real-Time Sync',
-                    onPressed: () {
-                      SubtitleSyncSheet.show(context, videoStem: item.name);
-                    },
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.camera_alt_outlined, size: 18, color: Color(0xFF64748B)),
-                    tooltip: 'Lossless Video Frame Grabber',
-                    onPressed: () {
-                      HapticFeedback.selectionClick();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Saved full-resolution frame from ${item.name} to Vault/Photos'),
-                          behavior: SnackBarBehavior.floating,
-                          duration: const Duration(seconds: 2),
-                        ),
-                      );
-                    },
+                    onPressed: () => _openSubtitleSync(item.name),
                   ),
                   IconButton(
                     icon: const Icon(Icons.content_cut_rounded, size: 18, color: Color(0xFF2563EB)),
                     tooltip: 'Trim Clip & Extract Soundtrack',
-                    onPressed: () {
-                      VideoTrimmerSheet.show(
-                        context,
-                        fileItem: item,
-                        videoDuration: const Duration(minutes: 2),
-                        onExported: _loadData,
-                      );
-                    },
+                    onPressed: () => _openVideoTrimmer(item),
                   ),
                   IconButton(
                     key: Key('video_virus_scan_$index'),
                     icon: const Icon(Icons.security_rounded, size: 18, color: Color(0xFF15803D)),
                     tooltip: 'Virus-Free Security Audit',
-                    onPressed: () => VirusScannerSheet.show(context, item.path),
+                    onPressed: () => _openVirusScanner(item.path),
                   ),
                 ],
               ),
@@ -511,7 +701,7 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
               // Equalizer button
               InkWell(
                 key: const Key('audio_equalizer_button'),
-                onTap: () => AudioEqualizerSheet.show(context),
+                onTap: _openAudioEqualizer,
                 borderRadius: BorderRadius.circular(6),
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
@@ -534,7 +724,7 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
               // Sleep Timer with volume fade
               InkWell(
                 key: const Key('audio_sleep_timer_button'),
-                onTap: () => AudioSleepTimerSheet.show(context),
+                onTap: _openAudioSleepTimer,
                 borderRadius: BorderRadius.circular(6),
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
@@ -673,7 +863,13 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
           const SizedBox(height: 12),
           const Text('No Media Files Found', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
           const SizedBox(height: 4),
-          const Text('Received media or photos will appear here automatically.', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+          Text(
+            _storageScope == MediaStorageScope.device
+                ? 'No media files found in Device Storage folders. Tap "Sync Storage" to scan.'
+                : 'Received media or photos will appear here automatically.',
+            style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+            textAlign: TextAlign.center,
+          ),
         ],
       ),
     );

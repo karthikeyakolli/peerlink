@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/hotspot_tether_qr_service.dart';
+import 'dedicated_tool_page.dart';
 
 class HotspotTetherQrSheet extends StatelessWidget {
   final HotspotTetherPayload payload;
+  final bool isPage;
 
   const HotspotTetherQrSheet({
     super.key,
     required this.payload,
+    this.isPage = false,
   });
 
   static Future<void> show(BuildContext context, {HotspotTetherPayload? payload}) {
@@ -20,11 +23,12 @@ class HotspotTetherQrSheet extends StatelessWidget {
           nodeId: 'peerlink-local-node',
           publicKey: 'ed25519-node-key-preview',
         );
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => HotspotTetherQrSheet(payload: effectivePayload),
+    return DedicatedToolPage.open(
+      context,
+      title: 'Zero-Touch Hotspot Auto-Tether',
+      subtitle: 'Scan Scannable QR to Pair & Connect Wi-Fi Direct Mesh',
+      icon: Icons.wifi_tethering_rounded,
+      child: HotspotTetherQrSheet(payload: effectivePayload, isPage: true),
     );
   }
 
@@ -35,9 +39,9 @@ class HotspotTetherQrSheet extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: SafeArea(
         top: false,
@@ -45,17 +49,19 @@ class HotspotTetherQrSheet extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE2E8F0),
-                  borderRadius: BorderRadius.circular(2),
+            if (!isPage) ...[
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE2E8F0),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 14),
+              const SizedBox(height: 14),
+            ],
             Row(
               children: [
                 Container(

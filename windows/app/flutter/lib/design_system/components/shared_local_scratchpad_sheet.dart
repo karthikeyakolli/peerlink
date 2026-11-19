@@ -1,16 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dedicated_tool_page.dart';
 
 /// Modal sheet for shared local scratchpad and instant LAN note sync.
 class SharedLocalScratchpadSheet extends StatefulWidget {
-  const SharedLocalScratchpadSheet({super.key});
+  final bool isPage;
+
+  const SharedLocalScratchpadSheet({super.key, this.isPage = false});
 
   static Future<void> show(BuildContext context) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => const SharedLocalScratchpadSheet(),
+    return DedicatedToolPage.open(
+      context,
+      title: 'Shared Local Scratchpad',
+      subtitle: 'Real-Time LAN Clipboard & Ephemeral Note Sync',
+      icon: Icons.notes_rounded,
+      child: const SharedLocalScratchpadSheet(isPage: true),
     );
   }
 
@@ -69,22 +73,24 @@ class _SharedLocalScratchpadSheetState extends State<SharedLocalScratchpadSheet>
         top: 20,
         bottom: MediaQuery.of(context).viewInsets.bottom + 20,
       ),
-      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
-      decoration: const BoxDecoration(
+      constraints: widget.isPage ? null : BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Center(
-            child: Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(2)),
+          if (!widget.isPage) ...[
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(2)),
+              ),
             ),
-          ),
+          ],
           Row(
             children: [
               Container(

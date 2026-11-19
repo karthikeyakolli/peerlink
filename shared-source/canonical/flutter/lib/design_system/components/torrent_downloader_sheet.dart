@@ -6,18 +6,22 @@ import '../../core/services/virus_scanner_service.dart';
 import '../../core/received_files_service.dart';
 import 'media_preview_modal.dart';
 import 'virus_scanner_sheet.dart';
+import 'dedicated_tool_page.dart';
 
 /// Dedicated Torrent & Web Downloader Sheet with Real-Time Virus Scanning.
 /// Minimalist Light-Only design (#FFFFFF, #F7F8FA, #E5E7EB, #2563EB, zero dark mode).
 class TorrentDownloaderSheet extends StatefulWidget {
-  const TorrentDownloaderSheet({super.key});
+  final bool isPage;
+
+  const TorrentDownloaderSheet({super.key, this.isPage = false});
 
   static Future<void> show(BuildContext context) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => const TorrentDownloaderSheet(),
+    return DedicatedToolPage.open(
+      context,
+      title: 'Torrent & Swarm Downloader',
+      subtitle: 'Multi-Peer Swarm Engine with Automated Virus Scanning',
+      icon: Icons.downloading_rounded,
+      child: const TorrentDownloaderSheet(isPage: true),
     );
   }
 
@@ -77,33 +81,36 @@ class _TorrentDownloaderSheetState extends State<TorrentDownloaderSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: MediaQuery.of(context).size.height * 0.88,
-      decoration: const BoxDecoration(
-        color: Color(0xFFF7F8FA),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      height: widget.isPage ? null : MediaQuery.of(context).size.height * 0.88,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F8FA),
+        borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: Column(
         children: [
-          // Drag handle & Header
+          // Header
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-              border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB))),
+              borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(20)),
+              border: const Border(bottom: BorderSide(color: Color(0xFFE5E7EB))),
             ),
             child: Column(
               children: [
-                Center(
-                  child: Container(
-                    width: 36,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFCBD5E1),
-                      borderRadius: BorderRadius.circular(2),
+                if (!widget.isPage) ...[
+                  Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFCBD5E1),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
                   ),
-                ),
+                  const SizedBox(height: 10),
+                ],
                 const SizedBox(height: 10),
                 Row(
                   children: [

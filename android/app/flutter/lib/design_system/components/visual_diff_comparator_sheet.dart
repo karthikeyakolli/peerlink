@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dedicated_tool_page.dart';
 
 class DiffLine {
   final int? oldLine;
@@ -20,19 +21,22 @@ enum DiffType { same, added, removed }
 class VisualDiffComparatorSheet extends StatefulWidget {
   final String fileAName;
   final String fileBName;
+  final bool isPage;
 
   const VisualDiffComparatorSheet({
     super.key,
     this.fileAName = 'config.v1.json',
     this.fileBName = 'config.v2.json',
+    this.isPage = false,
   });
 
   static Future<void> show(BuildContext context, {String fileAName = 'config.v1.json', String fileBName = 'config.v2.json'}) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => VisualDiffComparatorSheet(fileAName: fileAName, fileBName: fileBName),
+    return DedicatedToolPage.open(
+      context,
+      title: 'Visual Diff Comparator',
+      subtitle: 'Side-by-Side & Unified Diff ($fileAName ↔ $fileBName)',
+      icon: Icons.difference_rounded,
+      child: VisualDiffComparatorSheet(fileAName: fileAName, fileBName: fileBName, isPage: true),
     );
   }
 
@@ -56,21 +60,23 @@ class _VisualDiffComparatorSheetState extends State<VisualDiffComparatorSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
-      decoration: const BoxDecoration(
+      constraints: widget.isPage ? null : BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(16)),
       ),
       child: Column(
         children: [
-          Center(
-            child: Container(
-              margin: const EdgeInsets.only(top: 8, bottom: 4),
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(2)),
+          if (!widget.isPage) ...[
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 8, bottom: 4),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(2)),
+              ),
             ),
-          ),
+          ],
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(

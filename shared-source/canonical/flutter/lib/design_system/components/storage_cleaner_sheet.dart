@@ -1,20 +1,24 @@
 import 'package:flutter/material.dart';
 import '../../core/storage_cleaner_service.dart';
+import 'dedicated_tool_page.dart';
 
 class StorageCleanerSheet extends StatefulWidget {
   final VoidCallback onCleaned;
+  final bool isPage;
 
   const StorageCleanerSheet({
     super.key,
     required this.onCleaned,
+    this.isPage = false,
   });
 
   static Future<void> show(BuildContext context, {required VoidCallback onCleaned}) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => StorageCleanerSheet(onCleaned: onCleaned),
+    return DedicatedToolPage.open(
+      context,
+      title: 'Storage Hygiene & Cleaner',
+      subtitle: 'Identify Orphaned Staging Files, Leftover Torrents & Redundant Cache',
+      icon: Icons.cleaning_services_rounded,
+      child: StorageCleanerSheet(onCleaned: onCleaned, isPage: true),
     );
   }
 
@@ -67,9 +71,9 @@ class _StorageCleanerSheetState extends State<StorageCleanerSheet> {
 
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: SafeArea(
         top: false,
@@ -77,16 +81,19 @@ class _StorageCleanerSheetState extends State<StorageCleanerSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE2E8F0),
-                  borderRadius: BorderRadius.circular(2),
+            if (!widget.isPage) ...[
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE2E8F0),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-            ),
+              const SizedBox(height: 16),
+            ],
             const SizedBox(height: 16),
             Row(
               children: [

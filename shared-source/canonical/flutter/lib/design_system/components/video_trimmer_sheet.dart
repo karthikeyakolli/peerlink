@@ -1,17 +1,20 @@
 import 'package:flutter/material.dart';
 import '../../core/media_trimmer_service.dart';
 import '../../core/received_files_service.dart';
+import 'dedicated_tool_page.dart';
 
 class VideoTrimmerSheet extends StatefulWidget {
   final ReceivedFileItem fileItem;
   final Duration videoDuration;
   final VoidCallback onExported;
+  final bool isPage;
 
   const VideoTrimmerSheet({
     super.key,
     required this.fileItem,
     required this.videoDuration,
     required this.onExported,
+    this.isPage = false,
   });
 
   static Future<void> show(
@@ -20,14 +23,16 @@ class VideoTrimmerSheet extends StatefulWidget {
     required Duration videoDuration,
     required VoidCallback onExported,
   }) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => VideoTrimmerSheet(
+    return DedicatedToolPage.open(
+      context,
+      title: 'Video Trimmer & Audio Extractor',
+      subtitle: 'Lossless Keyframe Segment Trimming & Soundtrack Rip',
+      icon: Icons.content_cut_rounded,
+      child: VideoTrimmerSheet(
         fileItem: fileItem,
         videoDuration: videoDuration,
         onExported: onExported,
+        isPage: true,
       ),
     );
   }
@@ -105,9 +110,9 @@ class _VideoTrimmerSheetState extends State<VideoTrimmerSheet> {
 
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: SafeArea(
         top: false,
@@ -115,17 +120,19 @@ class _VideoTrimmerSheetState extends State<VideoTrimmerSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE2E8F0),
-                  borderRadius: BorderRadius.circular(2),
+            if (!widget.isPage) ...[
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE2E8F0),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 14),
+              const SizedBox(height: 14),
+            ],
             Row(
               children: [
                 Container(

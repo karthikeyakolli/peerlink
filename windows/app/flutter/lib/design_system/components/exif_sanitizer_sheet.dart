@@ -2,24 +2,28 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/models/file_item.dart';
 import '../../core/services/exif_sanitizer_service.dart';
+import 'dedicated_tool_page.dart';
 
 /// Modal sheet for stripping GPS metadata and EXIF hardware identifiers before sharing photos.
 class ExifSanitizerSheet extends StatefulWidget {
   final FileItem fileItem;
   final VoidCallback? onSanitized;
+  final bool isPage;
 
   const ExifSanitizerSheet({
     super.key,
     required this.fileItem,
     this.onSanitized,
+    this.isPage = false,
   });
 
   static Future<void> show(BuildContext context, FileItem fileItem, {VoidCallback? onSanitized}) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => ExifSanitizerSheet(fileItem: fileItem, onSanitized: onSanitized),
+    return DedicatedToolPage.open(
+      context,
+      title: 'EXIF & GPS Privacy Sanitizer',
+      subtitle: 'Scrub Camera, Geolocation & Hardware Tags',
+      icon: Icons.location_off_rounded,
+      child: ExifSanitizerSheet(fileItem: fileItem, onSanitized: onSanitized, isPage: true),
     );
   }
 
@@ -50,9 +54,9 @@ class _ExifSanitizerSheetState extends State<ExifSanitizerSheet> {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,

@@ -1,24 +1,28 @@
 import 'package:flutter/material.dart';
 import '../../core/models/file_item.dart';
 import '../../core/services/file_tagging_service.dart';
+import 'dedicated_tool_page.dart';
 
 /// Modal sheet for adding and toggling virtual tags and color badges on files.
 class FileTaggingSheet extends StatefulWidget {
   final FileItem fileItem;
   final VoidCallback? onTagsChanged;
+  final bool isPage;
 
   const FileTaggingSheet({
     super.key,
     required this.fileItem,
     this.onTagsChanged,
+    this.isPage = false,
   });
 
   static Future<void> show(BuildContext context, FileItem fileItem, {VoidCallback? onTagsChanged}) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => FileTaggingSheet(fileItem: fileItem, onTagsChanged: onTagsChanged),
+    return DedicatedToolPage.open(
+      context,
+      title: 'File Tagging & Virtual Labels',
+      subtitle: 'Color Tags & Finder-Style Metadata (${fileItem.name})',
+      icon: Icons.label_rounded,
+      child: FileTaggingSheet(fileItem: fileItem, onTagsChanged: onTagsChanged, isPage: true),
     );
   }
 
@@ -65,9 +69,9 @@ class _FileTaggingSheetState extends State<FileTaggingSheet> {
         top: 20,
         bottom: MediaQuery.of(context).viewInsets.bottom + 20,
       ),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(16)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,

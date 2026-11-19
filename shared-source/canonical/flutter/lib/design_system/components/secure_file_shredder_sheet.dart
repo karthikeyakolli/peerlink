@@ -2,24 +2,28 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/models/file_item.dart';
 import '../../core/services/secure_shredder_service.dart';
+import 'dedicated_tool_page.dart';
 
 /// Modal sheet for permanently destroying files using DoD 5220.22-M sanitization.
 class SecureFileShredderSheet extends StatefulWidget {
   final FileItem fileItem;
   final VoidCallback? onShredded;
+  final bool isPage;
 
   const SecureFileShredderSheet({
     super.key,
     required this.fileItem,
     this.onShredded,
+    this.isPage = false,
   });
 
   static Future<void> show(BuildContext context, FileItem fileItem, {VoidCallback? onShredded}) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => SecureFileShredderSheet(fileItem: fileItem, onShredded: onShredded),
+    return DedicatedToolPage.open(
+      context,
+      title: 'DoD 5220.22-M File Shredder',
+      subtitle: 'Permanent Cryptographic Zero-Recovery Destruction',
+      icon: Icons.delete_forever_rounded,
+      child: SecureFileShredderSheet(fileItem: fileItem, onShredded: onShredded, isPage: true),
     );
   }
 
@@ -71,9 +75,9 @@ class _SecureFileShredderSheetState extends State<SecureFileShredderSheet> {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(16)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,

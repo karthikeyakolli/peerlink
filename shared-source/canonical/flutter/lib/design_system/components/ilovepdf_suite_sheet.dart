@@ -5,6 +5,7 @@ import '../../core/models/file_item.dart';
 import '../../core/pdf_power_suite_service.dart';
 import '../../core/received_files_service.dart';
 import '../colors/peerlink_colors.dart';
+import 'dedicated_tool_page.dart';
 
 /// Comprehensive offline iLovePDF-style studio suite.
 /// Provides 20+ categorized PDF manipulation tools matching and exceeding iLovePDF capabilities:
@@ -14,15 +15,17 @@ import '../colors/peerlink_colors.dart';
 /// 100% offline, zero network access, minimal light-only design.
 class ILovePdfSuiteSheet extends StatefulWidget {
   final VoidCallback? onOperationComplete;
+  final bool isPage;
 
-  const ILovePdfSuiteSheet({super.key, this.onOperationComplete});
+  const ILovePdfSuiteSheet({super.key, this.onOperationComplete, this.isPage = false});
 
   static Future<void> show(BuildContext context, {VoidCallback? onOperationComplete}) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => ILovePdfSuiteSheet(onOperationComplete: onOperationComplete),
+    return DedicatedToolPage.open(
+      context,
+      title: 'iLovePDF Power Studio',
+      subtitle: '23+ Document & Image Format Converters • Organize • Protect • OCR',
+      icon: Icons.picture_as_pdf_rounded,
+      child: ILovePdfSuiteSheet(onOperationComplete: onOperationComplete, isPage: true),
     );
   }
 
@@ -357,28 +360,30 @@ class _ILovePdfSuiteSheetState extends State<ILovePdfSuiteSheet> with SingleTick
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.92),
+      constraints: widget.isPage ? null : BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.92),
       child: SafeArea(
         top: false,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE5E7EB),
-                  borderRadius: BorderRadius.circular(2),
+            if (!widget.isPage) ...[
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE5E7EB),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
+              const SizedBox(height: 16),
+            ],
 
             // Header
             Row(

@@ -1,15 +1,19 @@
 import 'package:flutter/material.dart';
+import 'dedicated_tool_page.dart';
 
 /// Modal sheet rendering a WinDirStat-style disk space treemap heatmap.
 class StorageTreemapSheet extends StatelessWidget {
-  const StorageTreemapSheet({super.key});
+  final bool isPage;
+
+  const StorageTreemapSheet({super.key, this.isPage = false});
 
   static Future<void> show(BuildContext context) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => const StorageTreemapSheet(),
+    return DedicatedToolPage.open(
+      context,
+      title: 'Disk Space Treemap & Heatmap',
+      subtitle: 'WinDirStat-Style Proportional Storage Allocation',
+      icon: Icons.donut_large_rounded,
+      child: const StorageTreemapSheet(isPage: true),
     );
   }
 
@@ -25,23 +29,24 @@ class StorageTreemapSheet extends StatelessWidget {
     ];
 
     return Container(
-      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
-      decoration: const BoxDecoration(
+      constraints: isPage ? null : BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(16)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Drag handle
-          Center(
-            child: Container(
-              margin: const EdgeInsets.only(top: 8, bottom: 4),
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(2)),
+          if (!isPage) ...[
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 8, bottom: 4),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(2)),
+              ),
             ),
-          ),
+          ],
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(

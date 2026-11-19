@@ -2,21 +2,29 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../core/services/virus_scanner_service.dart';
 import '../../core/services/secure_shredder_service.dart';
+import 'dedicated_tool_page.dart';
 
 /// On-Demand Antivirus & Virus-Free Security Audit Sheet.
 /// Displays detailed inspection passes and cryptographic hashes.
 class VirusScannerSheet extends StatefulWidget {
   final String filePath;
   final VirusScanReport? initialReport;
+  final bool isPage;
 
-  const VirusScannerSheet({super.key, required this.filePath, this.initialReport});
+  const VirusScannerSheet({
+    super.key,
+    required this.filePath,
+    this.initialReport,
+    this.isPage = false,
+  });
 
   static Future<void> show(BuildContext context, String filePath, {VirusScanReport? initialReport}) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => VirusScannerSheet(filePath: filePath, initialReport: initialReport),
+    return DedicatedToolPage.open(
+      context,
+      title: 'Antivirus Security Audit',
+      subtitle: 'Static Heuristics, Entropy & Hash Match Integrity Verification',
+      icon: Icons.security_rounded,
+      child: VirusScannerSheet(filePath: filePath, initialReport: initialReport, isPage: true),
     );
   }
 
@@ -55,27 +63,28 @@ class _VirusScannerSheetState extends State<VirusScannerSheet> {
     final fileName = widget.filePath.split(Platform.pathSeparator).last;
 
     return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFFF7F8FA),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F8FA),
+        borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Drag handle
-          Center(
-            child: Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: const Color(0xFFCBD5E1),
-                borderRadius: BorderRadius.circular(2),
+          if (!widget.isPage) ...[
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFCBD5E1),
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 12),
+            const SizedBox(height: 12),
+          ],
 
           // Header
           Row(

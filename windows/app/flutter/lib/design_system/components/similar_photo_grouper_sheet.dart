@@ -2,24 +2,28 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/models/file_item.dart';
 import '../../core/services/photo_similarity_service.dart';
+import 'dedicated_tool_page.dart';
 
 /// Modal sheet for discovering similar burst photos and keeping only the best shot.
 class SimilarPhotoGrouperSheet extends StatefulWidget {
   final List<FileItem> photoItems;
   final VoidCallback? onResolved;
+  final bool isPage;
 
   const SimilarPhotoGrouperSheet({
     super.key,
     required this.photoItems,
     this.onResolved,
+    this.isPage = false,
   });
 
   static Future<void> show(BuildContext context, List<FileItem> photoItems, {VoidCallback? onResolved}) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => SimilarPhotoGrouperSheet(photoItems: photoItems, onResolved: onResolved),
+    return DedicatedToolPage.open(
+      context,
+      title: 'Similar Photos & Burst Grouper',
+      subtitle: 'Perceptual dHash Duplicate & Burst Detection',
+      icon: Icons.burst_mode_rounded,
+      child: SimilarPhotoGrouperSheet(photoItems: photoItems, onResolved: onResolved, isPage: true),
     );
   }
 
@@ -72,20 +76,21 @@ class _SimilarPhotoGrouperSheetState extends State<SimilarPhotoGrouperSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
-      decoration: const BoxDecoration(
+      constraints: widget.isPage ? null : BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(16)),
       ),
       child: Column(
         children: [
-          // Drag handle
-          Container(
-            margin: const EdgeInsets.only(top: 8, bottom: 4),
-            width: 36,
-            height: 4,
-            decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(2)),
-          ),
+          if (!widget.isPage) ...[
+            Container(
+              margin: const EdgeInsets.only(top: 8, bottom: 4),
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(2)),
+            ),
+          ],
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(

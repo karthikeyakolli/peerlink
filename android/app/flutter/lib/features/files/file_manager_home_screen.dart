@@ -154,11 +154,101 @@ class _FileManagerHomeScreenState extends State<FileManagerHomeScreen> {
       ),
       body: Column(
         children: [
+          _buildSpaceContextHeader(),
           Expanded(child: _buildFlowContent()),
           if (_selectedMode == 0) ...[
             const StashTrayDock(),
             const FloatingAudioMiniPlayer(),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpaceContextHeader() {
+    IconData icon;
+    String title;
+    String subtitle;
+    Color accentColor;
+
+    switch (_selectedMode) {
+      case 1:
+        icon = Icons.smart_display_rounded;
+        title = 'Player Hub Space';
+        subtitle = 'Universal Device Media Player, Video Theater & Lossless Jukebox';
+        accentColor = const Color(0xFF10B981);
+        break;
+      case 2:
+        icon = Icons.share_rounded;
+        title = 'P2P Share & Link Space';
+        subtitle = 'Decentralized Transfer Engine, WebBeam 2.0 & Wi-Fi Direct';
+        accentColor = const Color(0xFF8B5CF6);
+        break;
+      case 3:
+        icon = Icons.transform_rounded;
+        title = 'Conversion Studio Space';
+        subtitle = 'iLovePDF 23-Format Power Studio & Mobile Document Scanner';
+        accentColor = const Color(0xFFD97706);
+        break;
+      case 0:
+      default:
+        icon = Icons.folder_copy_rounded;
+        title = 'File Explorer Space';
+        subtitle = 'Local System Storage & Cryptographic Secure Vault';
+        accentColor = const Color(0xFF2563EB);
+        break;
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(
+          bottom: BorderSide(color: Color(0xFFE5E7EB), width: 1),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: accentColor.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: accentColor.withValues(alpha: 0.25)),
+            ),
+            child: Icon(icon, color: accentColor, size: 16),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF0F172A),
+                    letterSpacing: -0.2,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: Color(0xFF64748B),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );

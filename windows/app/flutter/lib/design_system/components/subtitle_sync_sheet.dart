@@ -1,17 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dedicated_tool_page.dart';
 
 /// Modal sheet for auto-detecting subtitles and adjusting real-time sync offset (+/- 2500ms).
 class SubtitleSyncSheet extends StatefulWidget {
   final String videoStem;
   final int initialOffsetMs;
   final ValueChanged<int>? onOffsetChanged;
+  final bool isPage;
 
   const SubtitleSyncSheet({
     super.key,
     required this.videoStem,
     this.initialOffsetMs = 0,
     this.onOffsetChanged,
+    this.isPage = false,
   });
 
   static Future<void> show(
@@ -20,14 +23,16 @@ class SubtitleSyncSheet extends StatefulWidget {
     int initialOffsetMs = 0,
     ValueChanged<int>? onOffsetChanged,
   }) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => SubtitleSyncSheet(
+    return DedicatedToolPage.open(
+      context,
+      title: 'Subtitle Sync & Detection',
+      subtitle: 'Real-time Millisecond Timing Offset & Auto-SRT Match',
+      icon: Icons.subtitles_rounded,
+      child: SubtitleSyncSheet(
         videoStem: videoStem,
         initialOffsetMs: initialOffsetMs,
         onOffsetChanged: onOffsetChanged,
+        isPage: true,
       ),
     );
   }
@@ -59,9 +64,9 @@ class _SubtitleSyncSheetState extends State<SubtitleSyncSheet> {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(16)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,

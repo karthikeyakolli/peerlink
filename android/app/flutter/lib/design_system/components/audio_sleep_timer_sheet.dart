@@ -1,17 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/audio_player_service.dart';
+import 'dedicated_tool_page.dart';
 
 /// Modal sheet for configuring background audio sleep timer with gentle volume fade-out.
 class AudioSleepTimerSheet extends StatefulWidget {
-  const AudioSleepTimerSheet({super.key});
+  final bool isPage;
+
+  const AudioSleepTimerSheet({super.key, this.isPage = false});
 
   static Future<void> show(BuildContext context) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => const AudioSleepTimerSheet(),
+    return DedicatedToolPage.open(
+      context,
+      title: 'Audio Sleep Timer & Fade',
+      subtitle: 'Gentle Exponential Volume Decay & Sleep Inactivity Stop',
+      icon: Icons.bedtime_rounded,
+      child: const AudioSleepTimerSheet(isPage: true),
     );
   }
 
@@ -54,9 +58,9 @@ class _AudioSleepTimerSheetState extends State<AudioSleepTimerSheet> {
 
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(16)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,

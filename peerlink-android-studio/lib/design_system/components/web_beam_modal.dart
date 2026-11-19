@@ -8,6 +8,7 @@ import '../../platform/android_node_bridge.dart';
 import '../../platform/windows_file_dialog.dart';
 import 'glass_container.dart';
 import 'interactive_glass_card.dart';
+import 'dedicated_tool_page.dart';
 
 /// Modal bottom sheet for the real On-Device Zero-Install Browser Web Beam Portal.
 /// Runs a live embedded HTTP server directly on the phone or desktop over Wi-Fi / Hotspot,
@@ -35,11 +36,12 @@ class WebBeamModal extends StatefulWidget {
     List<String> initialPaths = const [],
     VoidCallback? onStopPortal,
   }) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => WebBeamModal(
+    return DedicatedToolPage.open(
+      context,
+      title: 'Bi-Directional Web Portal 2.0',
+      subtitle: 'On-Device Zero-Install Browser Beam & QR Portal',
+      icon: Icons.language_rounded,
+      child: WebBeamModal(
         initialPaths: initialPaths,
         onStopPortal: onStopPortal,
       ),
@@ -54,11 +56,12 @@ class WebBeamModal extends StatefulWidget {
     required String portalUrl,
     VoidCallback? onStopPortal,
   }) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => WebBeamModal(
+    return DedicatedToolPage.open(
+      context,
+      title: 'Bi-Directional Web Portal 2.0',
+      subtitle: 'On-Device Zero-Install Browser Beam & QR Portal',
+      icon: Icons.language_rounded,
+      child: WebBeamModal(
         fileName: fileName,
         fileSize: fileSize,
         portalUrl: portalUrl,

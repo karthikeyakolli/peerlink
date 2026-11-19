@@ -1,16 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dedicated_tool_page.dart';
 
 /// Modal sheet transforming the mobile app into a local Wi-Fi presentation clicker & trackpad.
 class RemotePresentationClickerSheet extends StatefulWidget {
-  const RemotePresentationClickerSheet({super.key});
+  final bool isPage;
+
+  const RemotePresentationClickerSheet({super.key, this.isPage = false});
 
   static Future<void> show(BuildContext context) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => const RemotePresentationClickerSheet(),
+    return DedicatedToolPage.open(
+      context,
+      title: 'Presentation Clicker & Remote',
+      subtitle: 'Slide Advancer & Touchpad Cursor Over Private Wi-Fi',
+      icon: Icons.cast_connected_rounded,
+      child: const RemotePresentationClickerSheet(isPage: true),
     );
   }
 
@@ -36,19 +40,21 @@ class _RemotePresentationClickerSheetState extends State<RemotePresentationClick
   @override
   Widget build(BuildContext context) {
     return Container(
-      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
-      decoration: const BoxDecoration(
+      constraints: widget.isPage ? null : BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: Column(
         children: [
-          Container(
-            margin: const EdgeInsets.only(top: 8, bottom: 4),
-            width: 36,
-            height: 4,
-            decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(2)),
-          ),
+          if (!widget.isPage) ...[
+            Container(
+              margin: const EdgeInsets.only(top: 8, bottom: 4),
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(2)),
+            ),
+          ],
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(

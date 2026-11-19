@@ -1,15 +1,19 @@
 import 'package:flutter/material.dart';
+import 'dedicated_tool_page.dart';
 
 /// Modal sheet for configuring and monitoring multi-stream link bonding and parallel socket pipelines.
 class MultiStreamBondingSheet extends StatefulWidget {
-  const MultiStreamBondingSheet({super.key});
+  final bool isPage;
+
+  const MultiStreamBondingSheet({super.key, this.isPage = false});
 
   static Future<void> show(BuildContext context) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => const MultiStreamBondingSheet(),
+    return DedicatedToolPage.open(
+      context,
+      title: 'Multi-Stream Link Bonding',
+      subtitle: 'Parallel Socket Pipelines & Sub-Path Aggregation',
+      icon: Icons.alt_route_rounded,
+      child: const MultiStreamBondingSheet(isPage: true),
     );
   }
 
@@ -25,9 +29,9 @@ class _MultiStreamBondingSheetState extends State<MultiStreamBondingSheet> {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(16)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,

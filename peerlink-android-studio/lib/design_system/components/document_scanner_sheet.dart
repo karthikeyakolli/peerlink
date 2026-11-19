@@ -4,6 +4,7 @@ import '../../core/app_settings_service.dart';
 import '../../core/document_scanner_service.dart';
 import '../../core/file_converter_service.dart';
 import '../colors/peerlink_colors.dart';
+import 'dedicated_tool_page.dart';
 
 /// Minimalist Light-Only Document Scanner Sheet.
 /// Turns photographed document pages into clean multi-page PDFs saved directly in PeerLink Vault.
@@ -11,15 +12,17 @@ import '../colors/peerlink_colors.dart';
 /// 90-degree page rotation, and drag/button reordering.
 class DocumentScannerSheet extends StatefulWidget {
   final VoidCallback? onScanComplete;
+  final bool isPage;
 
-  const DocumentScannerSheet({super.key, this.onScanComplete});
+  const DocumentScannerSheet({super.key, this.onScanComplete, this.isPage = false});
 
   static Future<void> show(BuildContext context, {VoidCallback? onScanComplete}) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => DocumentScannerSheet(onScanComplete: onScanComplete),
+    return DedicatedToolPage.open(
+      context,
+      title: 'Mobile Document Scanner',
+      subtitle: 'Camera & Paper Scan • B&W Contrast • Magic Color • Multi-Page PDF',
+      icon: Icons.document_scanner_rounded,
+      child: DocumentScannerSheet(onScanComplete: onScanComplete, isPage: true),
     );
   }
 
@@ -115,29 +118,31 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.88),
+      constraints: widget.isPage ? null : BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.88),
       child: SafeArea(
         top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE5E7EB),
-                  borderRadius: BorderRadius.circular(2),
+            if (!widget.isPage) ...[
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE5E7EB),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
+              const SizedBox(height: 16),
+            ],
 
             // Header
             Row(

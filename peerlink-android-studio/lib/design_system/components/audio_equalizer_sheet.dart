@@ -1,16 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dedicated_tool_page.dart';
 
 /// Modal sheet for 5-band audio frequency equalization and vocal clarity enhancement.
 class AudioEqualizerSheet extends StatefulWidget {
-  const AudioEqualizerSheet({super.key});
+  final bool isPage;
+
+  const AudioEqualizerSheet({super.key, this.isPage = false});
 
   static Future<void> show(BuildContext context) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => const AudioEqualizerSheet(),
+    return DedicatedToolPage.open(
+      context,
+      title: '5-Band Acoustic Equalizer',
+      subtitle: 'Hardware Calibration & Vocal Clarity Booster',
+      icon: Icons.graphic_eq_rounded,
+      child: const AudioEqualizerSheet(isPage: true),
     );
   }
 
@@ -44,9 +48,9 @@ class _AudioEqualizerSheetState extends State<AudioEqualizerSheet> {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(16)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,

@@ -15,6 +15,7 @@ import 'qr_pairing_sheet.dart';
 import 'quick_text_share_modal.dart';
 import 'radar_sonar_view.dart';
 import 'web_beam_modal.dart';
+import 'dedicated_tool_page.dart';
 
 /// Contextual On-Demand Sharing Sheet — surfaces sharing smoothly over the
 /// File Manager ONLY when the user wants to share or receive, eliminating the
@@ -39,11 +40,12 @@ class ContextualShareSheet extends StatefulWidget {
             .map((f) => f.path)
             .toList();
 
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => ContextualShareSheet(initialPaths: effectivePaths),
+    return DedicatedToolPage.open(
+      context,
+      title: 'Contextual Share & Transfer',
+      subtitle: 'Nearby P2P Device Discovery, Radar & Direct File Beam',
+      icon: Icons.share_rounded,
+      child: ContextualShareSheet(initialPaths: effectivePaths),
     );
   }
 

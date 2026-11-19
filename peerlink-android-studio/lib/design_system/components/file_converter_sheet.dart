@@ -3,17 +3,20 @@ import 'package:flutter/material.dart';
 import '../../core/file_converter_service.dart';
 import '../../core/received_files_service.dart';
 import '../colors/peerlink_colors.dart';
+import 'dedicated_tool_page.dart';
 
 /// Minimalist Light-Only File Converter Sheet.
 /// Converts files locally 100% offline with zero cloud relays.
 class FileConverterSheet extends StatefulWidget {
   final ReceivedFileItem fileItem;
   final VoidCallback? onConversionComplete;
+  final bool isPage;
 
   const FileConverterSheet({
     super.key,
     required this.fileItem,
     this.onConversionComplete,
+    this.isPage = false,
   });
 
   static Future<void> show(
@@ -21,13 +24,15 @@ class FileConverterSheet extends StatefulWidget {
     ReceivedFileItem item, {
     VoidCallback? onConversionComplete,
   }) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => FileConverterSheet(
+    return DedicatedToolPage.open(
+      context,
+      title: 'Offline Format Converter',
+      subtitle: 'Lossless Transcoding & Multi-Format Parsing (${item.name})',
+      icon: Icons.transform_rounded,
+      child: FileConverterSheet(
         fileItem: item,
         onConversionComplete: onConversionComplete,
+        isPage: true,
       ),
     );
   }
@@ -150,14 +155,14 @@ class _FileConverterSheetState extends State<FileConverterSheet> {
     final isDesktop = MediaQuery.of(context).size.width >= 768;
 
     return Container(
-      constraints: BoxConstraints(
+      constraints: widget.isPage ? null : BoxConstraints(
         maxHeight: MediaQuery.of(context).size.height * 0.85,
         maxWidth: isDesktop ? 600 : double.infinity,
       ),
-      margin: isDesktop ? const EdgeInsets.symmetric(horizontal: 24, vertical: 24) : null,
-      decoration: const BoxDecoration(
+      margin: (!widget.isPage && isDesktop) ? const EdgeInsets.symmetric(horizontal: 24, vertical: 24) : null,
+      decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: SafeArea(
         top: false,
@@ -167,17 +172,19 @@ class _FileConverterSheetState extends State<FileConverterSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Top drag bar
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE5E7EB),
-                    borderRadius: BorderRadius.circular(2),
+              if (!widget.isPage) ...[
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE5E7EB),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
                 ),
-              ),
+                const SizedBox(height: 12),
+              ],
               const SizedBox(height: 16),
 
               // Header
