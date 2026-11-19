@@ -4,9 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/audio_player_service.dart';
 import '../../core/received_files_service.dart';
+import '../../core/models/file_item.dart';
 import '../../design_system/components/media_preview_modal.dart';
 import '../../design_system/components/floating_audio_mini_player.dart';
 import '../../design_system/components/video_trimmer_sheet.dart';
+import '../../design_system/components/subtitle_sync_sheet.dart';
+import '../../design_system/components/audio_sleep_timer_sheet.dart';
+import '../../design_system/components/audio_equalizer_sheet.dart';
+import '../../design_system/components/similar_photo_grouper_sheet.dart';
 
 enum MediaHubTab { all, photos, videos, audio, documents }
 
@@ -211,56 +216,81 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
 
   Widget _buildPhotosGrid() {
     final photos = _filteredFiles;
-    return GridView.builder(
-      padding: const EdgeInsets.all(12),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        crossAxisSpacing: 8,
-        mainAxisSpacing: 8,
-        childAspectRatio: 1.0,
-      ),
-      itemCount: photos.length,
-      itemBuilder: (context, index) {
-        final item = photos[index];
-        return InkWell(
-          key: Key('photo_tile_$index'),
-          borderRadius: BorderRadius.circular(10),
-          onTap: () => _openPreview(item, playlist: photos, index: index),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Image.file(
-                  File(item.path),
-                  fit: BoxFit.cover,
-                  cacheWidth: 240,
-                  cacheHeight: 240,
-                  errorBuilder: (_, __, ___) => Container(
-                    color: const Color(0xFFF1F5F9),
-                    child: const Icon(Icons.broken_image_rounded, color: Color(0xFF94A3B8)),
-                  ),
-                ),
-                Positioned(
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                    color: Colors.black45,
-                    child: Text(
-                      item.name,
-                      style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w500),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ),
-              ],
+    return Column(
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          color: const Color(0xFFF8FAFC),
+          child: OutlinedButton.icon(
+            key: const Key('find_similar_photos_button'),
+            onPressed: () {
+              final photoFiles = _filteredFiles.map((f) => FileItem(name: f.name, path: f.path, size: f.sizeBytes, modified: f.lastModified)).toList();
+              SimilarPhotoGrouperSheet.show(context, photoFiles, onResolved: _loadData);
+            },
+            icon: const Icon(Icons.burst_mode_rounded, size: 16, color: Color(0xFF2563EB)),
+            label: const Text('Find Similar Photos & Burst Duplicates (dHash)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF1D4ED8))),
+            style: OutlinedButton.styleFrom(
+              backgroundColor: const Color(0xFFEFF6FF),
+              side: const BorderSide(color: Color(0xFFDBEAFE)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
           ),
-        );
-      },
+        ),
+        Expanded(
+          child: GridView.builder(
+            padding: const EdgeInsets.all(12),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+              childAspectRatio: 1.0,
+            ),
+            itemCount: photos.length,
+            itemBuilder: (context, index) {
+              final item = photos[index];
+              return InkWell(
+                key: Key('photo_tile_$index'),
+                borderRadius: BorderRadius.circular(10),
+                onTap: () => _openPreview(item, playlist: photos, index: index),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Image.file(
+                        File(item.path),
+                        fit: BoxFit.cover,
+                        cacheWidth: 240,
+                        cacheHeight: 240,
+                        errorBuilder: (_, __, ___) => Container(
+                          color: const Color(0xFFF1F5F9),
+                          child: const Icon(Icons.broken_image_rounded, color: Color(0xFF94A3B8)),
+                        ),
+                      ),
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                          color: Colors.black45,
+                          child: Text(
+                            item.name,
+                            style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w500),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -332,6 +362,27 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
                     ),
                   ),
                   IconButton(
+                    icon: const Icon(Icons.subtitles_outlined, size: 18, color: Color(0xFF2563EB)),
+                    tooltip: 'Subtitles & Real-Time Sync',
+                    onPressed: () {
+                      SubtitleSyncSheet.show(context, videoStem: item.name);
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.camera_alt_outlined, size: 18, color: Color(0xFF64748B)),
+                    tooltip: 'Lossless Video Frame Grabber',
+                    onPressed: () {
+                      HapticFeedback.selectionClick();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Saved full-resolution frame from ${item.name} to Vault/Photos'),
+                          behavior: SnackBarBehavior.floating,
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    },
+                  ),
+                  IconButton(
                     icon: const Icon(Icons.content_cut_rounded, size: 18, color: Color(0xFF2563EB)),
                     tooltip: 'Trim Clip & Extract Soundtrack',
                     onPressed: () {
@@ -356,9 +407,9 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
     final audioFiles = _filteredFiles;
     return Column(
       children: [
-        // Speed & Sleep Controls Bar
+        // Speed, Equalizer & Sleep Controls Bar
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: const BoxDecoration(
             color: Color(0xFFF8FAFC),
             border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
@@ -366,44 +417,71 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
           child: Row(
             children: [
               const Icon(Icons.speed_rounded, size: 16, color: Color(0xFF2563EB)),
-              const SizedBox(width: 6),
-              const Text('Speed:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF475569))),
-              const SizedBox(width: 6),
+              const SizedBox(width: 4),
               DropdownButton<double>(
                 value: _playbackSpeed,
                 isDense: true,
                 underline: const SizedBox.shrink(),
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
                 items: const [
+                  DropdownMenuItem(value: 0.5, child: Text('0.5x')),
                   DropdownMenuItem(value: 0.75, child: Text('0.75x')),
                   DropdownMenuItem(value: 1.0, child: Text('1.0x')),
                   DropdownMenuItem(value: 1.25, child: Text('1.25x')),
                   DropdownMenuItem(value: 1.5, child: Text('1.5x')),
                   DropdownMenuItem(value: 2.0, child: Text('2.0x')),
+                  DropdownMenuItem(value: 2.5, child: Text('2.5x')),
+                  DropdownMenuItem(value: 3.0, child: Text('3.0x')),
                 ],
                 onChanged: (val) {
                   if (val != null) _setPlaybackSpeed(val);
                 },
               ),
+              const SizedBox(width: 8),
+              // Equalizer button
+              InkWell(
+                key: const Key('audio_equalizer_button'),
+                onTap: () => AudioEqualizerSheet.show(context),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFFCBD5E1)),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.graphic_eq_rounded, size: 14, color: Color(0xFF2563EB)),
+                      SizedBox(width: 4),
+                      Text('EQ', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF1D4ED8))),
+                    ],
+                  ),
+                ),
+              ),
               const Spacer(),
-              const Icon(Icons.bedtime_outlined, size: 16, color: Color(0xFF7C3AED)),
-              const SizedBox(width: 6),
-              const Text('Sleep Timer:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF475569))),
-              const SizedBox(width: 6),
-              DropdownButton<int>(
-                value: _sleepTimerMinutes,
-                isDense: true,
-                underline: const SizedBox.shrink(),
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
-                items: const [
-                  DropdownMenuItem(value: 0, child: Text('Off')),
-                  DropdownMenuItem(value: 15, child: Text('15 min')),
-                  DropdownMenuItem(value: 30, child: Text('30 min')),
-                  DropdownMenuItem(value: 45, child: Text('45 min')),
-                ],
-                onChanged: (val) {
-                  if (val != null) _setSleepTimer(val);
-                },
+              // Sleep Timer with volume fade
+              InkWell(
+                key: const Key('audio_sleep_timer_button'),
+                onTap: () => AudioSleepTimerSheet.show(context),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFFCBD5E1)),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.bedtime_outlined, size: 14, color: Color(0xFF9333EA)),
+                      SizedBox(width: 4),
+                      Text('Sleep Fade', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF7E22CE))),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),

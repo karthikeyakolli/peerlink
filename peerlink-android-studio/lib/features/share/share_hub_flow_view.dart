@@ -6,11 +6,16 @@ import '../../core/hotspot_tether_qr_service.dart';
 import '../../core/network_diagnostic_service.dart';
 import '../../core/received_files_service.dart';
 import '../../core/web_beam_server_service.dart';
+import '../../core/services/resumable_transfer_service.dart';
 import '../../design_system/components/burner_viewer_modal.dart';
 import '../../design_system/components/contextual_share_sheet.dart';
 import '../../design_system/components/hotspot_tether_qr_sheet.dart';
 import '../../design_system/components/network_diagnostic_card.dart';
 import '../../design_system/components/web_beam_modal.dart';
+import '../../design_system/components/multi_stream_bonding_sheet.dart';
+import '../../design_system/components/local_walkie_talkie_sheet.dart';
+import '../../design_system/components/remote_presentation_clicker_sheet.dart';
+import '../../design_system/components/shared_local_scratchpad_sheet.dart';
 
 /// Dedicated P2P Share & Transfer Flow.
 /// Unifies local Wi-Fi Hotspot Auto-Tether QR, Bi-Directional Web Beam 2.0,
@@ -151,25 +156,212 @@ class _ShareHubFlowViewState extends State<ShareHubFlowView> {
         _buildP2PRadarCard(),
         const SizedBox(height: 14),
 
-        // 2. Zero-Touch Hotspot Auto-Tether Card
+        // 2. Resumable Chunk Bitmask Ledger Card
+        _buildResumableTransfersCard(),
+        const SizedBox(height: 14),
+
+        // 3. Cross-Device Interoperability & Productivity
+        _buildCrossDeviceProductivityCard(),
+        const SizedBox(height: 14),
+
+        // 4. Zero-Touch Hotspot Auto-Tether Card
         _buildHotspotTetherCard(),
         const SizedBox(height: 14),
 
-        // 3. Bi-Directional Web Portal 2.0 (Web Beam)
+        // 5. Bi-Directional Web Portal 2.0 (Web Beam)
         _buildWebBeamCard(),
         const SizedBox(height: 14),
 
-        // 4. One-Time Ephemeral Burner Vault Share
+        // 6. One-Time Ephemeral Burner Vault Share
         _buildBurnerShareCard(),
         const SizedBox(height: 14),
 
-        // 5. Wi-Fi 6 / 5GHz Link Diagnostic & Congestion Advisor
+        // 7. Wi-Fi 6 / 5GHz Link Diagnostic & Congestion Advisor
         const NetworkDiagnosticCard(),
         const SizedBox(height: 14),
 
-        // 6. Network Governors (Speed Throttling & Battery Guard)
+        // 8. Network Governors (Speed Throttling & Battery Guard)
         _buildGovernorsCard(),
       ],
+    );
+  }
+
+  Widget _buildResumableTransfersCard() {
+    final sessions = ResumableTransferService.instance.activeSessions;
+    if (sessions.isEmpty) return const SizedBox.shrink();
+
+    final session = sessions.first;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.replay_circle_filled_rounded, color: Color(0xFF2563EB), size: 20),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Resumable Bitmask Engine', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                    Text(
+                      'Resilience against Wi-Fi drops • 1 MB chunk ledger',
+                      style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF0FDF4),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFFBBF7D0)),
+                ),
+                child: Text(
+                  '${(session.progressRatio * 100).toInt()}% Resumable',
+                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Color(0xFF15803D)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        session.fileName,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+                      ),
+                    ),
+                    Text(
+                      '${session.receivedChunks.length}/${session.totalChunks} Chunks',
+                      style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(3),
+                  child: LinearProgressIndicator(
+                    value: session.progressRatio,
+                    minHeight: 5,
+                    backgroundColor: const Color(0xFFE2E8F0),
+                    valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF2563EB)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCrossDeviceProductivityCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Cross-Device Turbochargers', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Color(0xFF0F172A))),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  key: const Key('open_multi_stream_bonding_button'),
+                  onPressed: () => MultiStreamBondingSheet.show(context),
+                  icon: const Icon(Icons.alt_route_rounded, size: 16, color: Color(0xFF2563EB)),
+                  label: const Text('Link Bonding', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Color(0xFFCBD5E1)),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  key: const Key('open_walkie_talkie_button'),
+                  onPressed: () => LocalWalkieTalkieSheet.show(context),
+                  icon: const Icon(Icons.record_voice_over_rounded, size: 16, color: Color(0xFF16A34A)),
+                  label: const Text('Walkie-Talkie', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Color(0xFFCBD5E1)),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  key: const Key('open_presentation_clicker_button'),
+                  onPressed: () => RemotePresentationClickerSheet.show(context),
+                  icon: const Icon(Icons.cast_connected_rounded, size: 16, color: Color(0xFFD97706)),
+                  label: const Text('Slide Remote', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Color(0xFFCBD5E1)),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  key: const Key('open_scratchpad_button'),
+                  onPressed: () => SharedLocalScratchpadSheet.show(context),
+                  icon: const Icon(Icons.sticky_note_2_outlined, size: 16, color: Color(0xFF9333EA)),
+                  label: const Text('LAN Notepad', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Color(0xFFCBD5E1)),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 

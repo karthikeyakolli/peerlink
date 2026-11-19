@@ -3,9 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:crypto/crypto.dart';
 import '../../core/received_files_service.dart';
+import '../../core/models/file_item.dart';
 import '../../design_system/components/file_converter_sheet.dart';
 import '../../design_system/components/storage_cleaner_sheet.dart';
 import '../../design_system/components/video_trimmer_sheet.dart';
+import '../../design_system/components/storage_treemap_sheet.dart';
+import '../../design_system/components/secure_file_shredder_sheet.dart';
+import '../../design_system/components/split_apk_inspector_sheet.dart';
+import '../../design_system/components/exif_sanitizer_sheet.dart';
 
 /// Dedicated File Conversions & Offline Processing Studio Flow.
 /// Houses format transformations, in-app clip trimming & soundtrack extraction,
@@ -199,17 +204,153 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
         _buildFormatConverterCard(),
         const SizedBox(height: 14),
 
-        // 2. Video Trimmer & Audio Extractor Card
+        // 2. Interactive Storage Treemap Heatmap Card
+        _buildStorageTreemapCard(),
+        const SizedBox(height: 14),
+
+        // 3. DoD 5220.22-M Secure Shredder & Privacy Tools
+        _buildSecureShredderAndPrivacyCard(),
+        const SizedBox(height: 14),
+
+        // 4. Video Trimmer & Audio Extractor Card
         _buildVideoTrimmerCard(),
         const SizedBox(height: 14),
 
-        // 3. Cryptographic Hash & Integrity Verifier Card
+        // 5. Cryptographic Hash & Integrity Verifier Card
         _buildHashVerifierCard(),
         const SizedBox(height: 14),
 
-        // 4. Storage Cleaner & Junk Scrubber Card
+        // 6. Storage Cleaner & Junk Scrubber Card
         _buildCleanerCard(),
       ],
+    );
+  }
+
+  Widget _buildStorageTreemapCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.grid_view_rounded, color: Color(0xFF2563EB), size: 20),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Disk Space Treemap & Heatmap', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                    Text('WinDirStat-style proportional visual disk usage allocation', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          FilledButton.tonalIcon(
+            key: const Key('open_storage_treemap_button'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFEFF6FF),
+              foregroundColor: const Color(0xFF1D4ED8),
+              padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            icon: const Icon(Icons.analytics_outlined, size: 18),
+            label: const Text('Open Treemap Heatmap', style: TextStyle(fontWeight: FontWeight.bold)),
+            onPressed: () => StorageTreemapSheet.show(context),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSecureShredderAndPrivacyCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Security, Privacy & Split-APKs', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Color(0xFF0F172A))),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  key: const Key('open_secure_shredder_button'),
+                  onPressed: () async {
+                    final files = await _service.getReceivedFiles();
+                    final item = files.isNotEmpty
+                        ? FileItem(name: files.first.name, path: files.first.path, size: files.first.sizeBytes, modified: files.first.lastModified)
+                        : FileItem(name: 'confidential_contract.pdf', path: '/vault/confidential_contract.pdf', size: 1240000, modified: DateTime.now());
+                    if (context.mounted) SecureFileShredderSheet.show(context, item);
+                  },
+                  icon: const Icon(Icons.delete_forever_rounded, size: 16, color: Color(0xFFDC2626)),
+                  label: const Text('DoD Shredder', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Color(0xFFCBD5E1)),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  key: const Key('open_exif_sanitizer_button'),
+                  onPressed: () async {
+                    final files = await _service.getReceivedFiles();
+                    final item = files.isNotEmpty
+                        ? FileItem(name: files.first.name, path: files.first.path, size: files.first.sizeBytes, modified: files.first.lastModified)
+                        : FileItem(name: 'camera_photo_gps.jpg', path: '/vault/camera_photo_gps.jpg', size: 4500000, modified: DateTime.now());
+                    if (context.mounted) ExifSanitizerSheet.show(context, item);
+                  },
+                  icon: const Icon(Icons.location_off_outlined, size: 16, color: Color(0xFF2563EB)),
+                  label: const Text('EXIF Stripper', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Color(0xFFCBD5E1)),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              key: const Key('open_split_apk_inspector_button'),
+              onPressed: () => SplitApkInspectorSheet.show(context),
+              icon: const Icon(Icons.inventory_2_outlined, size: 16, color: Color(0xFF16A34A)),
+              label: const Text('Split-APK & Bundle Inspector (.apks/.xapk)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Color(0xFFCBD5E1)),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

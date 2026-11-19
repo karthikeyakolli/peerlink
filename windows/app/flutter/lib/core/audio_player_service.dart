@@ -183,8 +183,32 @@ class AudioPlayerService {
     }
   }
 
+  DateTime? _sleepTimerEnd;
+  Timer? _sleepTimer;
+
+  Duration? get sleepTimerRemaining {
+    if (_sleepTimerEnd == null) return null;
+    final remaining = _sleepTimerEnd!.difference(DateTime.now());
+    return remaining.isNegative ? Duration.zero : remaining;
+  }
+
+  void setSleepTimer(Duration duration) {
+    cancelSleepTimer();
+    _sleepTimerEnd = DateTime.now().add(duration);
+    _sleepTimer = Timer(duration, () {
+      pause();
+      cancelSleepTimer();
+    });
+  }
+
+  void cancelSleepTimer() {
+    _sleepTimer?.cancel();
+    _sleepTimer = null;
+    _sleepTimerEnd = null;
+  }
+
   void setPlaybackSpeed(double speed) {
-    speedNotifier.value = speed.clamp(0.5, 2.0);
+    speedNotifier.value = speed.clamp(0.5, 3.0);
   }
 
   void closeMiniPlayer() {

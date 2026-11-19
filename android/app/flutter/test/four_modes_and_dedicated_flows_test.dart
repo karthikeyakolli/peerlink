@@ -62,6 +62,9 @@ void main() {
     });
 
     testWidgets('Tapping Mode 1 switches to dedicated Media Viewer & Player Flow', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
       await tester.pumpWidget(
         const MaterialApp(
           home: FileManagerHomeScreen(),
@@ -87,11 +90,15 @@ void main() {
       await tester.tap(find.byKey(const Key('media_tab_audio')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
-      expect(find.text('Speed:'), findsOneWidget);
-      expect(find.text('Sleep Timer:'), findsOneWidget);
+      expect(find.byKey(const Key('audio_equalizer_button')), findsOneWidget);
+      expect(find.byKey(const Key('audio_sleep_timer_button')), findsOneWidget);
+      expect(find.text('1.0x'), findsOneWidget);
     });
 
     testWidgets('Tapping Mode 2 switches to dedicated P2P Share & Link Flow', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
       await tester.pumpWidget(
         const MaterialApp(
           home: FileManagerHomeScreen(),
@@ -107,6 +114,7 @@ void main() {
 
       // Verify Share Hub view is active
       expect(find.byType(ShareHubFlowView), findsOneWidget);
+      expect(find.text('Resumable Bitmask Engine'), findsOneWidget);
       expect(find.text('Direct P2P Beam & Discovery'), findsOneWidget);
       expect(find.text('Hotspot Auto-Tether QR'), findsOneWidget);
       expect(find.text('Bi-Directional Web Portal 2.0'), findsOneWidget);
@@ -115,6 +123,9 @@ void main() {
     });
 
     testWidgets('Tapping Mode 3 switches to dedicated File Conversions & Studio Flow', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
       await tester.pumpWidget(
         const MaterialApp(
           home: FileManagerHomeScreen(),
@@ -130,6 +141,8 @@ void main() {
 
       // Verify File Converter Studio view is active
       expect(find.byType(FileConverterFlowView), findsOneWidget);
+      expect(find.text('Disk Space Treemap & Heatmap'), findsOneWidget);
+      expect(find.text('Security, Privacy & Split-APKs'), findsOneWidget);
       expect(find.text('Offline Format Converter'), findsOneWidget);
       expect(find.text('In-App Video Trimmer & Audio Extractor'), findsOneWidget);
       expect(find.text('Checksum & Integrity Verifier'), findsOneWidget);

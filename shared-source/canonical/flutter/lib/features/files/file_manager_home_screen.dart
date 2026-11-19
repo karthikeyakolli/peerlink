@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../core/services/ransomware_canary_guard.dart';
+import '../../design_system/components/ransomware_alert_modal.dart';
 import '../../design_system/components/contextual_share_sheet.dart';
 import '../../design_system/components/floating_audio_mini_player.dart';
 import '../../design_system/components/stash_tray_dock.dart';
@@ -25,6 +28,21 @@ class FileManagerHomeScreen extends StatefulWidget {
 
 class _FileManagerHomeScreenState extends State<FileManagerHomeScreen> {
   int _selectedMode = 0; // 0: Files, 1: Media, 2: Share, 3: Conversions
+  StreamSubscription<CanaryTripEvent>? _canarySub;
+
+  @override
+  void initState() {
+    super.initState();
+    _canarySub = RansomwareCanaryGuard.instance.onTrip.listen((event) {
+      if (mounted) RansomwareAlertModal.show(context, event);
+    });
+  }
+
+  @override
+  void dispose() {
+    _canarySub?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {

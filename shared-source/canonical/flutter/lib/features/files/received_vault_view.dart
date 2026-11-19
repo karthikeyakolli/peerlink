@@ -30,6 +30,11 @@ import '../../core/network_diagnostic_service.dart';
 import '../../design_system/components/burner_viewer_modal.dart';
 import '../../design_system/components/hotspot_tether_qr_sheet.dart';
 import '../../design_system/components/network_diagnostic_card.dart';
+import '../../design_system/components/file_tagging_sheet.dart';
+import '../../design_system/components/visual_diff_comparator_sheet.dart';
+import '../../design_system/components/secure_file_shredder_sheet.dart';
+import '../../core/models/file_item.dart';
+import '../../core/services/file_tagging_service.dart';
 
 class _FolderTabState {
   bool browseInternalStorage;
@@ -3149,7 +3154,100 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
               _buildDetailProperty('Last Modified', _formatDetailedDate(item.lastModified), isDark),
               if (!item.isDirectory)
                 _buildSha256Property(item.path, isDark),
-              const SizedBox(height: 20),
+              const SizedBox(height: 10),
+              // Virtual Tag Badges
+              Builder(
+                builder: (context) {
+                  final tags = FileTaggingService.instance.getTagsForFile(item.path);
+                  if (tags.isEmpty) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: tags.map((t) {
+                        return Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: t.color.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: t.color.withValues(alpha: 0.3)),
+                          ),
+                          child: Text(
+                            t.label,
+                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: t.color),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 10),
+              // Advanced Tool Action Chips (Tags, Diff, Shred)
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const Key('file_detail_tags_button'),
+                      icon: const Icon(Icons.label_outline_rounded, size: 14, color: Color(0xFF2563EB)),
+                      label: const Text('Tags', style: TextStyle(fontSize: 12)),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        side: const BorderSide(color: Color(0xFFE2E8F0)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        FileTaggingSheet.show(
+                          context,
+                          FileItem(name: item.name, path: item.path, size: item.sizeBytes, modified: item.lastModified),
+                          onTagsChanged: () => setState(() {}),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const Key('file_detail_diff_button'),
+                      icon: const Icon(Icons.difference_outlined, size: 14, color: Color(0xFFD97706)),
+                      label: const Text('Diff', style: TextStyle(fontSize: 12)),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        side: const BorderSide(color: Color(0xFFE2E8F0)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        VisualDiffComparatorSheet.show(context, fileAName: item.name);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const Key('file_detail_shred_button'),
+                      icon: const Icon(Icons.delete_forever_rounded, size: 14, color: Color(0xFFDC2626)),
+                      label: const Text('DoD Shred', style: TextStyle(fontSize: 12)),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        side: const BorderSide(color: Color(0xFFE2E8F0)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        SecureFileShredderSheet.show(
+                          context,
+                          FileItem(name: item.name, path: item.path, size: item.sizeBytes, modified: item.lastModified),
+                          onShredded: _loadData,
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
               Row(
                 children: [
                   if (!item.isDirectory) ...[

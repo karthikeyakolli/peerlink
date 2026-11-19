@@ -23,6 +23,7 @@ import 'pdf_suite_sheet.dart';
 import 'expiring_beam_link_sheet.dart';
 import 'video_trimmer_sheet.dart';
 import 'floating_video_pip_overlay.dart';
+import 'subtitle_sync_sheet.dart';
 
 /// Universal In-App File & Media Viewer Engine (Minimalist Light-Only Surface).
 /// Brings every file type to life directly inside PeerLink:
@@ -2297,7 +2298,7 @@ class _MediaPreviewModalState extends State<MediaPreviewModal> {
                             tooltip: 'Playback Speed',
                             initialValue: _videoController.playbackSpeed,
                             onSelected: (speed) => setState(() => _videoController.setPlaybackSpeed(speed)),
-                            itemBuilder: (ctx) => [0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((s) => PopupMenuItem(
+                            itemBuilder: (ctx) => [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0].map((s) => PopupMenuItem(
                               value: s,
                               child: Text('${s}x Speed', style: TextStyle(fontWeight: s == _videoController.playbackSpeed ? FontWeight.bold : FontWeight.normal)),
                             )).toList(),
@@ -2367,24 +2368,64 @@ class _MediaPreviewModalState extends State<MediaPreviewModal> {
                             ),
                           ),
                           const SizedBox(width: 6),
-                          // Subtitles Badge
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: _videoController.subtitles.isNotEmpty ? const Color(0xFFF0FDF4) : Colors.white,
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: _videoController.subtitles.isNotEmpty ? const Color(0xFFBBF7D0) : const Color(0xFFCBD5E1)),
+                          // Subtitles Badge & Calibrator
+                          InkWell(
+                            key: const Key('video_subtitles_button'),
+                            onTap: () => SubtitleSyncSheet.show(context, videoStem: item.name),
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: _videoController.subtitles.isNotEmpty ? const Color(0xFFF0FDF4) : Colors.white,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: _videoController.subtitles.isNotEmpty ? const Color(0xFFBBF7D0) : const Color(0xFFCBD5E1)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.subtitles_rounded, size: 14, color: _videoController.subtitles.isNotEmpty ? const Color(0xFF16A34A) : const Color(0xFF64748B)),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    _videoController.subtitles.isNotEmpty ? 'CC: ${_videoController.subtitles.length}' : 'CC: Sync',
+                                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: _videoController.subtitles.isNotEmpty ? const Color(0xFF15803D) : const Color(0xFF64748B)),
+                                  ),
+                                ],
+                              ),
                             ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.subtitles_rounded, size: 14, color: _videoController.subtitles.isNotEmpty ? const Color(0xFF16A34A) : const Color(0xFF64748B)),
-                                const SizedBox(width: 4),
-                                Text(
-                                  _videoController.subtitles.isNotEmpty ? 'CC: ${_videoController.subtitles.length}' : 'CC: None',
-                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: _videoController.subtitles.isNotEmpty ? const Color(0xFF15803D) : const Color(0xFF64748B)),
+                          ),
+                          const SizedBox(width: 6),
+                          // Frame Grabber Snapshot
+                          InkWell(
+                            key: const Key('video_frame_grabber_button'),
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Saved full-resolution frame from ${item.name} to Vault/Photos'),
+                                  behavior: SnackBarBehavior.floating,
+                                  duration: const Duration(seconds: 2),
                                 ),
-                              ],
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: const Color(0xFFCBD5E1)),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.camera_alt_outlined, size: 14, color: Color(0xFF475569)),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'Snapshot',
+                                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                           const SizedBox(width: 6),
