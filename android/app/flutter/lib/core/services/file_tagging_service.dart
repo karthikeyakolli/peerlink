@@ -34,9 +34,7 @@ class FileTaggingService {
   final Map<String, Set<FileTag>> _tagsByPath = {};
 
   void _initDefaults() {
-    // Seed some demo tags for seamless out-of-the-box experience
-    _tagsByPath['invoice.pdf'] = {defaultTags[2], defaultTags[4]}; // Taxes, Starred
-    _tagsByPath['presentation.pptx'] = {defaultTags[0]}; // Work
+    // Dynamic tag map: begins empty and records user-applied tags on real files
   }
 
   Set<FileTag> getTagsForFile(String path) {

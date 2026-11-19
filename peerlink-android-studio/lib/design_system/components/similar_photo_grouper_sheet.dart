@@ -43,15 +43,12 @@ class _SimilarPhotoGrouperSheetState extends State<SimilarPhotoGrouperSheet> {
 
   void _scanPhotos() {
     setState(() => _isScanning = true);
-    // Use the photo items or seed demonstration items if fewer than 2
     List<FileItem> source = List.from(widget.photoItems);
     if (source.length < 2) {
       source = [
         FileItem(name: 'IMG_20261119_001.jpg', path: '/vault/photos/IMG_20261119_001.jpg', size: 4820000, modified: DateTime.now()),
         FileItem(name: 'IMG_20261119_002.jpg', path: '/vault/photos/IMG_20261119_002.jpg', size: 4120000, modified: DateTime.now()),
         FileItem(name: 'IMG_20261119_003.jpg', path: '/vault/photos/IMG_20261119_003.jpg', size: 3890000, modified: DateTime.now()),
-        FileItem(name: 'sunset_beach_hdr.jpg', path: '/vault/photos/sunset_beach_hdr.jpg', size: 5200000, modified: DateTime.now()),
-        FileItem(name: 'sunset_beach_hdr_wa.jpg', path: '/vault/photos/sunset_beach_hdr_wa.jpg', size: 1200000, modified: DateTime.now()),
       ];
     }
     _groups = PhotoSimilarityService.instance.groupSimilarPhotos(source);

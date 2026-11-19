@@ -251,9 +251,11 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
         Expanded(
           child: _isLoading
               ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
-              : _filteredFiles.isEmpty
-                  ? _buildEmptyState()
-                  : _buildTabContent(),
+              : (_currentTab == MediaHubTab.audio || _currentTab == MediaHubTab.photos)
+                  ? _buildTabContent()
+                  : _filteredFiles.isEmpty
+                      ? _buildEmptyState()
+                      : _buildTabContent(),
         ),
 
         // Sticky Audio Mini-Player
@@ -372,10 +374,24 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
                 // Threat Audit pill
                 InkWell(
                   key: const Key('open_virus_scanner_button'),
-                  onTap: () {
+                  onTap: () async {
                     final files = _allFiles;
                     if (files.isNotEmpty) {
                       _openVirusScanner(files.first.path);
+                    } else if (Platform.isWindows) {
+                      final picked = await WindowsFileDialog.pickFiles(title: 'Select File to Audit for Threats');
+                      if (picked.isNotEmpty && mounted) {
+                        _openVirusScanner(picked.first);
+                        return;
+                      }
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('No media files found to audit.'),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
                     } else {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
@@ -563,7 +579,9 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
           ),
         ),
         Expanded(
-          child: GridView.builder(
+          child: photos.isEmpty
+              ? _buildEmptyState()
+              : GridView.builder(
             padding: const EdgeInsets.all(12),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 3,
@@ -844,7 +862,9 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
           ),
         ),
         Expanded(
-          child: ListView.builder(
+          child: audioFiles.isEmpty
+              ? _buildEmptyState()
+              : ListView.builder(
             padding: const EdgeInsets.all(12),
             itemCount: audioFiles.length,
             itemBuilder: (context, index) {

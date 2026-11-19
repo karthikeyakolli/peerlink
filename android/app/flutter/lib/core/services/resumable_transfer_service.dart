@@ -41,28 +41,10 @@ class ResumableTransferSession {
 
 /// Resumable Chunk Bitmask Engine ensuring transfers survive Wi-Fi drops without restarting.
 class ResumableTransferService {
-  ResumableTransferService._() {
-    _initDemoSession();
-  }
+  ResumableTransferService._();
   static final ResumableTransferService instance = ResumableTransferService._();
 
   final Map<String, ResumableTransferSession> _sessions = {};
-
-  void _initDemoSession() {
-    // Seed an active resumable session for instant UI inspection
-    final demoSession = ResumableTransferSession(
-      transferId: 'transfer_resumable_4k_backup',
-      fileName: 'ubuntu-24.04-desktop-amd64.iso',
-      totalBytes: 5792481280, // 5.79 GB
-      chunkSize: 1048576,
-    );
-    // Simulate 72% completed chunks
-    final chunksToSeed = (demoSession.totalChunks * 0.72).floor();
-    for (int i = 0; i < chunksToSeed; i++) {
-      demoSession.markChunkReceived(i);
-    }
-    _sessions[demoSession.transferId] = demoSession;
-  }
 
   ResumableTransferSession getOrCreateSession({
     required String transferId,

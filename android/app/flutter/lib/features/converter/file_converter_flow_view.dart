@@ -101,11 +101,11 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
             }
           });
           return;
+        } else {
+          return; // User cancelled
         }
       }
     } catch (_) {}
-
-    _addEmbeddedSamplePage();
   }
 
   void _addEmbeddedSamplePage() {
@@ -234,10 +234,26 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
     final files = await _service.getReceivedFiles();
     final nonDirs = files.where((f) => !f.isDirectory).toList();
     if (nonDirs.isEmpty) {
+      if (Platform.isWindows) {
+        final pickedPaths = await WindowsFileDialog.pickFiles(title: 'Select File to Hash & Verify');
+        if (pickedPaths.isNotEmpty && mounted) {
+          final f = File(pickedPaths.first);
+          final item = ReceivedFileItem(
+            name: f.uri.pathSegments.last,
+            path: f.path,
+            sizeBytes: f.lengthSync(),
+            lastModified: f.lastModifiedSync(),
+            category: ReceivedFileCategory.documents,
+            extension: f.path.split('.').last,
+          );
+          _calculateFileHash(item);
+          return;
+        }
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No files in vault to verify. Receive or add a file first.'),
+            content: Text('No files in vault or selected to verify.'),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -268,7 +284,10 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
     );
 
     if (picked == null || !mounted) return;
+    await _calculateFileHash(picked);
+  }
 
+  Future<void> _calculateFileHash(ReceivedFileItem picked) async {
     setState(() {
       _selectedHashFile = picked;
       _isHashing = true;
@@ -309,10 +328,26 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
     final files = await _service.getReceivedFiles();
     final nonDirs = files.where((f) => !f.isDirectory).toList();
     if (nonDirs.isEmpty) {
+      if (Platform.isWindows) {
+        final pickedPaths = await WindowsFileDialog.pickFiles(title: 'Select File to Convert');
+        if (pickedPaths.isNotEmpty && mounted) {
+          final f = File(pickedPaths.first);
+          final item = ReceivedFileItem(
+            name: f.uri.pathSegments.last,
+            path: f.path,
+            sizeBytes: f.lengthSync(),
+            lastModified: f.lastModifiedSync(),
+            category: ReceivedFileCategory.documents,
+            extension: f.path.split('.').last,
+          );
+          FileConverterSheet.show(context, item);
+          return;
+        }
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No files in vault to convert. Receive or add a file first.'),
+            content: Text('No files in vault or selected to convert.'),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -351,10 +386,31 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
     final files = await _service.getReceivedFiles();
     final videos = files.where((f) => f.isVideo).toList();
     if (videos.isEmpty) {
+      if (Platform.isWindows) {
+        final pickedPaths = await WindowsFileDialog.pickFiles(title: 'Select Video File to Trim');
+        if (pickedPaths.isNotEmpty && mounted) {
+          final f = File(pickedPaths.first);
+          final item = ReceivedFileItem(
+            name: f.uri.pathSegments.last,
+            path: f.path,
+            sizeBytes: f.lengthSync(),
+            lastModified: f.lastModifiedSync(),
+            category: ReceivedFileCategory.videos,
+            extension: f.path.split('.').last,
+          );
+          VideoTrimmerSheet.show(
+            context,
+            fileItem: item,
+            videoDuration: const Duration(minutes: 2),
+            onExported: () {},
+          );
+          return;
+        }
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No video files found in vault to trim.'),
+            content: Text('No video files found in vault or selected to trim.'),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -1048,10 +1104,22 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
                   key: const Key('open_secure_shredder_button'),
                   onPressed: () async {
                     final files = await _service.getReceivedFiles();
-                    final item = files.isNotEmpty
-                        ? FileItem(name: files.first.name, path: files.first.path, size: files.first.sizeBytes, modified: files.first.lastModified)
-                        : FileItem(name: 'confidential_contract.pdf', path: '/vault/confidential_contract.pdf', size: 1240000, modified: DateTime.now());
-                    if (context.mounted) SecureFileShredderSheet.show(context, item);
+                    final nonDirs = files.where((f) => !f.isDirectory).toList();
+                    if (nonDirs.isNotEmpty && context.mounted) {
+                      final item = FileItem(name: nonDirs.first.name, path: nonDirs.first.path, size: nonDirs.first.sizeBytes, modified: nonDirs.first.lastModified);
+                      SecureFileShredderSheet.show(context, item);
+                    } else if (Platform.isWindows) {
+                      final picked = await WindowsFileDialog.pickFiles(title: 'Select File to Shred');
+                      if (picked.isNotEmpty && context.mounted) {
+                        final f = File(picked.first);
+                        final item = FileItem(name: f.uri.pathSegments.last, path: f.path, size: f.lengthSync(), modified: f.lastModifiedSync());
+                        SecureFileShredderSheet.show(context, item);
+                      }
+                    } else if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('No file selected to shred.'), behavior: SnackBarBehavior.floating),
+                      );
+                    }
                   },
                   icon: const Icon(Icons.delete_forever_rounded, size: 16, color: Color(0xFFDC2626)),
                   label: const Text('DoD Shredder', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
@@ -1068,10 +1136,22 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
                   key: const Key('open_exif_sanitizer_button'),
                   onPressed: () async {
                     final files = await _service.getReceivedFiles();
-                    final item = files.isNotEmpty
-                        ? FileItem(name: files.first.name, path: files.first.path, size: files.first.sizeBytes, modified: files.first.lastModified)
-                        : FileItem(name: 'camera_photo_gps.jpg', path: '/vault/camera_photo_gps.jpg', size: 4500000, modified: DateTime.now());
-                    if (context.mounted) ExifSanitizerSheet.show(context, item);
+                    final images = files.where((f) => f.isImage).toList();
+                    if (images.isNotEmpty && context.mounted) {
+                      final item = FileItem(name: images.first.name, path: images.first.path, size: images.first.sizeBytes, modified: images.first.lastModified);
+                      ExifSanitizerSheet.show(context, item);
+                    } else if (Platform.isWindows) {
+                      final picked = await WindowsFileDialog.pickFiles(title: 'Select Photo to Strip EXIF/GPS Metadata');
+                      if (picked.isNotEmpty && context.mounted) {
+                        final f = File(picked.first);
+                        final item = FileItem(name: f.uri.pathSegments.last, path: f.path, size: f.lengthSync(), modified: f.lastModifiedSync());
+                        ExifSanitizerSheet.show(context, item);
+                      }
+                    } else if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('No photo selected to sanitize.'), behavior: SnackBarBehavior.floating),
+                      );
+                    }
                   },
                   icon: const Icon(Icons.location_off_outlined, size: 16, color: Color(0xFF2563EB)),
                   label: const Text('EXIF Stripper', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),

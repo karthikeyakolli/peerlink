@@ -5,6 +5,7 @@ import '../../core/app_settings_service.dart';
 import '../../core/document_scanner_service.dart';
 import '../../core/file_converter_service.dart';
 import '../../platform/windows_file_dialog.dart';
+import '../../platform/android_node_bridge.dart';
 import '../colors/peerlink_colors.dart';
 import 'dedicated_tool_page.dart';
 
@@ -119,11 +120,33 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
             }
           });
           return;
+        } else {
+          return; // User cancelled
+        }
+      } else if (Platform.isAndroid) {
+        final uris = await AndroidNodeBridge.instance.pickCategoryContentUris('photos');
+        if (uris.isNotEmpty) {
+          for (final u in uris) {
+            final res = await AndroidNodeBridge.instance.resolveContentUriToCacheFile(u);
+            if (res != null && res['cachedPath'] != null) {
+              final f = File(res['cachedPath'] as String);
+              if (f.existsSync()) {
+                setState(() {
+                  _pages.add(ScannedPage(
+                    id: 'imported_${DateTime.now().millisecondsSinceEpoch}_${_pages.length + 1}',
+                    file: f,
+                    filter: DocScanFilter.magicColor,
+                  ));
+                });
+              }
+            }
+          }
+          return;
+        } else {
+          return; // User cancelled
         }
       }
     } catch (_) {}
-
-    _addSamplePage();
   }
 
   void _extractOcrText() {
