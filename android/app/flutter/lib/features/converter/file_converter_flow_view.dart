@@ -11,6 +11,7 @@ import '../../design_system/components/storage_treemap_sheet.dart';
 import '../../design_system/components/secure_file_shredder_sheet.dart';
 import '../../design_system/components/split_apk_inspector_sheet.dart';
 import '../../design_system/components/exif_sanitizer_sheet.dart';
+import '../../design_system/components/virus_scanner_sheet.dart';
 
 /// Dedicated File Conversions & Offline Processing Studio Flow.
 /// Houses format transformations, in-app clip trimming & soundtrack extraction,
@@ -344,6 +345,34 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
               label: const Text('Split-APK & Bundle Inspector (.apks/.xapk)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
               style: OutlinedButton.styleFrom(
                 side: const BorderSide(color: Color(0xFFCBD5E1)),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              key: const Key('open_virus_scanner_from_studio_button'),
+              onPressed: () async {
+                final files = await _service.getReceivedFiles();
+                if (files.isNotEmpty && context.mounted) {
+                  VirusScannerSheet.show(context, files.first.path);
+                } else if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('No files in vault to audit.'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              },
+              icon: const Icon(Icons.security_rounded, size: 16, color: Color(0xFF15803D)),
+              label: const Text('Virus-Free Antivirus Audit & Threat Quarantiner', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF15803D))),
+              style: OutlinedButton.styleFrom(
+                backgroundColor: const Color(0xFFF0FDF4),
+                side: const BorderSide(color: Color(0xFFBBF7D0)),
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),

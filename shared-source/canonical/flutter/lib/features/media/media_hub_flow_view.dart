@@ -12,6 +12,8 @@ import '../../design_system/components/subtitle_sync_sheet.dart';
 import '../../design_system/components/audio_sleep_timer_sheet.dart';
 import '../../design_system/components/audio_equalizer_sheet.dart';
 import '../../design_system/components/similar_photo_grouper_sheet.dart';
+import '../../design_system/components/torrent_downloader_sheet.dart';
+import '../../design_system/components/virus_scanner_sheet.dart';
 
 enum MediaHubTab { all, photos, videos, audio, documents }
 
@@ -120,6 +122,9 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
   Widget build(BuildContext context) {
     return Column(
       children: [
+        // Top Utility Toolbar (Torrent Downloader & Antivirus Audit)
+        _buildTopUtilityBar(),
+
         // Top Media Tab Selector
         _buildCategoryChips(),
 
@@ -135,6 +140,65 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
         // Sticky Audio Mini-Player
         const FloatingAudioMiniPlayer(),
       ],
+    );
+  }
+
+  Widget _buildTopUtilityBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: const BoxDecoration(
+        color: Color(0xFFF8FAFC),
+        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              key: const Key('open_torrent_downloader_button'),
+              onPressed: () => TorrentDownloaderSheet.show(context),
+              icon: const Icon(Icons.downloading_rounded, size: 16, color: Color(0xFF2563EB)),
+              label: const Text(
+                'Torrent Downloader (Virus-Free)',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF1D4ED8)),
+              ),
+              style: OutlinedButton.styleFrom(
+                backgroundColor: const Color(0xFFEFF6FF),
+                side: const BorderSide(color: Color(0xFFBFDBFE)),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            key: const Key('open_virus_scanner_button'),
+            onPressed: () {
+              final files = _allFiles;
+              if (files.isNotEmpty) {
+                VirusScannerSheet.show(context, files.first.path);
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('No media files in vault to audit.'),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              }
+            },
+            icon: const Icon(Icons.security_rounded, size: 15, color: Color(0xFF15803D)),
+            label: const Text(
+              'Virus Scan',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF15803D)),
+            ),
+            style: OutlinedButton.styleFrom(
+              backgroundColor: const Color(0xFFF0FDF4),
+              side: const BorderSide(color: Color(0xFFBBF7D0)),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -393,6 +457,12 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
                         onExported: _loadData,
                       );
                     },
+                  ),
+                  IconButton(
+                    key: Key('video_virus_scan_$index'),
+                    icon: const Icon(Icons.security_rounded, size: 18, color: Color(0xFF15803D)),
+                    tooltip: 'Virus-Free Security Audit',
+                    onPressed: () => VirusScannerSheet.show(context, item.path),
                   ),
                 ],
               ),

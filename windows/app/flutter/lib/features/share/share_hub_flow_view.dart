@@ -16,6 +16,7 @@ import '../../design_system/components/multi_stream_bonding_sheet.dart';
 import '../../design_system/components/local_walkie_talkie_sheet.dart';
 import '../../design_system/components/remote_presentation_clicker_sheet.dart';
 import '../../design_system/components/shared_local_scratchpad_sheet.dart';
+import '../../design_system/components/torrent_downloader_sheet.dart';
 
 /// Dedicated P2P Share & Transfer Flow.
 /// Unifies local Wi-Fi Hotspot Auto-Tether QR, Bi-Directional Web Beam 2.0,
@@ -359,6 +360,21 @@ class _ShareHubFlowViewState extends State<ShareHubFlowView> {
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              key: const Key('open_torrent_downloader_from_share_button'),
+              onPressed: () => TorrentDownloaderSheet.show(context),
+              icon: const Icon(Icons.downloading_rounded, size: 16, color: Color(0xFF2563EB)),
+              label: const Text('Torrent & Web Downloader (Virus-Free)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Color(0xFFCBD5E1)),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
           ),
         ],
       ),

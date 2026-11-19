@@ -24,6 +24,7 @@ import 'expiring_beam_link_sheet.dart';
 import 'video_trimmer_sheet.dart';
 import 'floating_video_pip_overlay.dart';
 import 'subtitle_sync_sheet.dart';
+import 'virus_scanner_sheet.dart';
 
 /// Universal In-App File & Media Viewer Engine (Minimalist Light-Only Surface).
 /// Brings every file type to life directly inside PeerLink:
@@ -684,6 +685,21 @@ class _MediaPreviewModalState extends State<MediaPreviewModal> {
                           filePath: item.path,
                           fileName: item.name,
                         );
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      key: const Key('modal_virus_scan_button'),
+                      icon: const Icon(Icons.security_rounded, size: 16, color: Color(0xFF15803D)),
+                      label: const Text('Virus Scan', style: TextStyle(color: Color(0xFF15803D))),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF15803D),
+                        side: const BorderSide(color: Color(0xFFBBF7D0)),
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      ),
+                      onPressed: () {
+                        VirusScannerSheet.show(context, item.path);
                       },
                     ),
                     const SizedBox(width: 8),
