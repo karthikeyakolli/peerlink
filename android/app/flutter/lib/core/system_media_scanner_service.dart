@@ -19,12 +19,34 @@ class SystemMediaScannerService {
   static final SystemMediaScannerService instance = SystemMediaScannerService._();
 
   List<ReceivedFileItem> _cachedDeviceFiles = [];
+  final List<String> _customFolderPaths = [];
   DateTime? _lastScanTime;
   bool _isScanning = false;
 
   bool get isScanning => _isScanning;
   List<ReceivedFileItem> get cachedFiles => List.unmodifiable(_cachedDeviceFiles);
+  List<String> get customFolderPaths => List.unmodifiable(_customFolderPaths);
   DateTime? get lastScanTime => _lastScanTime;
+
+  /// Registers a custom directory path (e.g. secondary Windows drive like D:\Media) to scan.
+  void addCustomScanFolder(String path) {
+    final clean = path.trim();
+    if (clean.isEmpty) return;
+    final dir = Directory(clean);
+    if (dir.existsSync() && !_customFolderPaths.contains(dir.path)) {
+      _customFolderPaths.add(dir.path);
+    }
+  }
+
+  /// Removes a registered custom directory from the scan list.
+  void removeCustomScanFolder(String path) {
+    _customFolderPaths.remove(path.trim());
+  }
+
+  /// Clears all custom scan folders.
+  void clearCustomScanFolders() {
+    _customFolderPaths.clear();
+  }
 
   /// Scans device storage for media files with caching.
   Future<List<ReceivedFileItem>> scanDeviceStorage({
@@ -93,6 +115,14 @@ class SystemMediaScannerService {
             final dir = Directory(p);
             if (dir.existsSync()) roots.add(dir);
           }
+        }
+      }
+
+      // Include custom registered scan folders (e.g. secondary drives D:\, E:\)
+      for (final cp in _customFolderPaths) {
+        final d = Directory(cp);
+        if (d.existsSync() && !roots.any((r) => r.path == d.path)) {
+          roots.add(d);
         }
       }
 

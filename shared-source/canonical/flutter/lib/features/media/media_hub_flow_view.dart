@@ -16,6 +16,7 @@ import '../../design_system/components/audio_equalizer_sheet.dart';
 import '../../design_system/components/similar_photo_grouper_sheet.dart';
 import '../../design_system/components/torrent_downloader_sheet.dart';
 import '../../design_system/components/virus_scanner_sheet.dart';
+import '../../platform/windows_file_dialog.dart';
 
 enum MediaHubTab { all, photos, videos, audio, documents }
 enum MediaStorageScope { device, vault, unified }
@@ -218,6 +219,27 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
     );
   }
 
+  Future<void> _pickAndAddCustomFolder() async {
+    try {
+      final selected = await WindowsFileDialog.pickDirectory(title: 'Select Media Folder to Synchronize');
+      if (selected != null && selected.isNotEmpty) {
+        _systemScanner.addCustomScanFolder(selected);
+        await _loadData(forceSystemSync: true);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Added media folder: $selected'),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Error picking custom folder: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -273,6 +295,17 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
             ),
           ),
           const Spacer(),
+          if (Platform.isWindows) ...[
+            IconButton(
+              key: const Key('add_custom_folder_button'),
+              icon: const Icon(Icons.create_new_folder_outlined, size: 18, color: Color(0xFF2563EB)),
+              tooltip: 'Add Custom Media Folder (e.g. D:\\Media)',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              onPressed: _pickAndAddCustomFolder,
+            ),
+            const SizedBox(width: 4),
+          ],
           // Sync System Storage Button
           OutlinedButton.icon(
             key: const Key('sync_system_media_button'),
@@ -654,6 +687,13 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
                     tooltip: 'Virus-Free Security Audit',
                     onPressed: () => _openVirusScanner(item.path),
                   ),
+                  if (Platform.isWindows)
+                    IconButton(
+                      key: Key('video_reveal_explorer_$index'),
+                      icon: const Icon(Icons.folder_open_rounded, size: 18, color: Color(0xFF64748B)),
+                      tooltip: 'Reveal in File Explorer',
+                      onPressed: () => _vaultService.revealInFolder(item.path),
+                    ),
                 ],
               ),
             ),
@@ -783,11 +823,23 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
                       item.formattedSize,
                       style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
                     ),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.play_arrow_rounded, color: Color(0xFF2563EB)),
-                      onPressed: () {
-                        _audioService.loadFolderQueue([item.path]);
-                      },
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (Platform.isWindows)
+                          IconButton(
+                            key: Key('audio_reveal_explorer_$index'),
+                            icon: const Icon(Icons.folder_open_rounded, size: 18, color: Color(0xFF64748B)),
+                            tooltip: 'Reveal in File Explorer',
+                            onPressed: () => _vaultService.revealInFolder(item.path),
+                          ),
+                        IconButton(
+                          icon: const Icon(Icons.play_arrow_rounded, color: Color(0xFF2563EB)),
+                          onPressed: () {
+                            _audioService.loadFolderQueue([item.path]);
+                          },
+                        ),
+                      ],
                     ),
                     onTap: () {
                       _audioService.loadFolderQueue([item.path]);
@@ -837,7 +889,19 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
                 '${item.extension.toUpperCase()} • ${item.formattedSize}',
                 style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
               ),
-              trailing: const Icon(Icons.chevron_right_rounded, color: Color(0xFF94A3B8)),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (Platform.isWindows)
+                    IconButton(
+                      key: Key('generic_reveal_explorer_$index'),
+                      icon: const Icon(Icons.folder_open_rounded, size: 18, color: Color(0xFF64748B)),
+                      tooltip: 'Reveal in File Explorer',
+                      onPressed: () => _vaultService.revealInFolder(item.path),
+                    ),
+                  const Icon(Icons.chevron_right_rounded, color: Color(0xFF94A3B8)),
+                ],
+              ),
               onTap: () => _openPreview(item, playlist: files, index: index),
             ),
           ),

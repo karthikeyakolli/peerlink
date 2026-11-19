@@ -51,6 +51,18 @@ void main() {
       final cached = scanner.cachedFiles;
       expect(cached, isNotNull);
     });
+
+    test('addCustomScanFolder, removeCustomScanFolder and customFolderPaths work correctly', () {
+      final scanner = SystemMediaScannerService.instance;
+      scanner.clearCustomScanFolders();
+      expect(scanner.customFolderPaths.isEmpty, isTrue);
+
+      scanner.addCustomScanFolder(picturesDir.path);
+      expect(scanner.customFolderPaths.contains(picturesDir.path), isTrue);
+
+      scanner.removeCustomScanFolder(picturesDir.path);
+      expect(scanner.customFolderPaths.contains(picturesDir.path), isFalse);
+    });
   });
 
   group('DedicatedToolPage Widget Tests', () {
