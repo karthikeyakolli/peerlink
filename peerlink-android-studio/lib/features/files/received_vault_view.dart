@@ -1588,8 +1588,17 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
                         color: !_browseInternalStorage ? Colors.white : Colors.transparent,
                         borderRadius: BorderRadius.circular(8),
                         border: !_browseInternalStorage
-                            ? Border.all(color: const Color(0xFFE5E7EB), width: 1.0)
+                            ? Border.all(color: const Color(0xFFCBD5E1), width: 1.0)
                             : Border.all(color: Colors.transparent, width: 1.0),
+                        boxShadow: !_browseInternalStorage
+                            ? const [
+                                BoxShadow(
+                                  color: Color(0x0C000000),
+                                  blurRadius: 3,
+                                  offset: Offset(0, 1),
+                                ),
+                              ]
+                            : null,
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -1644,8 +1653,17 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
                         color: _browseInternalStorage ? Colors.white : Colors.transparent,
                         borderRadius: BorderRadius.circular(8),
                         border: _browseInternalStorage
-                            ? Border.all(color: const Color(0xFFE5E7EB), width: 1.0)
+                            ? Border.all(color: const Color(0xFFCBD5E1), width: 1.0)
                             : Border.all(color: Colors.transparent, width: 1.0),
+                        boxShadow: _browseInternalStorage
+                            ? const [
+                                BoxShadow(
+                                  color: Color(0x0C000000),
+                                  blurRadius: 3,
+                                  offset: Offset(0, 1),
+                                ),
+                              ]
+                            : null,
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -1798,12 +1816,12 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
               );
             },
           ),
-          const SizedBox(height: 14),
-          // Multi-color segmented storage progress bar
+          const SizedBox(height: 10),
+          // Single-line compact segmented storage progress bar
           ClipRRect(
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(4),
             child: SizedBox(
-              height: 8,
+              height: 6,
               child: _browseInternalStorage
                   ? Row(
                       children: [

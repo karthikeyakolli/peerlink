@@ -244,14 +244,8 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Storage Scope Selector (Device Media vs Vault) & System Storage Sync
-        _buildStorageScopeBar(),
-
-        // Top Utility Toolbar (Torrent Downloader & Antivirus Audit)
-        _buildTopUtilityBar(),
-
-        // Media Category Tabs
-        _buildCategoryChips(),
+        // Consolidated Sticky Source, Utility & Media Category Filter Bar
+        _buildConsolidatedFilterBar(),
 
         // Active Media Content
         Expanded(
@@ -268,79 +262,156 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
     );
   }
 
-  Widget _buildStorageScopeBar() {
+  Widget _buildConsolidatedFilterBar() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       decoration: const BoxDecoration(
         color: Colors.white,
-        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0), width: 1.0)),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Storage scope toggle
-          Container(
-            padding: const EdgeInsets.all(2),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF1F5F9),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
-            ),
+          // Row 1: Source Selector, Sync & Fast Utility Pills
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _buildScopeChip('Device Storage', MediaStorageScope.device, Icons.phone_android_rounded),
-                _buildScopeChip('Vault', MediaStorageScope.vault, Icons.lock_outline_rounded),
-                _buildScopeChip('Unified', MediaStorageScope.unified, Icons.dashboard_outlined),
-              ],
-            ),
-          ),
-          const Spacer(),
-          if (Platform.isWindows) ...[
-            IconButton(
-              key: const Key('add_custom_folder_button'),
-              icon: const Icon(Icons.create_new_folder_outlined, size: 18, color: Color(0xFF2563EB)),
-              tooltip: 'Add Custom Media Folder (e.g. D:\\Media)',
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              onPressed: _pickAndAddCustomFolder,
-            ),
-            const SizedBox(width: 4),
-          ],
-          // Sync System Storage Button
-          OutlinedButton.icon(
-            key: const Key('sync_system_media_button'),
-            onPressed: _isSyncing
-                ? null
-                : () async {
-                    HapticFeedback.selectionClick();
-                    setState(() => _isSyncing = true);
-                    await _loadData(forceSystemSync: true);
-                    if (mounted) {
-                      setState(() => _isSyncing = false);
+                // Scope segmented switch
+                Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _buildScopeChip('Device Storage', MediaStorageScope.device, Icons.phone_android_rounded),
+                      _buildScopeChip('Vault', MediaStorageScope.vault, Icons.lock_outline_rounded),
+                      _buildScopeChip('Unified', MediaStorageScope.unified, Icons.dashboard_outlined),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 6),
+                if (Platform.isWindows) ...[
+                  IconButton(
+                    key: const Key('add_custom_folder_button'),
+                    icon: const Icon(Icons.create_new_folder_outlined, size: 17, color: Color(0xFF2563EB)),
+                    tooltip: 'Add Custom Media Folder (e.g. D:\\Media)',
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    onPressed: _pickAndAddCustomFolder,
+                  ),
+                  const SizedBox(width: 4),
+                ],
+                // Sync button
+                OutlinedButton.icon(
+                  key: const Key('sync_system_media_button'),
+                  onPressed: _isSyncing
+                      ? null
+                      : () async {
+                          HapticFeedback.selectionClick();
+                          setState(() => _isSyncing = true);
+                          await _loadData(forceSystemSync: true);
+                          if (mounted) {
+                            setState(() => _isSyncing = false);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Synchronized ${_allFiles.length} media files from Device Storage!'),
+                                behavior: SnackBarBehavior.floating,
+                                duration: const Duration(seconds: 2),
+                              ),
+                            );
+                          }
+                        },
+                  icon: _isSyncing
+                      ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.sync_rounded, size: 13, color: Color(0xFF2563EB)),
+                  label: Text(
+                    _isSyncing ? 'Syncing...' : 'Sync',
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF1D4ED8)),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    minimumSize: const Size(0, 28),
+                    backgroundColor: const Color(0xFFEFF6FF),
+                    side: const BorderSide(color: Color(0xFFBFDBFE)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Downloader utility pill
+                InkWell(
+                  key: const Key('open_torrent_downloader_button'),
+                  onTap: _openTorrentDownloader,
+                  borderRadius: BorderRadius.circular(6),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEFF6FF),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0xFFBFDBFE)),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.downloading_rounded, size: 14, color: Color(0xFF2563EB)),
+                        SizedBox(width: 4),
+                        Text(
+                          'Downloader',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF1D4ED8)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                // Threat Audit pill
+                InkWell(
+                  key: const Key('open_virus_scanner_button'),
+                  onTap: () {
+                    final files = _allFiles;
+                    if (files.isNotEmpty) {
+                      _openVirusScanner(files.first.path);
+                    } else {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Synchronized ${_allFiles.length} media files from Device Storage!'),
+                        const SnackBar(
+                          content: Text('No media files found to audit.'),
                           behavior: SnackBarBehavior.floating,
-                          duration: const Duration(seconds: 2),
                         ),
                       );
                     }
                   },
-            icon: _isSyncing
-                ? const SizedBox(width: 13, height: 13, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.sync_rounded, size: 14, color: Color(0xFF2563EB)),
-            label: Text(
-              _isSyncing ? 'Syncing...' : 'Sync Storage',
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF1D4ED8)),
-            ),
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              minimumSize: const Size(0, 30),
-              backgroundColor: const Color(0xFFEFF6FF),
-              side: const BorderSide(color: Color(0xFFBFDBFE)),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF0FDF4),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0xFFBBF7D0)),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.security_rounded, size: 14, color: Color(0xFF15803D)),
+                        SizedBox(width: 4),
+                        Text(
+                          'Audit',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF15803D)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
+          const Divider(height: 1, thickness: 1, color: Color(0xFFF1F5F9)),
+          // Row 2: Media Category Tabs
+          _buildCategoryChips(),
         ],
       ),
     );
@@ -382,82 +453,6 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
     );
   }
 
-  Widget _buildTopUtilityBar() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-      decoration: const BoxDecoration(
-        color: Color(0xFFF8FAFC),
-        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: InkWell(
-              key: const Key('open_torrent_downloader_button'),
-              onTap: _openTorrentDownloader,
-              borderRadius: BorderRadius.circular(7),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFEFF6FF),
-                  borderRadius: BorderRadius.circular(7),
-                  border: Border.all(color: const Color(0xFFBFDBFE)),
-                ),
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.downloading_rounded, size: 15, color: Color(0xFF2563EB)),
-                    SizedBox(width: 6),
-                    Text(
-                      'Web & Torrent Downloader',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF1D4ED8)),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          InkWell(
-            key: const Key('open_virus_scanner_button'),
-            onTap: () {
-              final files = _allFiles;
-              if (files.isNotEmpty) {
-                _openVirusScanner(files.first.path);
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('No media files found to audit.'),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-              }
-            },
-            borderRadius: BorderRadius.circular(7),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF0FDF4),
-                borderRadius: BorderRadius.circular(7),
-                border: Border.all(color: const Color(0xFFBBF7D0)),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.security_rounded, size: 14, color: Color(0xFF15803D)),
-                  SizedBox(width: 4),
-                  Text(
-                    'Threat Audit',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF15803D)),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _buildCategoryChips() {
     return Container(

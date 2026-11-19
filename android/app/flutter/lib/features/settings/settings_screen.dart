@@ -1037,19 +1037,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                        color: const Color(0xFFEFF6FF),
                         borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFBFDBFE)),
                       ),
-                      child: Row(
+                      child: const Row(
                         children: [
-                          const Icon(Icons.shield_outlined, size: 20, color: Color(0xFF10B981)),
-                          const SizedBox(width: 10),
+                          Icon(Icons.shield_rounded, size: 20, color: Color(0xFF2563EB)),
+                          SizedBox(width: 10),
                           Expanded(
                             child: Text(
                               'Rule 11 Enforced: AI has zero authority over identity, trust, encryption, sync truth, deletion, or execution. Every transfer proposal requires your explicit confirmation tap.',
                               style: TextStyle(
                                 fontSize: 11,
-                                color: theme.colorScheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF1E3A8A),
                               ),
                             ),
                           ),

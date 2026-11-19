@@ -153,37 +153,76 @@ class _ShareHubFlowViewState extends State<ShareHubFlowView> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // 1. Send & Receive P2P Radar Card
+        // 1. Primary Elevated Send & Receive Radar Hero
         _buildP2PRadarCard(),
         const SizedBox(height: 14),
 
-        // 2. Resumable Chunk Bitmask Ledger Card
+        // 2. Resumable Chunk Bitmask Ledger (Active Transfers)
         _buildResumableTransfersCard(),
-        const SizedBox(height: 14),
 
-        // 3. Cross-Device Interoperability & Productivity
+        // 3. Categorized Transfer Tools Section
         _buildCrossDeviceProductivityCard(),
         const SizedBox(height: 14),
 
-        // 4. Zero-Touch Hotspot Auto-Tether Card
+        // 4. Local Connectivity & Web Sharing Suite
         _buildHotspotTetherCard(),
         const SizedBox(height: 14),
 
-        // 5. Bi-Directional Web Portal 2.0 (Web Beam)
         _buildWebBeamCard(),
         const SizedBox(height: 14),
 
-        // 6. One-Time Ephemeral Burner Vault Share
         _buildBurnerShareCard(),
         const SizedBox(height: 14),
 
-        // 7. Wi-Fi 6 / 5GHz Link Diagnostic & Congestion Advisor
-        const NetworkDiagnosticCard(),
-        const SizedBox(height: 14),
-
-        // 8. Network Governors (Speed Throttling & Battery Guard)
-        _buildGovernorsCard(),
+        // 5. Expandable Network Diagnostics & Transfer Governors Accordion
+        _buildNetworkAndEngineSettingsAccordion(),
       ],
+    );
+  }
+
+  Widget _buildNetworkAndEngineSettingsAccordion() {
+    return Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: Color(0xFFE5E7EB)),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: false,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          leading: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.tune_rounded, color: Color(0xFF475569), size: 20),
+          ),
+          title: const Text(
+            'Network Diagnostics & Transfer Governors',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF0F172A)),
+          ),
+          subtitle: const Text(
+            'Wi-Fi 6 Link Analytics, Bandwidth Throttling & Battery Guard',
+            style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+          ),
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Column(
+                children: [
+                  const NetworkDiagnosticCard(),
+                  const SizedBox(height: 12),
+                  _buildGovernorsCard(),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

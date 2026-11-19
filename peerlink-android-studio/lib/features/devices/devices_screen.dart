@@ -466,89 +466,97 @@ class _DevicesScreenState extends State<DevicesScreen> {
           return ListView(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
             children: [
-              // Quick Connectivity & Productivity Strip (Direct IP, Universal Clipboard, Zero-Download Stream)
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  OutlinedButton.icon(
-                    key: const Key('devices_direct_ip_button'),
-                    onPressed: _showDirectIpConnectDialog,
-                    icon: const Icon(Icons.lan_outlined, size: 16, color: Color(0xFF2563EB)),
-                    label: const Text('Direct IP', style: TextStyle(fontSize: 12, color: Color(0xFF0F172A))),
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      side: const BorderSide(color: Color(0xFFE5E7EB)),
-                      visualDensity: VisualDensity.compact,
+              // Quick Connectivity & Productivity Strip (Compact 2-Row Grid)
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                ),
+                padding: const EdgeInsets.all(10),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildQuickActionButton(
+                            keyName: 'devices_direct_ip_button',
+                            label: 'Direct IP',
+                            icon: Icons.lan_outlined,
+                            color: const Color(0xFF2563EB),
+                            onTap: _showDirectIpConnectDialog,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _buildQuickActionButton(
+                            keyName: 'devices_universal_clipboard_button',
+                            label: 'Clipboard Sync',
+                            icon: Icons.content_paste_go_rounded,
+                            color: const Color(0xFF7C3AED),
+                            onTap: () => UniversalClipboardSheet.show(context),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _buildQuickActionButton(
+                            keyName: 'devices_stream_folder_button',
+                            label: 'Stream Folder',
+                            icon: Icons.cast_connected_rounded,
+                            color: const Color(0xFF059669),
+                            onTap: () => RemoteStreamBrowserSheet.show(context),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _buildQuickActionButton(
+                            keyName: 'devices_webdav_mount_button',
+                            label: 'WebDAV Drive',
+                            icon: Icons.storage_rounded,
+                            color: const Color(0xFF2563EB),
+                            onTap: () => WebDavStatusSheet.show(context),
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                  OutlinedButton.icon(
-                    key: const Key('devices_universal_clipboard_button'),
-                    onPressed: () => UniversalClipboardSheet.show(context),
-                    icon: const Icon(Icons.content_paste_go_rounded, size: 16, color: Color(0xFF7C3AED)),
-                    label: const Text('Clipboard Sync', style: TextStyle(fontSize: 12, color: Color(0xFF0F172A))),
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      side: const BorderSide(color: Color(0xFFE5E7EB)),
-                      visualDensity: VisualDensity.compact,
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildQuickActionButton(
+                            keyName: 'devices_peerroom_button',
+                            label: 'PeerRoom Drop',
+                            icon: Icons.groups_rounded,
+                            color: const Color(0xFFD97706),
+                            onTap: () => PeerRoomSheet.show(context),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _buildQuickActionButton(
+                            keyName: 'devices_remote_controller_button',
+                            label: 'Remote Deck',
+                            icon: Icons.cast_for_education_rounded,
+                            color: const Color(0xFF4F46E5),
+                            onTap: () => RemotePresentationSheet.show(context),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _buildQuickActionButton(
+                            keyName: 'devices_lan_benchmark_button',
+                            label: 'Speed Test',
+                            icon: Icons.speed_rounded,
+                            color: const Color(0xFF0284C7),
+                            onTap: () => LanBenchmarkSheet.show(context),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        const Expanded(child: SizedBox.shrink()),
+                      ],
                     ),
-                  ),
-                  OutlinedButton.icon(
-                    key: const Key('devices_stream_folder_button'),
-                    onPressed: () => RemoteStreamBrowserSheet.show(context),
-                    icon: const Icon(Icons.cast_connected_rounded, size: 16, color: Color(0xFF059669)),
-                    label: const Text('Stream Folder', style: TextStyle(fontSize: 12, color: Color(0xFF0F172A))),
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      side: const BorderSide(color: Color(0xFFE5E7EB)),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ),
-                  OutlinedButton.icon(
-                    key: const Key('devices_webdav_mount_button'),
-                    onPressed: () => WebDavStatusSheet.show(context),
-                    icon: const Icon(Icons.storage_rounded, size: 16, color: Color(0xFF2563EB)),
-                    label: const Text('WebDAV Drive', style: TextStyle(fontSize: 12, color: Color(0xFF0F172A))),
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      side: const BorderSide(color: Color(0xFFE5E7EB)),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ),
-                  OutlinedButton.icon(
-                    key: const Key('devices_peerroom_button'),
-                    onPressed: () => PeerRoomSheet.show(context),
-                    icon: const Icon(Icons.groups_rounded, size: 16, color: Color(0xFFD97706)),
-                    label: const Text('PeerRoom Drop', style: TextStyle(fontSize: 12, color: Color(0xFF0F172A))),
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      side: const BorderSide(color: Color(0xFFE5E7EB)),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ),
-                  OutlinedButton.icon(
-                    key: const Key('devices_remote_controller_button'),
-                    onPressed: () => RemotePresentationSheet.show(context),
-                    icon: const Icon(Icons.cast_for_education_rounded, size: 16, color: Color(0xFF4F46E5)),
-                    label: const Text('Remote Deck', style: TextStyle(fontSize: 12, color: Color(0xFF0F172A))),
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      side: const BorderSide(color: Color(0xFFE5E7EB)),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ),
-                  OutlinedButton.icon(
-                    key: const Key('devices_lan_benchmark_button'),
-                    onPressed: () => LanBenchmarkSheet.show(context),
-                    icon: const Icon(Icons.speed_rounded, size: 16, color: Color(0xFF0284C7)),
-                    label: const Text('Speed Test', style: TextStyle(fontSize: 12, color: Color(0xFF0F172A))),
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      side: const BorderSide(color: Color(0xFFE5E7EB)),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
               const SizedBox(height: 14),
 
@@ -784,6 +792,41 @@ class _DevicesScreenState extends State<DevicesScreen> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildQuickActionButton({
+    required String keyName,
+    required String label,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      key: Key(keyName),
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+            ),
+          ],
+        ),
       ),
     );
   }
