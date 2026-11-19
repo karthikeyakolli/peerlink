@@ -12,6 +12,8 @@ import '../../design_system/components/secure_file_shredder_sheet.dart';
 import '../../design_system/components/split_apk_inspector_sheet.dart';
 import '../../design_system/components/exif_sanitizer_sheet.dart';
 import '../../design_system/components/virus_scanner_sheet.dart';
+import '../../design_system/components/ilovepdf_suite_sheet.dart';
+import '../../design_system/components/document_scanner_sheet.dart';
 
 /// Dedicated File Conversions & Offline Processing Studio Flow.
 /// Houses format transformations, in-app clip trimming & soundtrack extraction,
@@ -201,6 +203,14 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // 0A. iLovePDF Offline Power Studio Card
+        _buildILovePdfSuiteCard(),
+        const SizedBox(height: 14),
+
+        // 0B. Smart Document Scanner Card
+        _buildDocScannerCard(),
+        const SizedBox(height: 14),
+
         // 1. Offline Format Converter Studio Card
         _buildFormatConverterCard(),
         const SizedBox(height: 14),
@@ -224,6 +234,154 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
         // 6. Storage Cleaner & Junk Scrubber Card
         _buildCleanerCard(),
       ],
+    );
+  }
+
+  Widget _buildILovePdfSuiteCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                ),
+                child: const Icon(Icons.picture_as_pdf_rounded, color: Color(0xFF2563EB), size: 20),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('iLovePDF Studio (20+ PDF Tools)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Color(0xFF0F172A))),
+                    Text('Merge, Split, Compress, Watermark, Protect, Unlock & Convert', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              _buildFeatureBadge('Merge PDF'),
+              _buildFeatureBadge('Split PDF'),
+              _buildFeatureBadge('Compress PDF'),
+              _buildFeatureBadge('Images to PDF'),
+              _buildFeatureBadge('Protect / Encrypt'),
+              _buildFeatureBadge('Watermark'),
+              _buildFeatureBadge('Rotate 90°'),
+              _buildFeatureBadge('Page Numbers'),
+            ],
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            key: const Key('open_ilovepdf_studio_button'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF2563EB),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            icon: const Icon(Icons.auto_stories_rounded, size: 18),
+            label: const Text('Open iLovePDF Suite', style: TextStyle(fontWeight: FontWeight.bold)),
+            onPressed: () => ILovePdfSuiteSheet.show(context),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDocScannerCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                ),
+                child: const Icon(Icons.document_scanner_rounded, color: Color(0xFF2563EB), size: 20),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Document Scanner (Camera & Paper Scan)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Color(0xFF0F172A))),
+                    Text('Multi-page camera scanner with B&W / Magic Color filters', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              _buildFeatureBadge('Multi-Page Scan'),
+              _buildFeatureBadge('B&W Document Filter'),
+              _buildFeatureBadge('Magic Color'),
+              _buildFeatureBadge('90° Rotation'),
+              _buildFeatureBadge('Compile to PDF'),
+            ],
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            key: const Key('open_doc_scanner_button'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF2563EB),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            icon: const Icon(Icons.camera_alt_outlined, size: 18),
+            label: const Text('Launch Document Scanner', style: TextStyle(fontWeight: FontWeight.bold)),
+            onPressed: () => DocumentScannerSheet.show(context),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFeatureBadge(String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+      ),
     );
   }
 

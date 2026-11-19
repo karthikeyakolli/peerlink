@@ -7,6 +7,8 @@ import '../colors/peerlink_colors.dart';
 
 /// Minimalist Light-Only Document Scanner Sheet.
 /// Turns photographed document pages into clean multi-page PDFs saved directly in PeerLink Vault.
+/// Supports real-time filter profiles (B&W Document, Magic Color, Grayscale, Original),
+/// 90-degree page rotation, and drag/button reordering.
 class DocumentScannerSheet extends StatefulWidget {
   final VoidCallback? onScanComplete;
 
@@ -28,7 +30,7 @@ class DocumentScannerSheet extends StatefulWidget {
 class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
   final DocumentScannerService _scanner = DocumentScannerService.instance;
   final TextEditingController _titleController = TextEditingController(text: 'Scanned Document');
-  final List<File> _scannedPages = [];
+  final List<ScannedPage> _pages = [];
   bool _isProcessing = false;
   File? _compiledPdf;
 
@@ -40,7 +42,7 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
 
   void _addSamplePage() {
     final tempDir = Directory.systemTemp;
-    final idx = _scannedPages.length + 1;
+    final idx = _pages.length + 1;
     final sampleFile = File('${tempDir.path}/scan_page_$idx.bmp');
     final bmpBytes = FileConverterService.instance.createSolidBmp(
       width: 100,
@@ -50,18 +52,53 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
       blue: 250,
     );
     sampleFile.writeAsBytesSync(bmpBytes);
-    setState(() => _scannedPages.add(sampleFile));
+
+    setState(() {
+      _pages.add(ScannedPage(
+        id: 'page_${DateTime.now().millisecondsSinceEpoch}_$idx',
+        file: sampleFile,
+        filter: DocScanFilter.bwDocument, // default to clean B&W doc filter
+      ));
+    });
+  }
+
+  void _rotatePage(int index) {
+    setState(() {
+      _pages[index].rotateClockwise();
+    });
+  }
+
+  void _changePageFilter(int index, DocScanFilter filter) {
+    setState(() {
+      _pages[index].filter = filter;
+    });
+  }
+
+  void _movePageUp(int index) {
+    if (index <= 0) return;
+    setState(() {
+      final page = _pages.removeAt(index);
+      _pages.insert(index - 1, page);
+    });
+  }
+
+  void _movePageDown(int index) {
+    if (index >= _pages.length - 1) return;
+    setState(() {
+      final page = _pages.removeAt(index);
+      _pages.insert(index + 1, page);
+    });
   }
 
   Future<void> _handleCompilePdf() async {
-    if (_scannedPages.isEmpty || _isProcessing) return;
+    if (_pages.isEmpty || _isProcessing) return;
     setState(() => _isProcessing = true);
 
     final title = _titleController.text.trim();
     final vaultDir = Directory(AppSettingsService.instance.saveLocation);
 
     final pdf = await _scanner.compileScannedPagesToPdf(
-      pageFiles: _scannedPages,
+      pages: _pages,
       documentTitle: title,
       destinationDir: vaultDir,
     );
@@ -83,7 +120,7 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.88),
       child: SafeArea(
         top: false,
         child: Column(
@@ -106,14 +143,14 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
             Row(
               children: [
                 Container(
-                  width: 40,
-                  height: 40,
+                  width: 44,
+                  height: 44,
                   decoration: BoxDecoration(
                     color: const Color(0xFFEFF6FF),
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: const Color(0xFFBFDBFE)),
                   ),
-                  child: const Icon(Icons.document_scanner_rounded, size: 22, color: PeerLinkColors.primaryBlue),
+                  child: const Icon(Icons.document_scanner_rounded, size: 24, color: PeerLinkColors.primaryBlue),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -122,17 +159,17 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
                     children: [
                       const Text(
                         'Smart Document Scanner',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF111827)),
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A)),
                       ),
                       Text(
-                        '${_scannedPages.length} ${_scannedPages.length == 1 ? "page" : "pages"} captured • Compiles to PDF',
-                        style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+                        '${_pages.length} ${_pages.length == 1 ? "page" : "pages"} captured • Filters & PDF Compiler',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
                       ),
                     ],
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close, size: 20, color: Color(0xFF6B7280)),
+                  icon: const Icon(Icons.close, size: 20, color: Color(0xFF64748B)),
                   onPressed: () => Navigator.pop(context),
                 ),
               ],
@@ -141,9 +178,18 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
 
             TextField(
               controller: _titleController,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Document Name',
-                border: OutlineInputBorder(),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                ),
+                filled: true,
+                fillColor: const Color(0xFFF8FAFC),
                 isDense: true,
               ),
             ),
@@ -174,7 +220,7 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
             ],
 
             Expanded(
-              child: _scannedPages.isEmpty
+              child: _pages.isEmpty
                   ? Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -187,7 +233,7 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
                           ),
                           const SizedBox(height: 4),
                           const Text(
-                            'Capture or add document pages, then compile into a clean PDF.',
+                            'Add document pages, pick visual filters (B&W/Magic), and compile.',
                             style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
                           ),
                           const SizedBox(height: 16),
@@ -207,10 +253,11 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
-                              'Pages (${_scannedPages.length})',
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                              'Pages (${_pages.length})',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F172A)),
                             ),
                             TextButton.icon(
+                              key: const Key('scanner_add_more_pages_button'),
                               onPressed: _addSamplePage,
                               icon: const Icon(Icons.add_rounded, size: 16),
                               label: const Text('Add Page', style: TextStyle(fontSize: 12)),
@@ -219,22 +266,103 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
                         ),
                         Expanded(
                           child: ListView.separated(
-                            itemCount: _scannedPages.length,
+                            itemCount: _pages.length,
                             separatorBuilder: (_, __) => const SizedBox(height: 8),
                             itemBuilder: (ctx, idx) {
-                              return ListTile(
-                                dense: true,
-                                tileColor: const Color(0xFFF9FAFB),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  side: const BorderSide(color: Color(0xFFE5E7EB)),
+                              final page = _pages[idx];
+                              return Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: const Color(0xFFE2E8F0)),
                                 ),
-                                leading: const Icon(Icons.description_outlined, color: PeerLinkColors.primaryBlue),
-                                title: Text('Page ${idx + 1}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                                subtitle: Text(_scannedPages[idx].uri.pathSegments.last, style: const TextStyle(fontSize: 11)),
-                                trailing: IconButton(
-                                  icon: const Icon(Icons.remove_circle_outline, size: 18, color: Color(0xFFEF4444)),
-                                  onPressed: () => setState(() => _scannedPages.removeAt(idx)),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Container(
+                                          width: 32,
+                                          height: 32,
+                                          decoration: BoxDecoration(
+                                            color: Colors.white,
+                                            borderRadius: BorderRadius.circular(6),
+                                            border: Border.all(color: const Color(0xFFCBD5E1)),
+                                          ),
+                                          alignment: Alignment.center,
+                                          child: Text(
+                                            '${idx + 1}',
+                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: PeerLinkColors.primaryBlue),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                page.file.uri.pathSegments.last,
+                                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Color(0xFF0F172A)),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                              Text(
+                                                'Rotation: ${page.rotationDegrees}° • ${page.filter.displayName}',
+                                                style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        // Rotate button
+                                        IconButton(
+                                          tooltip: 'Rotate 90°',
+                                          icon: const Icon(Icons.rotate_right_rounded, size: 20, color: PeerLinkColors.primaryBlue),
+                                          onPressed: () => _rotatePage(idx),
+                                        ),
+                                        // Move up / down
+                                        if (idx > 0)
+                                          IconButton(
+                                            tooltip: 'Move Up',
+                                            icon: const Icon(Icons.arrow_upward_rounded, size: 18, color: Color(0xFF64748B)),
+                                            onPressed: () => _movePageUp(idx),
+                                          ),
+                                        if (idx < _pages.length - 1)
+                                          IconButton(
+                                            tooltip: 'Move Down',
+                                            icon: const Icon(Icons.arrow_downward_rounded, size: 18, color: Color(0xFF64748B)),
+                                            onPressed: () => _movePageDown(idx),
+                                          ),
+                                        // Delete button
+                                        IconButton(
+                                          tooltip: 'Remove Page',
+                                          icon: const Icon(Icons.delete_outline_rounded, size: 20, color: Color(0xFFEF4444)),
+                                          onPressed: () => setState(() => _pages.removeAt(idx)),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    // Filter chips
+                                    SingleChildScrollView(
+                                      scrollDirection: Axis.horizontal,
+                                      child: Row(
+                                        children: DocScanFilter.values.map((f) {
+                                          final isSelected = page.filter == f;
+                                          return Padding(
+                                            padding: const EdgeInsets.only(right: 6),
+                                            child: ChoiceChip(
+                                              label: Text(f.displayName, style: TextStyle(fontSize: 11, color: isSelected ? Colors.white : const Color(0xFF334155))),
+                                              selected: isSelected,
+                                              selectedColor: PeerLinkColors.primaryBlue,
+                                              backgroundColor: Colors.white,
+                                              side: BorderSide(color: isSelected ? PeerLinkColors.primaryBlue : const Color(0xFFCBD5E1)),
+                                              onSelected: (_) => _changePageFilter(idx, f),
+                                            ),
+                                          );
+                                        }).toList(),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               );
                             },
@@ -247,11 +375,11 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
 
             ElevatedButton.icon(
               key: const Key('scanner_compile_pdf_button'),
-              onPressed: _scannedPages.isEmpty || _isProcessing ? null : _handleCompilePdf,
+              onPressed: _pages.isEmpty || _isProcessing ? null : _handleCompilePdf,
               icon: _isProcessing
                   ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                   : const Icon(Icons.picture_as_pdf_rounded, size: 18),
-              label: Text(_isProcessing ? 'Compiling PDF...' : 'Compile ${_scannedPages.length} Pages into PDF & Save to Vault'),
+              label: Text(_isProcessing ? 'Compiling PDF...' : 'Compile ${_pages.length} Pages into PDF & Save to Vault'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: PeerLinkColors.primaryBlue,
                 foregroundColor: Colors.white,
