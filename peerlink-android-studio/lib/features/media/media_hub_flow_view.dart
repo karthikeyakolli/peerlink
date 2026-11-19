@@ -384,7 +384,7 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
 
   Widget _buildTopUtilityBar() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
       decoration: const BoxDecoration(
         color: Color(0xFFF8FAFC),
         border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
@@ -392,26 +392,35 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
       child: Row(
         children: [
           Expanded(
-            child: OutlinedButton.icon(
+            child: InkWell(
               key: const Key('open_torrent_downloader_button'),
-              onPressed: _openTorrentDownloader,
-              icon: const Icon(Icons.downloading_rounded, size: 16, color: Color(0xFF2563EB)),
-              label: const Text(
-                'Torrent Downloader (Virus-Free)',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF1D4ED8)),
-              ),
-              style: OutlinedButton.styleFrom(
-                backgroundColor: const Color(0xFFEFF6FF),
-                side: const BorderSide(color: Color(0xFFBFDBFE)),
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              onTap: _openTorrentDownloader,
+              borderRadius: BorderRadius.circular(7),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(7),
+                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.downloading_rounded, size: 15, color: Color(0xFF2563EB)),
+                    SizedBox(width: 6),
+                    Text(
+                      'Web & Torrent Downloader',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF1D4ED8)),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
           const SizedBox(width: 8),
-          OutlinedButton.icon(
+          InkWell(
             key: const Key('open_virus_scanner_button'),
-            onPressed: () {
+            onTap: () {
               final files = _allFiles;
               if (files.isNotEmpty) {
                 _openVirusScanner(files.first.path);
@@ -424,16 +433,25 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
                 );
               }
             },
-            icon: const Icon(Icons.security_rounded, size: 15, color: Color(0xFF15803D)),
-            label: const Text(
-              'Virus Scan',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF15803D)),
-            ),
-            style: OutlinedButton.styleFrom(
-              backgroundColor: const Color(0xFFF0FDF4),
-              side: const BorderSide(color: Color(0xFFBBF7D0)),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            borderRadius: BorderRadius.circular(7),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0FDF4),
+                borderRadius: BorderRadius.circular(7),
+                border: Border.all(color: const Color(0xFFBBF7D0)),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.security_rounded, size: 14, color: Color(0xFF15803D)),
+                  SizedBox(width: 4),
+                  Text(
+                    'Threat Audit',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF15803D)),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -621,6 +639,11 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
           child: InkWell(
             borderRadius: BorderRadius.circular(14),
             onTap: () => _openPreview(item, playlist: videos, index: index),
+            onSecondaryTap: () {
+              if (Platform.isWindows) {
+                _vaultService.revealInFolder(item.path);
+              }
+            },
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Row(
@@ -672,28 +695,67 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.subtitles_outlined, size: 18, color: Color(0xFF2563EB)),
-                    tooltip: 'Subtitles & Real-Time Sync',
-                    onPressed: () => _openSubtitleSync(item.name),
-                  ),
-                  IconButton(
                     icon: const Icon(Icons.content_cut_rounded, size: 18, color: Color(0xFF2563EB)),
                     tooltip: 'Trim Clip & Extract Soundtrack',
                     onPressed: () => _openVideoTrimmer(item),
                   ),
-                  IconButton(
-                    key: Key('video_virus_scan_$index'),
-                    icon: const Icon(Icons.security_rounded, size: 18, color: Color(0xFF15803D)),
-                    tooltip: 'Virus-Free Security Audit',
-                    onPressed: () => _openVirusScanner(item.path),
+                  PopupMenuButton<String>(
+                    key: Key('video_more_menu_$index'),
+                    icon: const Icon(Icons.more_vert_rounded, size: 18, color: Color(0xFF64748B)),
+                    tooltip: 'More Actions',
+                    padding: EdgeInsets.zero,
+                    onSelected: (val) {
+                      if (val == 'subtitles') _openSubtitleSync(item.name);
+                      if (val == 'virus') _openVirusScanner(item.path);
+                      if (val == 'explorer') _vaultService.revealInFolder(item.path);
+                      if (val == 'open_app') _vaultService.openFileWithDefaultApp(item.path);
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: 'subtitles',
+                        child: Row(
+                          children: [
+                            Icon(Icons.subtitles_outlined, size: 16, color: Color(0xFF2563EB)),
+                            SizedBox(width: 8),
+                            Text('Subtitles & Sync', style: TextStyle(fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                      PopupMenuItem(
+                        key: Key('video_virus_scan_$index'),
+                        value: 'virus',
+                        child: const Row(
+                          children: [
+                            Icon(Icons.security_rounded, size: 16, color: Color(0xFF15803D)),
+                            SizedBox(width: 8),
+                            Text('Security Audit', style: TextStyle(fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                      if (Platform.isWindows)
+                        PopupMenuItem(
+                          key: Key('video_reveal_explorer_$index'),
+                          value: 'explorer',
+                          child: const Row(
+                            children: [
+                              Icon(Icons.folder_open_rounded, size: 16, color: Color(0xFF475569)),
+                              SizedBox(width: 8),
+                              Text('Reveal in File Explorer', style: TextStyle(fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                      const PopupMenuItem(
+                        value: 'open_app',
+                        child: Row(
+                          children: [
+                            Icon(Icons.open_in_new_rounded, size: 16, color: Color(0xFF475569)),
+                            SizedBox(width: 8),
+                            Text('Open in System App', style: TextStyle(fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                  if (Platform.isWindows)
-                    IconButton(
-                      key: Key('video_reveal_explorer_$index'),
-                      icon: const Icon(Icons.folder_open_rounded, size: 18, color: Color(0xFF64748B)),
-                      tooltip: 'Reveal in File Explorer',
-                      onPressed: () => _vaultService.revealInFolder(item.path),
-                    ),
                 ],
               ),
             ),
@@ -843,6 +905,11 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
                     ),
                     onTap: () {
                       _audioService.loadFolderQueue([item.path]);
+                    },
+                    onLongPress: () {
+                      if (Platform.isWindows) {
+                        _vaultService.revealInFolder(item.path);
+                      }
                     },
                   ),
                 ),

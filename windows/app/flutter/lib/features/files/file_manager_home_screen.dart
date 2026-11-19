@@ -162,6 +162,62 @@ class _FileManagerHomeScreenState extends State<FileManagerHomeScreen> {
           ],
         ],
       ),
+      bottomNavigationBar: Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(
+            top: BorderSide(color: Color(0xFFE5E7EB), width: 1.0),
+          ),
+        ),
+        child: SafeArea(
+          top: false,
+          child: SizedBox(
+            height: 52,
+            child: Row(
+              children: [
+                _buildBottomNavSpaceButton(0, Icons.folder_rounded, 'Files', 'bottom_mode_filemanager'),
+                _buildBottomNavSpaceButton(1, Icons.smart_display_rounded, 'Media', 'bottom_mode_media'),
+                _buildBottomNavSpaceButton(2, Icons.share_rounded, 'Share', 'bottom_mode_share'),
+                _buildBottomNavSpaceButton(3, Icons.transform_rounded, 'Studio', 'bottom_mode_conversions'),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomNavSpaceButton(int mode, IconData icon, String label, String keyName) {
+    final isSelected = _selectedMode == mode;
+    return Expanded(
+      child: InkWell(
+        key: Key(keyName),
+        onTap: () {
+          HapticFeedback.selectionClick();
+          setState(() => _selectedMode = mode);
+        },
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 20,
+              color: isSelected ? const Color(0xFF2563EB) : const Color(0xFF64748B),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                color: isSelected ? const Color(0xFF2563EB) : const Color(0xFF64748B),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

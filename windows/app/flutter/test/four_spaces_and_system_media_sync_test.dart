@@ -169,5 +169,33 @@ void main() {
       expect(find.text('iLovePDF 23-Format Power Studio & Mobile Document Scanner'), findsOneWidget);
       expect(find.byType(FileConverterFlowView), findsOneWidget);
     });
+
+    testWidgets('FileManagerHomeScreen bottom navigation bar switches spaces', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: FileManagerHomeScreen(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('bottom_mode_filemanager')), findsOneWidget);
+      expect(find.byKey(const Key('bottom_mode_media')), findsOneWidget);
+      expect(find.byKey(const Key('bottom_mode_share')), findsOneWidget);
+      expect(find.byKey(const Key('bottom_mode_conversions')), findsOneWidget);
+
+      // Tap bottom mode media
+      await tester.tap(find.byKey(const Key('bottom_mode_media')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.text('Player Hub Space'), findsOneWidget);
+
+      // Tap bottom mode share
+      await tester.tap(find.byKey(const Key('bottom_mode_share')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.text('P2P Share & Link Space'), findsOneWidget);
+    });
   });
 }
