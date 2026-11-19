@@ -94,7 +94,11 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   Widget _buildActiveScreen(int index) {
     switch (index) {
       case 0:
-        return FileManagerHomeScreen(key: const ValueKey('tab_files'), onNavigate: _navigateTo);
+        return FileManagerHomeScreen(
+          key: const ValueKey('tab_files'),
+          onNavigate: _navigateTo,
+          showBottomNav: false,
+        );
       case 1:
         return DevicesScreen(key: const ValueKey('tab_devices'), onNavigate: _navigateTo);
       case 2:
@@ -106,7 +110,11 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
       case 5:
         return SettingsScreen(key: const ValueKey('tab_settings'), onNavigate: _navigateTo);
       default:
-        return FileManagerHomeScreen(key: const ValueKey('tab_files'), onNavigate: _navigateTo);
+        return FileManagerHomeScreen(
+          key: const ValueKey('tab_files'),
+          onNavigate: _navigateTo,
+          showBottomNav: false,
+        );
     }
   }
 

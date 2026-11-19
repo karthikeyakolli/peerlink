@@ -19,8 +19,13 @@ import 'received_vault_view.dart';
 /// 4. File Conversions & Studio (conversions/trimmer/checksums)
 class FileManagerHomeScreen extends StatefulWidget {
   final void Function(int targetTabIndex)? onNavigate;
+  final bool showBottomNav;
 
-  const FileManagerHomeScreen({super.key, this.onNavigate});
+  const FileManagerHomeScreen({
+    super.key,
+    this.onNavigate,
+    this.showBottomNav = true,
+  });
 
   @override
   State<FileManagerHomeScreen> createState() => _FileManagerHomeScreenState();
@@ -162,28 +167,30 @@ class _FileManagerHomeScreenState extends State<FileManagerHomeScreen> {
           ],
         ],
       ),
-      bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          border: Border(
-            top: BorderSide(color: Color(0xFFE5E7EB), width: 1.0),
-          ),
-        ),
-        child: SafeArea(
-          top: false,
-          child: SizedBox(
-            height: 52,
-            child: Row(
-              children: [
-                _buildBottomNavSpaceButton(0, Icons.folder_rounded, 'Files', 'bottom_mode_filemanager'),
-                _buildBottomNavSpaceButton(1, Icons.smart_display_rounded, 'Media', 'bottom_mode_media'),
-                _buildBottomNavSpaceButton(2, Icons.share_rounded, 'Share', 'bottom_mode_share'),
-                _buildBottomNavSpaceButton(3, Icons.transform_rounded, 'Studio', 'bottom_mode_conversions'),
-              ],
-            ),
-          ),
-        ),
-      ),
+      bottomNavigationBar: widget.showBottomNav
+          ? Container(
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                border: Border(
+                  top: BorderSide(color: Color(0xFFE5E7EB), width: 1.0),
+                ),
+              ),
+              child: SafeArea(
+                top: false,
+                child: SizedBox(
+                  height: 52,
+                  child: Row(
+                    children: [
+                      _buildBottomNavSpaceButton(0, Icons.folder_rounded, 'Files', 'bottom_mode_filemanager'),
+                      _buildBottomNavSpaceButton(1, Icons.smart_display_rounded, 'Media', 'bottom_mode_media'),
+                      _buildBottomNavSpaceButton(2, Icons.share_rounded, 'Share', 'bottom_mode_share'),
+                      _buildBottomNavSpaceButton(3, Icons.transform_rounded, 'Studio', 'bottom_mode_conversions'),
+                    ],
+                  ),
+                ),
+              ),
+            )
+          : null,
     );
   }
 

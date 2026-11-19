@@ -610,9 +610,20 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
                             color: Color(0xFFF1F5F9),
                             borderRadius: BorderRadius.vertical(top: Radius.circular(9)),
                           ),
-                          child: const Center(
-                            child: Icon(Icons.image_rounded, size: 28, color: Color(0xFF94A3B8)),
-                          ),
+                          child: File(item.path).existsSync()
+                              ? ClipRRect(
+                                  borderRadius: const BorderRadius.vertical(top: Radius.circular(9)),
+                                  child: Image.file(
+                                    File(item.path),
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => const Center(
+                                      child: Icon(Icons.image_rounded, size: 28, color: Color(0xFF94A3B8)),
+                                    ),
+                                  ),
+                                )
+                              : const Center(
+                                  child: Icon(Icons.image_rounded, size: 28, color: Color(0xFF94A3B8)),
+                                ),
                         ),
                       ),
                       Padding(
