@@ -1590,15 +1590,6 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
                         border: !_browseInternalStorage
                             ? Border.all(color: const Color(0xFFCBD5E1), width: 1.0)
                             : Border.all(color: Colors.transparent, width: 1.0),
-                        boxShadow: !_browseInternalStorage
-                            ? const [
-                                BoxShadow(
-                                  color: Color(0x0C000000),
-                                  blurRadius: 3,
-                                  offset: Offset(0, 1),
-                                ),
-                              ]
-                            : null,
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -1655,15 +1646,6 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
                         border: _browseInternalStorage
                             ? Border.all(color: const Color(0xFFCBD5E1), width: 1.0)
                             : Border.all(color: Colors.transparent, width: 1.0),
-                        boxShadow: _browseInternalStorage
-                            ? const [
-                                BoxShadow(
-                                  color: Color(0x0C000000),
-                                  blurRadius: 3,
-                                  offset: Offset(0, 1),
-                                ),
-                              ]
-                            : null,
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -3283,7 +3265,7 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
                     child: OutlinedButton.icon(
                       key: const Key('file_action_stage_button'),
                       icon: const Icon(Icons.bolt_rounded, size: 15, color: Color(0xFFD97706)),
-                      label: const Text('Stage Beam', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFB45309))),
+                      label: const Text('Stage', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFB45309))),
                       style: OutlinedButton.styleFrom(
                         backgroundColor: const Color(0xFFFFFBEB),
                         side: const BorderSide(color: Color(0xFFFDE68A)),

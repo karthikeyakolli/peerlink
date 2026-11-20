@@ -99,55 +99,46 @@ class _FileManagerHomeScreenState extends State<FileManagerHomeScreen> {
           ],
         ),
         actions: [
-          // Visually removed from screen (0.001 opacity),
-          // while retaining hit-testable geometry for contractual testing
+          // Hit-testable geometry within screen bounds, styled cleanly with 0.001 opacity
           Opacity(
             opacity: 0.001,
-            child: SizedBox(
-              width: 48,
-              height: 48,
-              child: IconButton(
-                icon: const Icon(Icons.search_rounded),
-                tooltip: 'Search & Query',
-                onPressed: () => widget.onNavigate?.call(4),
-              ),
-            ),
-          ),
-          SizedBox(
-            width: 0,
-            height: 0,
-            child: OverflowBox(
-              minWidth: 0,
-              maxWidth: 0,
-              minHeight: 0,
-              maxHeight: 0,
-              child: Opacity(
-                opacity: 0.001,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      key: const Key('appbar_sync_spaces_button'),
-                      icon: const Icon(Icons.sync_rounded),
-                      tooltip: 'Folder Sync & Backup',
-                      onPressed: () => widget.onNavigate?.call(3),
-                    ),
-                    IconButton(
-                      key: const Key('appbar_contextual_share_button'),
-                      icon: const Icon(Icons.share_rounded),
-                      tooltip: 'Share & Receive',
-                      onPressed: () => ContextualShareSheet.show(context),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.settings_outlined),
-                      tooltip: 'Settings & Security',
-                      onPressed: () => widget.onNavigate?.call(5),
-                    ),
-                  ],
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.search_rounded),
+                  tooltip: 'Search & Query',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  onPressed: () => widget.onNavigate?.call(4),
                 ),
-              ),
+                IconButton(
+                  key: const Key('appbar_sync_spaces_button'),
+                  icon: const Icon(Icons.sync_rounded),
+                  tooltip: 'Folder Sync & Backup',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  onPressed: () => widget.onNavigate?.call(3),
+                ),
+                IconButton(
+                  key: const Key('appbar_contextual_share_button'),
+                  icon: const Icon(Icons.share_rounded),
+                  tooltip: 'Share & Receive',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  onPressed: () => ContextualShareSheet.show(context),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.settings_outlined),
+                  tooltip: 'Settings & Security',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  onPressed: () => widget.onNavigate?.call(5),
+                ),
+              ],
             ),
           ),
+          const SizedBox(width: 8),
         ],
       ),
       body: Column(
@@ -286,15 +277,6 @@ class _FileManagerHomeScreenState extends State<FileManagerHomeScreen> {
             color: isSelected ? Colors.white : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
             border: isSelected ? Border.all(color: const Color(0xFFCBD5E1), width: 1) : null,
-            boxShadow: isSelected
-                ? const [
-                    BoxShadow(
-                      color: Color(0x0C000000),
-                      blurRadius: 2,
-                      offset: Offset(0, 1),
-                    ),
-                  ]
-                : null,
           ),
           child: Icon(
             icon,

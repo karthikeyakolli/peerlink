@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'media/playback_backend.dart';
 
 enum VideoAspectRatioMode {
   fit,
@@ -29,6 +30,10 @@ class SubtitleCue {
 }
 
 class VideoEngineController extends ChangeNotifier {
+  final MediaPlaybackBackend _backend;
+  final bool _ownsBackend;
+  final List<StreamSubscription> _subscriptions = [];
+
   Duration duration;
   Duration currentPosition;
   double playbackSpeed;
@@ -46,7 +51,10 @@ class VideoEngineController extends ChangeNotifier {
   List<SubtitleCue> subtitles;
   String? subtitleSourcePath;
 
+  MediaPlaybackBackend get backend => _backend;
+
   VideoEngineController({
+    MediaPlaybackBackend? backend,
     this.duration = Duration.zero,
     this.currentPosition = Duration.zero,
     this.playbackSpeed = 1.0,
@@ -62,7 +70,59 @@ class VideoEngineController extends ChangeNotifier {
     this.aspectRatioMode = VideoAspectRatioMode.fit,
     List<SubtitleCue>? subtitles,
     this.subtitleSourcePath,
-  }) : subtitles = subtitles ?? [];
+  })  : _backend = backend ?? MediaPlaybackBackend.create(),
+        _ownsBackend = backend == null,
+        subtitles = subtitles ?? [] {
+    _initBackendListeners();
+  }
+
+  void _initBackendListeners() {
+    _subscriptions.add(_backend.positionStream.listen((pos) {
+      currentPosition = pos;
+      notifyListeners();
+    }));
+
+    _subscriptions.add(_backend.durationStream.listen((dur) {
+      duration = dur;
+      notifyListeners();
+    }));
+
+    _subscriptions.add(_backend.playingStream.listen((playing) {
+      isPlaying = playing;
+      notifyListeners();
+    }));
+
+    _subscriptions.add(_backend.completedStream.listen((completed) {
+      if (completed && isLooping) {
+        seekTo(Duration.zero);
+        play();
+      }
+    }));
+  }
+
+  Future<void> openSource(MediaSourceDescriptor source, {bool autoPlay = true}) async {
+    await _backend.open(source, autoPlay: autoPlay);
+  }
+
+  Future<void> play() async {
+    isPlaying = true;
+    notifyListeners();
+    await _backend.play();
+  }
+
+  Future<void> pause() async {
+    isPlaying = false;
+    notifyListeners();
+    await _backend.pause();
+  }
+
+  void togglePlayPause() {
+    if (isPlaying) {
+      pause();
+    } else {
+      play();
+    }
+  }
 
   void togglePip() {
     isPipActive = !isPipActive;
@@ -81,6 +141,7 @@ class VideoEngineController extends ChangeNotifier {
   void setPlaybackSpeed(double speed) {
     if (speed <= 0) return;
     playbackSpeed = speed;
+    _backend.setRate(speed);
     notifyListeners();
   }
 
@@ -88,14 +149,15 @@ class VideoEngineController extends ChangeNotifier {
     final newMs = (currentPosition.inMilliseconds + offset.inMilliseconds);
     final maxMs = duration.inMilliseconds > 0 ? duration.inMilliseconds : 86400000;
     final clampedMs = newMs.clamp(0, maxMs);
-    currentPosition = Duration(milliseconds: clampedMs);
-    notifyListeners();
+    final target = Duration(milliseconds: clampedMs);
+    seekTo(target);
   }
 
   void seekTo(Duration target) {
     final maxMs = duration.inMilliseconds > 0 ? duration.inMilliseconds : 86400000;
     final clampedMs = target.inMilliseconds.clamp(0, maxMs);
     currentPosition = Duration(milliseconds: clampedMs);
+    _backend.seek(currentPosition);
     notifyListeners();
   }
 
@@ -125,19 +187,16 @@ class VideoEngineController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void togglePlayPause() {
-    isPlaying = !isPlaying;
-    notifyListeners();
-  }
-
   void setVolume(double val) {
     volume = val.clamp(0.0, 1.0);
     if (volume > 0) isMuted = false;
+    _backend.setVolume(isMuted ? 0.0 : volume);
     notifyListeners();
   }
 
   void toggleMute() {
     isMuted = !isMuted;
+    _backend.setVolume(isMuted ? 0.0 : volume);
     notifyListeners();
   }
 
@@ -216,6 +275,13 @@ class VideoEngineController extends ChangeNotifier {
   @override
   void dispose() {
     _hudTimer?.cancel();
+    for (final s in _subscriptions) {
+      s.cancel();
+    }
+    _subscriptions.clear();
+    if (_ownsBackend) {
+      _backend.dispose();
+    }
     super.dispose();
   }
 
@@ -243,7 +309,6 @@ class VideoEngineController extends ChangeNotifier {
 
   void loadSubtitlesFromString(String content) {
     final parsed = <SubtitleCue>[];
-    // Normalize newlines
     final clean = content.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
     final blocks = clean.split(RegExp(r'\n\s*\n'));
 

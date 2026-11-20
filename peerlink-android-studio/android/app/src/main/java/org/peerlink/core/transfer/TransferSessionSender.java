@@ -30,6 +30,28 @@ public class TransferSessionSender {
     private static final int DEFAULT_CHUNK_TIMEOUT_MS = 15000;
     private static final int DEFAULT_OFFER_TIMEOUT_MS = 45000;
     private static final int DEFAULT_COMMIT_TIMEOUT_MS = 60000;
+    private static final int PIPELINE_WINDOW_SIZE = 6;
+
+    private static final class InFlightChunk {
+        final int itemIndex;
+        final long chunkIndex;
+        final long offsetBytes;
+        final byte[] data;
+        final boolean isLast;
+        final String sha256;
+        final CompletableFuture<TransferChunkAck> ackFuture;
+
+        InFlightChunk(int itemIndex, long chunkIndex, long offsetBytes, byte[] data,
+                      boolean isLast, String sha256, CompletableFuture<TransferChunkAck> ackFuture) {
+            this.itemIndex = itemIndex;
+            this.chunkIndex = chunkIndex;
+            this.offsetBytes = offsetBytes;
+            this.data = data;
+            this.isLast = isLast;
+            this.sha256 = sha256;
+            this.ackFuture = ackFuture;
+        }
+    }
 
     private final PeerSession session;
     private final TransferSessionCoordinator coordinator;
@@ -138,6 +160,7 @@ public class TransferSessionSender {
                             : item.getSha256Hex();
                     sendChunkWithRetry(transferId, i, 0, 0, new byte[0], true, emptySha);
                 } else {
+                    java.util.ArrayDeque<InFlightChunk> inFlight = new java.util.ArrayDeque<>(PIPELINE_WINDOW_SIZE);
                     try (FileInputStream fis = new FileInputStream(sourceFile.toFile())) {
                         while (offset < fileSize) {
                             if (tracker.isCancelled()) {
@@ -162,11 +185,17 @@ public class TransferSessionSender {
                             boolean isLast = (offset + read >= fileSize);
                             String chunkSha = FileManifestBuilder.calculateSha256Hex(chunkData);
 
-                            sendChunkWithRetry(transferId, i, chunkIndex, offset, chunkData, isLast, chunkSha);
+                            inFlight.addLast(dispatchChunkAsync(transferId, i, chunkIndex, offset, chunkData, isLast, chunkSha));
 
                             offset += read;
                             chunkIndex++;
-                            tracker.addBytes(read);
+
+                            if (inFlight.size() >= PIPELINE_WINDOW_SIZE) {
+                                awaitOrRetryInFlight(transferId, inFlight.removeFirst(), tracker);
+                            }
+                        }
+                        while (!inFlight.isEmpty()) {
+                            awaitOrRetryInFlight(transferId, inFlight.removeFirst(), tracker);
                         }
                     }
                 }
@@ -197,6 +226,230 @@ public class TransferSessionSender {
             tracker.fail(e.getMessage());
             throw e;
         }
+    }
+
+    public TransferCompletedReceipt sendResume(
+            TransferManifest manifest,
+            List<Path> sourcePaths,
+            Consumer<TransferProgress> progressCallback) throws Exception {
+
+        String transferId = manifest.getTransferId();
+        String remotePeerId = session.getRemotePeer().getPeerId().getValue();
+
+        if (session.getState() != SessionState.SESSION_STATE_ESTABLISHED) {
+            throw new IllegalStateException("Cannot initiate send resume: PeerSession is not established (" + session.getState() + ")");
+        }
+
+        if (!manifest.getReceiverPeerId().getValue().equals(remotePeerId)) {
+            throw new IllegalArgumentException(String.format(
+                    "Recipient Peer ID in manifest (%s) does not match authenticated remote peer (%s)",
+                    manifest.getReceiverPeerId().getValue(), remotePeerId));
+        }
+
+        TransferProgressTracker tracker = externalTracker != null
+                ? externalTracker
+                : new TransferProgressTracker(transferId, manifest.getTotalBytes(), manifest.getItemsCount(), progressCallback);
+        if (externalTracker == null) {
+            tracker.start();
+        }
+
+        try {
+            log.info("Sending TransferResumeOffer [{}] to peer [{}]", transferId, remotePeerId);
+            TransferResumeOffer offer = TransferResumeOffer.newBuilder()
+                    .setTransferId(transferId)
+                    .setOperationId(manifest.getOperationId())
+                    .setManifest(manifest)
+                    .setResumeTimestampUtcMs(System.currentTimeMillis())
+                    .build();
+
+            CompletableFuture<TransferResumeState> resumeFuture = coordinator.registerPendingResumeState(transferId);
+            TransferWireMessage wire = TransferWireMessage.newBuilder().setResumeOffer(offer).build();
+            session.sendPayloadAsync(wire.toByteArray());
+
+            TransferResumeState resumeState = resumeFuture.get(DEFAULT_OFFER_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            if (!resumeState.getCanResume()) {
+                tracker.fail("Resume rejected: " + resumeState.getMessage());
+                throw new IOException("Remote receiver rejected transfer resume: " + resumeState.getMessage());
+            }
+
+            java.util.Set<Long> ackedChunks = new java.util.HashSet<>(resumeState.getAckedChunkIndicesList());
+            log.info("Resume accepted for transfer [{}]. Receiver has {} acked chunks ({} bytes staged)",
+                    transferId, ackedChunks.size(), resumeState.getBytesAlreadyStaged());
+
+            if (resumeState.getBytesAlreadyStaged() > 0) {
+                tracker.addBytes(resumeState.getBytesAlreadyStaged());
+            }
+
+            tracker.updateState(TransferState.TRANSFER_STATE_TRANSFERRING);
+            int chunkSizeBytes = manifest.getChunkSizeBytes();
+            byte[] buffer = new byte[chunkSizeBytes];
+
+            for (int i = 0; i < manifest.getItemsCount(); i++) {
+                if (tracker.isCancelled()) {
+                    notifyReceiverCancelled(transferId, tracker.getCancelReason());
+                    throw new IllegalStateException("Transfer cancelled during transmission: " + tracker.getCancelReason());
+                }
+                if (tracker.isPaused()) {
+                    log.info("Transfer {} is paused; exiting resume chunk loop cleanly", transferId);
+                    return null;
+                }
+
+                TransferItem item = manifest.getItems(i);
+                tracker.setCurrentItem(i, item.getRelativePath());
+
+                if (item.getIsDirectory()) {
+                    continue;
+                }
+
+                Path sourceFile = findSourceFileForRelativePath(sourcePaths, item.getRelativePath());
+                validateSourceFile(sourceFile, item);
+
+                long fileSize = item.getFileSizeBytes();
+                long offset = 0;
+                long chunkIndex = 0;
+
+                try (FileInputStream fis = new FileInputStream(sourceFile.toFile())) {
+                    while (offset < fileSize) {
+                        if (tracker.isCancelled()) {
+                            notifyReceiverCancelled(transferId, tracker.getCancelReason());
+                            throw new IllegalStateException("Transfer cancelled during transmission: " + tracker.getCancelReason());
+                        }
+                        if (tracker.isPaused()) {
+                            log.info("Transfer {} is paused; exiting resume chunk loop cleanly", transferId);
+                            return null;
+                        }
+
+                        int toRead = (int) Math.min(chunkSizeBytes, fileSize - offset);
+                        int read = fis.read(buffer, 0, toRead);
+                        if (read <= 0) {
+                            break;
+                        }
+
+                        if (ackedChunks.contains(chunkIndex)) {
+                            log.debug("Skipping already-ACKed chunk [{}:{}] on resume", i, chunkIndex);
+                        } else {
+                            byte[] chunkData = new byte[read];
+                            System.arraycopy(buffer, 0, chunkData, 0, read);
+
+                            bandwidthLimiter.consume(read);
+                            boolean isLast = (offset + read >= fileSize);
+                            String chunkSha = FileManifestBuilder.calculateSha256Hex(chunkData);
+
+                            sendChunkWithRetry(transferId, i, chunkIndex, offset, chunkData, isLast, chunkSha);
+                            tracker.addBytes(read);
+                        }
+
+                        offset += read;
+                        chunkIndex++;
+                    }
+                }
+            }
+
+            log.info("All missing chunks sent on resume for transfer [{}]. Signaling commit to peer [{}]", transferId, remotePeerId);
+            TransferCommitSignal commit = TransferCommitSignal.newBuilder()
+                    .setTransferId(transferId)
+                    .build();
+
+            CompletableFuture<TransferCompletedReceipt> receiptFuture = coordinator.registerPendingReceipt(transferId);
+            TransferWireMessage commitWire = TransferWireMessage.newBuilder().setCommit(commit).build();
+            session.sendPayloadAsync(commitWire.toByteArray());
+
+            TransferCompletedReceipt receipt = receiptFuture.get(DEFAULT_COMMIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            if (!receipt.getSuccess()) {
+                tracker.fail(receipt.getErrorMessage());
+                throw new IOException("Remote receiver reported transfer failure: " + receipt.getErrorMessage());
+            }
+
+            tracker.complete();
+            log.info("Resume for transfer [{}] completed successfully over session [{}]. Committed {} bytes.",
+                    transferId, session.getSessionId().getValue(), receipt.getTotalBytesTransferred());
+            return receipt;
+
+        } catch (Exception e) {
+            tracker.fail(e.getMessage());
+            throw e;
+        }
+    }
+
+    public boolean pause(String transferId, String reason) {
+        if (externalTracker != null) {
+            externalTracker.pause(reason);
+        }
+        try {
+            TransferPauseRequest pauseReq = TransferPauseRequest.newBuilder()
+                    .setTransferId(transferId)
+                    .setReason(reason != null ? reason : "Sender requested pause")
+                    .build();
+            CompletableFuture<TransferPauseResponse> f = coordinator.registerPendingPauseResponse(transferId);
+            TransferWireMessage wire = TransferWireMessage.newBuilder().setPause(pauseReq).build();
+            session.sendPayloadAsync(wire.toByteArray());
+            TransferPauseResponse resp = f.get(3, TimeUnit.SECONDS);
+            return resp.getAcknowledged();
+        } catch (Exception e) {
+            log.warn("Failed to coordinate pause over session for {}: {}", transferId, e.getMessage());
+            return false;
+        }
+    }
+
+    private InFlightChunk dispatchChunkAsync(
+            String transferId,
+            int itemIndex,
+            long chunkIndex,
+            long offsetBytes,
+            byte[] chunkData,
+            boolean isLastChunk,
+            String chunkSha256) throws Exception {
+        if (session.getState() != SessionState.SESSION_STATE_ESTABLISHED) {
+            throw new IOException("Session no longer established: " + session.getState());
+        }
+        TransferChunk chunk = TransferChunk.newBuilder()
+                .setTransferId(transferId)
+                .setItemIndex(itemIndex)
+                .setChunkIndex(chunkIndex)
+                .setOffsetBytes(offsetBytes)
+                .setData(ByteString.copyFrom(chunkData))
+                .setIsLastChunk(isLastChunk)
+                .setChunkSha256(chunkSha256)
+                .build();
+        CompletableFuture<TransferChunkAck> ackFuture = coordinator.registerPendingChunkAck(
+                transferId, itemIndex, chunkIndex);
+        TransferWireMessage chunkWire = TransferWireMessage.newBuilder().setChunk(chunk).build();
+        CompletableFuture<Void> sendFuture = session.sendPayloadAsync(chunkWire.toByteArray());
+        if (sendFuture != null) {
+            sendFuture.get(DEFAULT_CHUNK_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        }
+        return new InFlightChunk(itemIndex, chunkIndex, offsetBytes, chunkData, isLastChunk, chunkSha256, ackFuture);
+    }
+
+    private void awaitOrRetryInFlight(
+            String transferId,
+            InFlightChunk inFlight,
+            TransferProgressTracker tracker) throws Exception {
+        try {
+            TransferChunkAck ack = inFlight.ackFuture.get(DEFAULT_CHUNK_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            if (ack.getSuccess()) {
+                tracker.addBytes(inFlight.data.length);
+                return;
+            }
+            log.warn("Pipelined chunk NACK [item={}, chunk={}]: {} — retrying cleanly",
+                    inFlight.itemIndex, inFlight.chunkIndex, ack.getErrorMessage());
+        } catch (Exception e) {
+            log.warn("Pipelined chunk timeout/error [item={}, chunk={}]: {} — retrying cleanly",
+                    inFlight.itemIndex, inFlight.chunkIndex, e.getMessage());
+            if (session.getState() != SessionState.SESSION_STATE_ESTABLISHED) {
+                throw new IOException("Peer session disconnected during pipelined chunk [" +
+                        inFlight.itemIndex + ":" + inFlight.chunkIndex + "]: " + e.getMessage(), e);
+            }
+        }
+        sendChunkWithRetry(
+                transferId,
+                inFlight.itemIndex,
+                inFlight.chunkIndex,
+                inFlight.offsetBytes,
+                inFlight.data,
+                inFlight.isLast,
+                inFlight.sha256);
+        tracker.addBytes(inFlight.data.length);
     }
 
     private void sendChunkWithRetry(

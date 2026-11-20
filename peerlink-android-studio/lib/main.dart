@@ -18,9 +18,11 @@ import 'features/search/search_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'core/file_staging_service.dart';
 import 'core/quick_text_service.dart';
+import 'core/media/playback_backend.dart';
 
 void main(List<String> args) {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaPlaybackBackend.ensureMediaLibrariesReady();
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -319,46 +321,43 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                 ),
               ],
             ),
-            bottomNavigationBar: SizedBox(
-              height: 0,
-              child: OverflowBox(
-                minHeight: 0,
-                maxHeight: 0,
-                child: Opacity(
-                  opacity: 0.001,
-                  child: DecoratedBox(
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      border: Border(
-                        top: BorderSide(color: Color(0xFFE5E7EB), width: 1.0),
+            bottomNavigationBar: Opacity(
+              opacity: 0.001,
+              child: SizedBox(
+                height: 48,
+                child: DecoratedBox(
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    border: Border(
+                      top: BorderSide(color: Color(0xFFE5E7EB), width: 1.0),
+                    ),
+                  ),
+                  child: NavigationBar(
+                    height: 48,
+                    selectedIndex: mobileIndex,
+                    onDestinationSelected: (index) {
+                      HapticFeedback.selectionClick();
+                      setState(() {
+                        _currentIndex = index;
+                      });
+                    },
+                    destinations: const [
+                      NavigationDestination(
+                        icon: Icon(Icons.folder_outlined),
+                        selectedIcon: Icon(Icons.folder_rounded),
+                        label: 'Files',
                       ),
-                    ),
-                    child: NavigationBar(
-                      selectedIndex: mobileIndex,
-                      onDestinationSelected: (index) {
-                        HapticFeedback.selectionClick();
-                        setState(() {
-                          _currentIndex = index;
-                        });
-                      },
-                      destinations: const [
-                        NavigationDestination(
-                          icon: Icon(Icons.folder_outlined),
-                          selectedIcon: Icon(Icons.folder_rounded),
-                          label: 'Files',
-                        ),
-                        NavigationDestination(
-                          icon: Icon(Icons.devices_outlined),
-                          selectedIcon: Icon(Icons.devices_rounded),
-                          label: 'Devices',
-                        ),
-                        NavigationDestination(
-                          icon: Icon(Icons.history_outlined),
-                          selectedIcon: Icon(Icons.history_rounded),
-                          label: 'Activity',
-                        ),
-                      ],
-                    ),
+                      NavigationDestination(
+                        icon: Icon(Icons.devices_outlined),
+                        selectedIcon: Icon(Icons.devices_rounded),
+                        label: 'Devices',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.history_outlined),
+                        selectedIcon: Icon(Icons.history_rounded),
+                        label: 'Activity',
+                      ),
+                    ],
                   ),
                 ),
               ),

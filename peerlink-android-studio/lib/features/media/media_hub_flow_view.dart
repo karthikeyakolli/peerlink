@@ -6,6 +6,11 @@ import '../../core/audio_player_service.dart';
 import '../../core/received_files_service.dart';
 import '../../core/system_media_scanner_service.dart';
 import '../../core/models/file_item.dart';
+import '../../core/media/media_source_models.dart';
+import '../../core/media/media_library_service.dart';
+import '../../core/media/playback_backend.dart';
+import 'professional_image_viewer.dart';
+import 'video_theater_player.dart';
 import '../../design_system/components/media_preview_modal.dart';
 import '../../design_system/components/floating_audio_mini_player.dart';
 import '../../design_system/components/dedicated_tool_page.dart';
@@ -16,15 +21,17 @@ import '../../design_system/components/audio_equalizer_sheet.dart';
 import '../../design_system/components/similar_photo_grouper_sheet.dart';
 import '../../design_system/components/torrent_downloader_sheet.dart';
 import '../../design_system/components/virus_scanner_sheet.dart';
+import '../../design_system/components/contextual_share_sheet.dart';
 import '../../platform/windows_file_dialog.dart';
 
 enum MediaHubTab { all, photos, videos, audio, documents }
 enum MediaStorageScope { device, vault, unified }
 
-/// Dedicated Media Viewer & Player Flow (Space 1).
-/// Directly synchronizes with System Device Storage (Pictures, Videos, Music, Downloads)
-/// as well as the secure PeerLink Vault.
-/// All auxiliary tools open in dedicated full-page workspaces instead of cramped bottom sheets.
+/// Reconstructed PeerLink Media Center.
+/// Combines the responsive desktop layout of Microsoft Photos and CPlay Windows
+/// with the fluid touch gestures and timeline grouping of Aves and Immich.
+/// Supports zero-cloud P2P streaming, local device storage scanning, secure vault isolation,
+/// professional full-screen photo viewing, and hardware-accelerated video theater playback.
 class MediaHubFlowView extends StatefulWidget {
   const MediaHubFlowView({super.key});
 
@@ -33,104 +40,140 @@ class MediaHubFlowView extends StatefulWidget {
 }
 
 class _MediaHubFlowViewState extends State<MediaHubFlowView> {
+  final MediaLibraryService _mediaService = MediaLibraryService.instance;
   final ReceivedFilesService _vaultService = ReceivedFilesService.instance;
   final SystemMediaScannerService _systemScanner = SystemMediaScannerService.instance;
   final AudioPlayerService _audioService = AudioPlayerService.instance;
 
   MediaHubTab _currentTab = MediaHubTab.all;
   MediaStorageScope _storageScope = MediaStorageScope.device;
-  List<ReceivedFileItem> _allFiles = [];
-  bool _isLoading = true;
-  bool _isSyncing = false;
-  StreamSubscription<void>? _changeSub;
+  bool _isSelectionMode = false;
+  final TextEditingController _searchController = TextEditingController();
 
-  double _playbackSpeed = 1.0;
-  int _sleepTimerMinutes = 0;
-  Timer? _sleepTimer;
+  StreamSubscription<void>? _vaultSub;
 
   @override
   void initState() {
     super.initState();
-    _loadData();
-    _changeSub = _vaultService.changeStream.listen((_) => _loadData());
+    _mediaService.addListener(_onServiceUpdate);
+    _vaultSub = _vaultService.changeStream.listen((_) => _refreshData());
+    _refreshData();
+  }
+
+  void _onServiceUpdate() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
-    _changeSub?.cancel();
-    _sleepTimer?.cancel();
+    _mediaService.removeListener(_onServiceUpdate);
+    _vaultSub?.cancel();
+    _searchController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadData({bool forceSystemSync = false}) async {
-    setState(() => _isLoading = true);
-
-    try {
-      List<ReceivedFileItem> loaded = [];
-
-      if (_storageScope == MediaStorageScope.device) {
-        // System Device Storage
-        loaded = await _systemScanner.scanDeviceStorage(forceRefresh: forceSystemSync);
-      } else if (_storageScope == MediaStorageScope.vault) {
-        // App Vault
-        final vaultFiles = await _vaultService.getReceivedFiles();
-        loaded = vaultFiles.where((f) => !f.isDirectory).toList();
-      } else {
-        // Unified: Device Storage + Vault
-        final devFiles = await _systemScanner.scanDeviceStorage(forceRefresh: forceSystemSync);
-        final vaultFiles = await _vaultService.getReceivedFiles();
-        final nonDirVault = vaultFiles.where((f) => !f.isDirectory).toList();
-        final seen = <String>{};
-        for (final f in devFiles) {
-          if (seen.add(f.path)) loaded.add(f);
-        }
-        for (final f in nonDirVault) {
-          if (seen.add(f.path)) loaded.add(f);
-        }
-      }
-
-      // If loaded is empty (e.g. running in fake/isolated test directory),
-      // merge vault files so test media files are guaranteed to be discoverable!
-      if (loaded.isEmpty) {
-        final vaultFiles = await _vaultService.getReceivedFiles();
-        loaded = vaultFiles.where((f) => !f.isDirectory).toList();
-      }
-
-      if (mounted) {
-        setState(() {
-          _allFiles = loaded;
-          _isLoading = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _isLoading = false);
+  Future<void> _refreshData({bool forceSystemSync = false}) async {
+    // Map current scope to service origin
+    if (_storageScope == MediaStorageScope.device) {
+      _mediaService.setOriginFilter(MediaOrigin.deviceStorage);
+    } else if (_storageScope == MediaStorageScope.vault) {
+      _mediaService.setOriginFilter(MediaOrigin.vaultStorage);
+    } else {
+      _mediaService.setOriginFilter(null);
     }
+    await _mediaService.refreshMedia(forceSystemSync: forceSystemSync);
   }
 
-  List<ReceivedFileItem> get _filteredFiles {
-    switch (_currentTab) {
+  void _handleTabChanged(MediaHubTab tab) {
+    HapticFeedback.selectionClick();
+    setState(() => _currentTab = tab);
+    switch (tab) {
       case MediaHubTab.photos:
-        return _allFiles.where((f) => f.isImage).toList();
+        _mediaService.setKindFilter(MediaKind.photo);
+        break;
       case MediaHubTab.videos:
-        return _allFiles.where((f) => f.isVideo).toList();
+        _mediaService.setKindFilter(MediaKind.video);
+        break;
       case MediaHubTab.audio:
-        return _allFiles.where((f) => f.isAudio).toList();
-      case MediaHubTab.documents:
-        return _allFiles.where((f) => f.isDocument).toList();
+        _mediaService.setKindFilter(MediaKind.audio);
+        break;
       case MediaHubTab.all:
+      case MediaHubTab.documents:
       default:
-        return _allFiles;
+        _mediaService.setKindFilter(null);
+        break;
     }
   }
 
-  void _setPlaybackSpeed(double speed) {
-    setState(() => _playbackSpeed = speed);
-    _audioService.setPlaybackSpeed(speed);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Audio speed set to ${speed}x'),
-        duration: const Duration(seconds: 1),
-        behavior: SnackBarBehavior.floating,
+  void _openPhotoViewer(MediaItem photo, {required List<MediaItem> playlist}) {
+    final photoList = playlist.where((it) => it.isPhoto).toList();
+    final index = photoList.indexWhere((it) => it.id == photo.id);
+    ProfessionalImageViewer.open(
+      context,
+      playlist: photoList.isNotEmpty ? photoList : [photo],
+      initialIndex: index != -1 ? index : 0,
+      onMediaChanged: () => setState(() {}),
+    );
+  }
+
+  void _openVideoTheater(MediaItem video) {
+    VideoTheaterPlayer.open(
+      context,
+      source: MediaSourceDescriptor.fromFilePath(video.path, title: video.name),
+    );
+  }
+
+  void _openItem(MediaItem item, {required List<MediaItem> playlist}) {
+    if (item.isPhoto) {
+      _openPhotoViewer(item, playlist: playlist);
+    } else if (item.isVideo) {
+      _openVideoTheater(item);
+    } else {
+      // Audio or document fallback via MediaPreviewModal
+      MediaPreviewModal.show(
+        context,
+        ReceivedFileItem(
+          name: item.name,
+          path: item.path,
+          sizeBytes: item.sizeBytes,
+          lastModified: item.lastModified,
+          category: item.isPhoto
+              ? ReceivedFileCategory.photos
+              : (item.isVideo
+                  ? ReceivedFileCategory.videos
+                  : (item.isAudio ? ReceivedFileCategory.audio : ReceivedFileCategory.other)),
+          extension: item.name.contains('.') ? item.name.split('.').last : '',
+        ),
+        onDeleted: _refreshData,
+      );
+    }
+  }
+
+  void _revealInExplorer(String filePath) {
+    if (!Platform.isWindows) return;
+    try {
+      Process.run('explorer.exe', ['/select,', filePath]);
+    } catch (e) {
+      debugPrint('Failed to reveal file: $e');
+    }
+  }
+
+  void _openSimilarPhotoGrouper() {
+    final photos = _mediaService.allItems.where((it) => it.isPhoto).toList();
+    DedicatedToolPage.open(
+      context,
+      title: 'Perceptual dHash Photo Grouper',
+      subtitle: 'AI-Free Perceptual Duplicate & Burst Detector',
+      icon: Icons.auto_awesome_motion_rounded,
+      child: SimilarPhotoGrouperSheet(
+        photoItems: photos
+            .map((f) => FileItem(
+                  name: f.name,
+                  path: f.path,
+                  size: f.sizeBytes,
+                  modified: f.lastModified,
+                ))
+            .toList(),
       ),
     );
   }
@@ -175,56 +218,12 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
     );
   }
 
-  void _openSubtitleSync(String videoStem) {
-    DedicatedToolPage.open(
-      context,
-      title: 'Subtitle Sync Studio',
-      subtitle: 'Real-Time Millisecond Timing Offset & Auto-Match',
-      icon: Icons.subtitles_outlined,
-      child: SubtitleSyncSheet(videoStem: videoStem),
-    );
-  }
-
-  void _openVideoTrimmer(ReceivedFileItem item) {
-    DedicatedToolPage.open(
-      context,
-      title: 'Video Trimmer & Soundtrack Extractor',
-      subtitle: 'Lossless In-App Segment Trimming & Audio Extraction',
-      icon: Icons.content_cut_rounded,
-      child: VideoTrimmerSheet(
-        fileItem: item,
-        videoDuration: const Duration(seconds: 120),
-        onExported: _loadData,
-      ),
-    );
-  }
-
-  void _openSimilarPhotoGrouper() {
-    DedicatedToolPage.open(
-      context,
-      title: 'Perceptual dHash Photo Grouper',
-      subtitle: 'AI-Free Perceptual Duplicate & Burst Detector',
-      icon: Icons.auto_awesome_motion_rounded,
-      child: SimilarPhotoGrouperSheet(
-        photoItems: _allFiles
-            .where((f) => f.isImage)
-            .map((f) => FileItem(
-                  name: f.name,
-                  path: f.path,
-                  size: f.sizeBytes,
-                  modified: f.lastModified,
-                ))
-            .toList(),
-      ),
-    );
-  }
-
   Future<void> _pickAndAddCustomFolder() async {
     try {
       final selected = await WindowsFileDialog.pickDirectory(title: 'Select Media Folder to Synchronize');
       if (selected != null && selected.isNotEmpty) {
         _systemScanner.addCustomScanFolder(selected);
-        await _loadData(forceSystemSync: true);
+        await _refreshData(forceSystemSync: true);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -242,189 +241,421 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        // Consolidated Sticky Source, Utility & Media Category Filter Bar
-        _buildConsolidatedFilterBar(),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isDesktop = constraints.maxWidth >= 720;
+        return Scaffold(
+          backgroundColor: const Color(0xFFF8FAFC),
+          body: Row(
+            children: [
+              // 1. Desktop Left Navigation Rail / Sidebar (Microsoft Photos paradigm)
+              if (isDesktop) _buildDesktopSidebar(),
 
-        // Active Media Content
-        Expanded(
-          child: _isLoading
-              ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
-              : (_currentTab == MediaHubTab.audio || _currentTab == MediaHubTab.photos)
-                  ? _buildTabContent()
-                  : _filteredFiles.isEmpty
-                      ? _buildEmptyState()
-                      : _buildTabContent(),
-        ),
-      ],
+              // 2. Main Gallery Content Canvas
+              Expanded(
+                child: Column(
+                  children: [
+                    // Sticky Control Chrome
+                    _buildTopHeader(isDesktop),
+
+                    // Active Gallery Content (Timeline sections)
+                    Expanded(
+                      child: _mediaService.isLoading
+                          ? const Center(
+                              child: CircularProgressIndicator(color: Color(0xFF0284C7)),
+                            )
+                          : _buildTimelineGallery(),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
-  Widget _buildConsolidatedFilterBar() {
+  Widget _buildDesktopSidebar() {
+    final albums = _mediaService.availableAlbums;
+
     return Container(
+      width: 240,
       decoration: const BoxDecoration(
         color: Colors.white,
-        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0), width: 1.0)),
+        border: Border(right: BorderSide(color: Color(0xFFE2E8F0))),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+      child: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
         children: [
-          // Row 1: Source Selector, Sync & Fast Utility Pills
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
+          // Branding Header
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             child: Row(
-              mainAxisSize: MainAxisSize.min,
               children: [
-                // Scope segmented switch
                 Container(
-                  padding: const EdgeInsets.all(2),
+                  padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
+                    color: const Color(0xFF0284C7),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _buildScopeChip('Device Storage', MediaStorageScope.device, Icons.phone_android_rounded),
-                      _buildScopeChip('Vault', MediaStorageScope.vault, Icons.lock_outline_rounded),
-                      _buildScopeChip('Unified', MediaStorageScope.unified, Icons.dashboard_outlined),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 6),
-                if (Platform.isWindows) ...[
-                  IconButton(
-                    key: const Key('add_custom_folder_button'),
-                    icon: const Icon(Icons.create_new_folder_outlined, size: 17, color: Color(0xFF2563EB)),
-                    tooltip: 'Add Custom Media Folder (e.g. D:\\Media)',
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                    onPressed: _pickAndAddCustomFolder,
-                  ),
-                  const SizedBox(width: 4),
-                ],
-                // Sync button
-                OutlinedButton.icon(
-                  key: const Key('sync_system_media_button'),
-                  onPressed: _isSyncing
-                      ? null
-                      : () async {
-                          HapticFeedback.selectionClick();
-                          setState(() => _isSyncing = true);
-                          await _loadData(forceSystemSync: true);
-                          if (mounted) {
-                            setState(() => _isSyncing = false);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Synchronized ${_allFiles.length} media files from Device Storage!'),
-                                behavior: SnackBarBehavior.floating,
-                                duration: const Duration(seconds: 2),
-                              ),
-                            );
-                          }
-                        },
-                  icon: _isSyncing
-                      ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.sync_rounded, size: 13, color: Color(0xFF2563EB)),
-                  label: Text(
-                    _isSyncing ? 'Syncing...' : 'Sync',
-                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF1D4ED8)),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                    minimumSize: const Size(0, 28),
-                    backgroundColor: const Color(0xFFEFF6FF),
-                    side: const BorderSide(color: Color(0xFFBFDBFE)),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
-                  ),
+                  child: const Icon(Icons.perm_media_rounded, color: Colors.white, size: 16),
                 ),
                 const SizedBox(width: 8),
-                // Downloader utility pill
-                InkWell(
-                  key: const Key('open_torrent_downloader_button'),
-                  onTap: _openTorrentDownloader,
-                  borderRadius: BorderRadius.circular(6),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEFF6FF),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: const Color(0xFFBFDBFE)),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.downloading_rounded, size: 14, color: Color(0xFF2563EB)),
-                        SizedBox(width: 4),
-                        Text(
-                          'Downloader',
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF1D4ED8)),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                // Threat Audit pill
-                InkWell(
-                  key: const Key('open_virus_scanner_button'),
-                  onTap: () async {
-                    final files = _allFiles;
-                    if (files.isNotEmpty) {
-                      _openVirusScanner(files.first.path);
-                    } else if (Platform.isWindows) {
-                      final picked = await WindowsFileDialog.pickFiles(title: 'Select File to Audit for Threats');
-                      if (picked.isNotEmpty && mounted) {
-                        _openVirusScanner(picked.first);
-                        return;
-                      }
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('No media files found to audit.'),
-                            behavior: SnackBarBehavior.floating,
-                          ),
-                        );
-                      }
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('No media files found to audit.'),
-                          behavior: SnackBarBehavior.floating,
-                        ),
-                      );
-                    }
-                  },
-                  borderRadius: BorderRadius.circular(6),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF0FDF4),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: const Color(0xFFBBF7D0)),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.security_rounded, size: 14, color: Color(0xFF15803D)),
-                        SizedBox(width: 4),
-                        Text(
-                          'Audit',
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF15803D)),
-                        ),
-                      ],
-                    ),
+                const Expanded(
+                  child: Text(
+                    'Media Center',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
             ),
           ),
-          const Divider(height: 1, thickness: 1, color: Color(0xFFF1F5F9)),
-          // Row 2: Media Category Tabs
-          _buildCategoryChips(),
+          const SizedBox(height: 16),
+
+          // Primary Navigation Items
+          _buildSidebarNavItem(
+            label: 'All Media',
+            icon: Icons.grid_view_rounded,
+            isSelected: _currentTab == MediaHubTab.all && !_mediaService.favoritesOnly && _mediaService.selectedAlbumName == null,
+            onTap: () {
+              _mediaService.setFavoritesOnly(false);
+              _mediaService.setSelectedAlbum(null);
+              _handleTabChanged(MediaHubTab.all);
+            },
+          ),
+          _buildSidebarNavItem(
+            label: 'Photos',
+            icon: Icons.photo_library_outlined,
+            isSelected: _currentTab == MediaHubTab.photos && !_mediaService.favoritesOnly,
+            onTap: () {
+              _mediaService.setFavoritesOnly(false);
+              _mediaService.setSelectedAlbum(null);
+              _handleTabChanged(MediaHubTab.photos);
+            },
+          ),
+          _buildSidebarNavItem(
+            label: 'Videos',
+            icon: Icons.video_library_outlined,
+            isSelected: _currentTab == MediaHubTab.videos && !_mediaService.favoritesOnly,
+            onTap: () {
+              _mediaService.setFavoritesOnly(false);
+              _mediaService.setSelectedAlbum(null);
+              _handleTabChanged(MediaHubTab.videos);
+            },
+          ),
+          _buildSidebarNavItem(
+            key: const Key('media_tab_audio'),
+            label: 'Audio Jukebox',
+            icon: Icons.library_music_outlined,
+            isSelected: _currentTab == MediaHubTab.audio && !_mediaService.favoritesOnly,
+            onTap: () {
+              _mediaService.setFavoritesOnly(false);
+              _mediaService.setSelectedAlbum(null);
+              _handleTabChanged(MediaHubTab.audio);
+            },
+          ),
+          _buildSidebarNavItem(
+            key: const Key('media_tab_documents'),
+            label: 'Documents',
+            icon: Icons.description_outlined,
+            isSelected: _currentTab == MediaHubTab.documents && !_mediaService.favoritesOnly,
+            onTap: () {
+              _mediaService.setFavoritesOnly(false);
+              _mediaService.setSelectedAlbum(null);
+              _handleTabChanged(MediaHubTab.documents);
+            },
+          ),
+          _buildSidebarNavItem(
+            label: 'Favorites',
+            icon: Icons.favorite_rounded,
+            iconColor: const Color(0xFFEF4444),
+            isSelected: _mediaService.favoritesOnly,
+            onTap: () {
+              _mediaService.setSelectedAlbum(null);
+              _mediaService.setFavoritesOnly(true);
+            },
+          ),
+
+          const Divider(color: Color(0xFFE2E8F0), height: 28),
+
+          // Folders & Albums Section
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Expanded(
+                  child: Text(
+                    'ALBUMS & FOLDERS',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF94A3B8)),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                InkWell(
+                  onTap: _pickAndAddCustomFolder,
+                  child: const Icon(Icons.add_rounded, size: 16, color: Color(0xFF0284C7)),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          if (albums.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Text('No folders discovered', style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+            )
+          else
+            ...albums.take(8).map((album) => _buildSidebarNavItem(
+                  label: album,
+                  icon: Icons.folder_outlined,
+                  isSelected: _mediaService.selectedAlbumName == album,
+                  onTap: () {
+                    _mediaService.setFavoritesOnly(false);
+                    _mediaService.setSelectedAlbum(album);
+                  },
+                )),
+
+          const Divider(color: Color(0xFFE2E8F0), height: 28),
+
+          // Tools Section
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Text(
+              'MEDIA UTILITIES',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF94A3B8)),
+            ),
+          ),
+          _buildSidebarNavItem(
+            label: 'Clean Similar / Bursts',
+            icon: Icons.auto_awesome_motion_rounded,
+            isSelected: false,
+            onTap: _openSimilarPhotoGrouper,
+          ),
+          _buildSidebarNavItem(
+            key: const Key('open_torrent_downloader_button'),
+            label: 'Web & Torrent Ingest',
+            icon: Icons.downloading_rounded,
+            isSelected: false,
+            onTap: _openTorrentDownloader,
+          ),
+          _buildSidebarNavItem(
+            key: const Key('open_virus_scanner_button'),
+            label: 'Zero-Trust Audit',
+            icon: Icons.security_rounded,
+            isSelected: false,
+            onTap: () {
+              final files = _mediaService.allItems;
+              if (files.isNotEmpty) {
+                _openVirusScanner(files.first.path);
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSidebarNavItem({
+    Key? key,
+    required String label,
+    required IconData icon,
+    required bool isSelected,
+    required VoidCallback onTap,
+    Color? iconColor,
+  }) {
+    return Container(
+      key: key,
+      margin: const EdgeInsets.only(bottom: 2),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: isSelected ? const Color(0xFFE0F2FE) : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, size: 18, color: iconColor ?? (isSelected ? const Color(0xFF0284C7) : const Color(0xFF64748B))),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                    color: isSelected ? const Color(0xFF0369A1) : const Color(0xFF334155),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTopHeader(bool isDesktop) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              // Search input
+              Expanded(
+                child: Container(
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: TextField(
+                    controller: _searchController,
+                    onChanged: (q) => _mediaService.setSearchQuery(q),
+                    style: const TextStyle(fontSize: 13),
+                    decoration: InputDecoration(
+                      prefixIcon: const Icon(Icons.search_rounded, size: 18, color: Color(0xFF94A3B8)),
+                      suffixIcon: _searchController.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear_rounded, size: 16, color: Color(0xFF94A3B8)),
+                              onPressed: () {
+                                _searchController.clear();
+                                _mediaService.setSearchQuery('');
+                              },
+                            )
+                          : null,
+                      hintText: 'Search media by file name...',
+                      hintStyle: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 9),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+
+              // Storage Scope selector
+              _buildScopeChip('Device', MediaStorageScope.device, Icons.smartphone_rounded),
+              const SizedBox(width: 4),
+              _buildScopeChip('Vault', MediaStorageScope.vault, Icons.shield_rounded),
+              const SizedBox(width: 4),
+              _buildScopeChip('Unified', MediaStorageScope.unified, Icons.all_inclusive_rounded),
+
+              const SizedBox(width: 6),
+
+              // View density toggle (Comfortable vs Compact)
+              IconButton(
+                tooltip: _mediaService.viewDensity == MediaViewDensity.comfortable
+                    ? 'Switch to Compact Grid'
+                    : 'Switch to Comfortable Grid',
+                icon: Icon(
+                  _mediaService.viewDensity == MediaViewDensity.comfortable
+                      ? Icons.view_comfy_rounded
+                      : Icons.grid_on_rounded,
+                  size: 20,
+                  color: const Color(0xFF475569),
+                ),
+                onPressed: () {
+                  _mediaService.setViewDensity(
+                    _mediaService.viewDensity == MediaViewDensity.comfortable
+                        ? MediaViewDensity.compact
+                        : MediaViewDensity.comfortable,
+                  );
+                },
+              ),
+
+              // Sort dropdown
+              PopupMenuButton<MediaSortOption>(
+                tooltip: 'Sort Media',
+                icon: const Icon(Icons.sort_rounded, size: 20, color: Color(0xFF475569)),
+                onSelected: (sort) => _mediaService.setSortOption(sort),
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: MediaSortOption.dateNewest,
+                    child: Text('Date: Newest First', style: TextStyle(fontSize: 12)),
+                  ),
+                  const PopupMenuItem(
+                    value: MediaSortOption.dateOldest,
+                    child: Text('Date: Oldest First', style: TextStyle(fontSize: 12)),
+                  ),
+                  const PopupMenuItem(
+                    value: MediaSortOption.sizeLargest,
+                    child: Text('Size: Largest First', style: TextStyle(fontSize: 12)),
+                  ),
+                  const PopupMenuItem(
+                    value: MediaSortOption.nameAsc,
+                    child: Text('Name: A to Z', style: TextStyle(fontSize: 12)),
+                  ),
+                ],
+              ),
+
+              // Sync / Refresh button
+              IconButton(
+                key: const Key('sync_system_media_button'),
+                tooltip: 'Refresh / Scan Storage',
+                icon: const Icon(Icons.refresh_rounded, size: 20, color: Color(0xFF475569)),
+                onPressed: () => _refreshData(forceSystemSync: true),
+              ),
+            ],
+          ),
+
+          // Secondary Category Chips on mobile
+          if (!isDesktop) ...[
+            const SizedBox(height: 10),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _buildMobileCategoryChip('All Media', MediaHubTab.all),
+                  _buildMobileCategoryChip('Photos', MediaHubTab.photos),
+                  _buildMobileCategoryChip('Videos', MediaHubTab.videos),
+                  _buildMobileCategoryChip('Audio Jukebox', MediaHubTab.audio, key: const Key('media_tab_audio')),
+                  _buildMobileCategoryChip('Documents', MediaHubTab.documents, key: const Key('media_tab_documents')),
+                  // Similar photos button
+                  OutlinedButton.icon(
+                    key: const Key('open_similar_photo_grouper_button'),
+                    onPressed: _openSimilarPhotoGrouper,
+                    icon: const Icon(Icons.auto_awesome_motion_rounded, size: 14, color: Color(0xFF0284C7)),
+                    label: const Text('Clean Bursts', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      minimumSize: const Size(0, 30),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  // Virus scanner button
+                  OutlinedButton.icon(
+                    key: const Key('open_virus_scanner_button'),
+                    onPressed: () {
+                      final files = _mediaService.allItems;
+                      if (files.isNotEmpty) {
+                        _openVirusScanner(files.first.path);
+                      }
+                    },
+                    icon: const Icon(Icons.security_rounded, size: 14, color: Color(0xFF15803D)),
+                    label: const Text('Threat Audit', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      minimumSize: const Size(0, 30),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -437,27 +668,30 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
       onTap: () {
         HapticFeedback.selectionClick();
         setState(() => _storageScope = scope);
-        _loadData();
+        _refreshData();
       },
       borderRadius: BorderRadius.circular(6),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.white : Colors.transparent,
+          color: isSelected ? const Color(0xFFE0F2FE) : const Color(0xFFF1F5F9),
           borderRadius: BorderRadius.circular(6),
-          border: isSelected ? Border.all(color: const Color(0xFFCBD5E1), width: 1) : null,
+          border: Border.all(
+            color: isSelected ? const Color(0xFF0284C7) : const Color(0xFFE2E8F0),
+            width: 1,
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 13, color: isSelected ? const Color(0xFF2563EB) : const Color(0xFF64748B)),
+            Icon(icon, size: 13, color: isSelected ? const Color(0xFF0284C7) : const Color(0xFF64748B)),
             const SizedBox(width: 4),
             Text(
               label,
               style: TextStyle(
                 fontSize: 11,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                color: isSelected ? const Color(0xFF0F172A) : const Color(0xFF64748B),
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                color: isSelected ? const Color(0xFF0369A1) : const Color(0xFF475569),
               ),
             ),
           ],
@@ -466,738 +700,244 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
     );
   }
 
-
-  Widget _buildCategoryChips() {
+  Widget _buildMobileCategoryChip(String label, MediaHubTab tab, {Key? key}) {
+    final isSelected = _currentTab == tab;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: Colors.white,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            _buildTabChip(MediaHubTab.all, 'All Media', Icons.perm_media_outlined),
-            const SizedBox(width: 8),
-            _buildTabChip(MediaHubTab.photos, 'Photos', Icons.photo_outlined),
-            const SizedBox(width: 8),
-            _buildTabChip(MediaHubTab.videos, 'Videos', Icons.videocam_outlined),
-            const SizedBox(width: 8),
-            _buildTabChip(MediaHubTab.audio, 'Audio Jukebox', Icons.headphones_outlined),
-            const SizedBox(width: 8),
-            _buildTabChip(MediaHubTab.documents, 'Documents', Icons.description_outlined),
-          ],
+      key: key,
+      margin: const EdgeInsets.only(right: 6),
+      child: ChoiceChip(
+        label: Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+        selected: isSelected,
+        onSelected: (_) => _handleTabChanged(tab),
+        selectedColor: const Color(0xFFE0F2FE),
+        backgroundColor: Colors.white,
+        labelStyle: TextStyle(color: isSelected ? const Color(0xFF0369A1) : const Color(0xFF475569)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(color: isSelected ? const Color(0xFF0284C7) : const Color(0xFFE2E8F0)),
         ),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       ),
     );
   }
 
-  Widget _buildTabChip(MediaHubTab tab, String label, IconData icon) {
-    final isSelected = _currentTab == tab;
+  Widget _buildTimelineGallery() {
+    final sections = _mediaService.timelineSections;
+
+    return Column(
+      children: [
+        if (_currentTab == MediaHubTab.audio)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: const BoxDecoration(
+              color: Color(0xFFF1F5F9),
+              border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+            ),
+            child: Row(
+              children: [
+                OutlinedButton.icon(
+                  key: const Key('audio_equalizer_button'),
+                  onPressed: _openAudioEqualizer,
+                  icon: const Icon(Icons.graphic_eq_rounded, size: 14),
+                  label: const Text('Equalizer', style: TextStyle(fontSize: 11)),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  key: const Key('audio_sleep_timer_button'),
+                  onPressed: _openAudioSleepTimer,
+                  icon: const Icon(Icons.bedtime_outlined, size: 14),
+                  label: const Text('Sleep Timer', style: TextStyle(fontSize: 11)),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: const Text('1.0x', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          ),
+        Expanded(
+          child: sections.isEmpty
+              ? _buildEmptyState()
+              : ListView.builder(
+                  physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+                  padding: const EdgeInsets.all(16),
+                  itemCount: sections.length,
+                  itemBuilder: (context, sectionIdx) {
+                    final sec = sections[sectionIdx];
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Sticky Timeline Date Header
+                        Padding(
+                          padding: const EdgeInsets.only(left: 4, bottom: 10, top: 8),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                sec.dateTitle,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF1E293B),
+                                ),
+                              ),
+                              Text(
+                                '${sec.items.length} items',
+                                style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // Grid items for this timeline section
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final width = constraints.maxWidth;
+                            final isCompact = _mediaService.viewDensity == MediaViewDensity.compact;
+                            int crossAxisCount = (width / (isCompact ? 110 : 160)).floor();
+                            if (crossAxisCount < 2) crossAxisCount = 2;
+
+                            return GridView.builder(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: crossAxisCount,
+                                crossAxisSpacing: 10,
+                                mainAxisSpacing: 10,
+                                childAspectRatio: 0.88,
+                              ),
+                              itemCount: sec.items.length,
+                              itemBuilder: (context, itemIdx) {
+                                final item = sec.items[itemIdx];
+                                return _buildMediaGridCard(item, sec.items);
+                              },
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMediaGridCard(MediaItem item, List<MediaItem> contextItems) {
+    final file = File(item.path);
+    final exists = file.existsSync();
+
     return InkWell(
-      key: Key('media_tab_${tab.name}'),
-      onTap: () {
-        HapticFeedback.selectionClick();
-        setState(() => _currentTab = tab);
+      onTap: () => _openItem(item, playlist: contextItems),
+      onSecondaryTap: () {
+        // Windows right-click context menu
+        if (Platform.isWindows) {
+          _revealInExplorer(item.path);
+        }
       },
       borderRadius: BorderRadius.circular(10),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFFEFF6FF) : const Color(0xFFF8FAFC),
+          color: Colors.white,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: isSelected ? const Color(0xFF3B82F6) : const Color(0xFFE2E8F0),
-            width: isSelected ? 1.5 : 1.0,
-          ),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Icon(icon, size: 16, color: isSelected ? const Color(0xFF2563EB) : const Color(0xFF64748B)),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                color: isSelected ? const Color(0xFF1E3A8A) : const Color(0xFF334155),
+            // Visual Preview Area
+            Expanded(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Container(
+                    color: const Color(0xFFF1F5F9),
+                    child: item.isPhoto && exists
+                        ? Image.file(
+                            file,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const Center(
+                              child: Icon(Icons.broken_image_rounded, size: 28, color: Color(0xFF94A3B8)),
+                            ),
+                          )
+                        : Center(
+                            child: Icon(
+                              item.isVideo
+                                  ? Icons.movie_creation_outlined
+                                  : (item.isAudio ? Icons.audiotrack_rounded : Icons.insert_drive_file_outlined),
+                              size: 32,
+                              color: const Color(0xFF94A3B8),
+                            ),
+                          ),
+                  ),
+
+                  // Video Duration & Play Badge
+                  if (item.isVideo)
+                    Positioned(
+                      bottom: 6,
+                      right: 6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.75),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.play_arrow_rounded, size: 12, color: Colors.white),
+                            const SizedBox(width: 2),
+                            Text(
+                              item.formattedDuration,
+                              style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                  // Favorite indicator
+                  if (item.isFavorite)
+                    const Positioned(
+                      top: 6,
+                      right: 6,
+                      child: Icon(Icons.favorite_rounded, size: 16, color: Color(0xFFEF4444)),
+                    ),
+                ],
+              ),
+            ),
+
+            // Item Name & Metadata
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    item.formattedSize,
+                    style: const TextStyle(fontSize: 10, color: Color(0xFF64748B)),
+                  ),
+                ],
               ),
             ),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildTabContent() {
-    switch (_currentTab) {
-      case MediaHubTab.photos:
-        return _buildPhotosGrid();
-      case MediaHubTab.videos:
-        return _buildVideosList();
-      case MediaHubTab.audio:
-        return _buildAudioJukebox();
-      case MediaHubTab.documents:
-      case MediaHubTab.all:
-      default:
-        return _buildGenericMediaGrid();
-    }
-  }
-
-  Widget _buildPhotosGrid() {
-    final photos = _filteredFiles;
-    return Column(
-      children: [
-        // Photo utility header (dHash grouper)
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: const BoxDecoration(
-            color: Color(0xFFF8FAFC),
-            border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                '${photos.length} Photos in ${_storageScope == MediaStorageScope.device ? "Device Storage" : "Vault"}',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
-              ),
-              OutlinedButton.icon(
-                key: const Key('open_similar_photo_grouper_button'),
-                onPressed: _openSimilarPhotoGrouper,
-                icon: const Icon(Icons.auto_awesome_motion_rounded, size: 14, color: Color(0xFF2563EB)),
-                label: const Text('Clean Similar & Bursts', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  minimumSize: const Size(0, 30),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: photos.isEmpty
-              ? _buildEmptyState()
-              : GridView.builder(
-            padding: const EdgeInsets.all(12),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-              childAspectRatio: 0.85,
-            ),
-            itemCount: photos.length,
-            itemBuilder: (context, index) {
-              final item = photos[index];
-              return InkWell(
-                onTap: () => _openPreview(item, playlist: photos, index: index),
-                borderRadius: BorderRadius.circular(10),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFFE5E7EB)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(
-                        child: Container(
-                          decoration: const BoxDecoration(
-                            color: Color(0xFFF1F5F9),
-                            borderRadius: BorderRadius.vertical(top: Radius.circular(9)),
-                          ),
-                          child: File(item.path).existsSync()
-                              ? ClipRRect(
-                                  borderRadius: const BorderRadius.vertical(top: Radius.circular(9)),
-                                  child: Image.file(
-                                    File(item.path),
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (_, __, ___) => const Center(
-                                      child: Icon(Icons.image_rounded, size: 28, color: Color(0xFF94A3B8)),
-                                    ),
-                                  ),
-                                )
-                              : const Center(
-                                  child: Icon(Icons.image_rounded, size: 28, color: Color(0xFF94A3B8)),
-                                ),
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.all(6),
-                        child: Text(
-                          item.name,
-                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildVideosList() {
-    final videos = _filteredFiles;
-    if (videos.isEmpty) return _buildEmptyState();
-
-    final firstVideo = videos.first;
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-      padding: const EdgeInsets.all(12),
-      children: [
-        // UC Browser-Inspired Video Theater Player Hero Card
-        _buildUCVideoTheaterHero(firstVideo),
-        const SizedBox(height: 14),
-
-        // Video Library List
-        ...List.generate(videos.length, (index) {
-          final item = videos[index];
-          return Container(
-            margin: const EdgeInsets.only(bottom: 10),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFFE5E7EB)),
-            ),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(14),
-              onTap: () => _openPreview(item, playlist: videos, index: index),
-              onSecondaryTap: () {
-                if (Platform.isWindows) {
-                  _vaultService.revealInFolder(item.path);
-                }
-              },
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 56,
-                      height: 56,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFEFF6FF),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Center(
-                        child: Icon(Icons.play_circle_fill_rounded, color: Color(0xFF2563EB), size: 30),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            item.name,
-                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF0F172A)),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFF1F5F9),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  item.extension.toUpperCase(),
-                                  style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Color(0xFF475569)),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                item.formattedSize,
-                                style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.content_cut_rounded, size: 18, color: Color(0xFF2563EB)),
-                      tooltip: 'Trim Clip & Extract Soundtrack',
-                      onPressed: () => _openVideoTrimmer(item),
-                    ),
-                    PopupMenuButton<String>(
-                      key: Key('video_more_menu_$index'),
-                      icon: const Icon(Icons.more_vert_rounded, size: 18, color: Color(0xFF64748B)),
-                      tooltip: 'More Actions',
-                      padding: EdgeInsets.zero,
-                      onSelected: (val) {
-                        if (val == 'subtitles') _openSubtitleSync(item.name);
-                        if (val == 'virus') _openVirusScanner(item.path);
-                        if (val == 'explorer') _vaultService.revealInFolder(item.path);
-                        if (val == 'open_app') _vaultService.openFileWithDefaultApp(item.path);
-                      },
-                      itemBuilder: (context) => [
-                        const PopupMenuItem(
-                          value: 'subtitles',
-                          child: Row(
-                            children: [
-                              Icon(Icons.subtitles_outlined, size: 16, color: Color(0xFF2563EB)),
-                              SizedBox(width: 8),
-                              Text('Subtitles & Sync', style: TextStyle(fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                        PopupMenuItem(
-                          key: Key('video_virus_scan_$index'),
-                          value: 'virus',
-                          child: const Row(
-                            children: [
-                              Icon(Icons.security_rounded, size: 16, color: Color(0xFF15803D)),
-                              SizedBox(width: 8),
-                              Text('Security Audit', style: TextStyle(fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                        if (Platform.isWindows)
-                          PopupMenuItem(
-                            key: Key('video_reveal_explorer_$index'),
-                            value: 'explorer',
-                            child: const Row(
-                              children: [
-                                Icon(Icons.folder_open_rounded, size: 16, color: Color(0xFF475569)),
-                                SizedBox(width: 8),
-                                Text('Reveal in File Explorer', style: TextStyle(fontSize: 12)),
-                              ],
-                            ),
-                          ),
-                        const PopupMenuItem(
-                          value: 'open_app',
-                          child: Row(
-                            children: [
-                              Icon(Icons.open_in_new_rounded, size: 16, color: Color(0xFF475569)),
-                              SizedBox(width: 8),
-                              Text('Open in System App', style: TextStyle(fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        }),
-      ],
-    );
-  }
-
-  Widget _buildUCVideoTheaterHero(ReceivedFileItem video) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF0F172A),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF334155)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // UC Video Top Bar
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2563EB),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const Text(
-                    'UC THEATER 4K',
-                    style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    video.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Pop-out Floating Window (PiP)',
-                  icon: const Icon(Icons.picture_in_picture_alt_rounded, size: 18, color: Colors.white),
-                  onPressed: () {
-                    HapticFeedback.selectionClick();
-                    _openPreview(video);
-                  },
-                ),
-              ],
-            ),
-          ),
-          // Viewport Stage
-          InkWell(
-            onTap: () => _openPreview(video),
-            child: Container(
-              height: 160,
-              color: Colors.black,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  const Icon(Icons.movie_creation_outlined, size: 64, color: Colors.white12),
-                  Positioned.fill(
-                    child: Center(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          IconButton(
-                            tooltip: 'Rewind 10 seconds',
-                            icon: const Icon(Icons.replay_10_rounded, color: Colors.white70, size: 28),
-                            onPressed: () {
-                              HapticFeedback.selectionClick();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Rewind 10s'),
-                                  duration: Duration(milliseconds: 600),
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
-                            },
-                          ),
-                          const SizedBox(width: 14),
-                          Container(
-                            width: 56,
-                            height: 56,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF2563EB),
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(color: const Color(0xFF2563EB).withValues(alpha: 0.5), blurRadius: 16),
-                              ],
-                            ),
-                            child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 36),
-                          ),
-                          const SizedBox(width: 14),
-                          IconButton(
-                            tooltip: 'Forward 10 seconds',
-                            icon: const Icon(Icons.forward_10_rounded, color: Colors.white70, size: 28),
-                            onPressed: () {
-                              HapticFeedback.selectionClick();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Forward 10s'),
-                                  duration: Duration(milliseconds: 600),
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    bottom: 24,
-                    left: 12,
-                    right: 12,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(2),
-                      child: const LinearProgressIndicator(
-                        value: 0.35,
-                        minHeight: 3,
-                        backgroundColor: Colors.white24,
-                        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF2563EB)),
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    bottom: 6,
-                    left: 12,
-                    right: 12,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('↕ Left: Brightness  ↕ Right: Volume  ↔ Seek 10s', style: TextStyle(color: Colors.white60, fontSize: 10)),
-                        Text('00:42 / 02:15 • ${video.formattedSize}', style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          // UC Browser Bottom Quick Controls
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: const BoxDecoration(
-              color: Color(0xFF1E293B),
-              borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
-            ),
-            child: Row(
-              children: [
-                InkWell(
-                  onTap: () => _setPlaybackSpeed(_playbackSpeed == 2.0 ? 1.0 : _playbackSpeed + 0.25),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF334155),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text('${_playbackSpeed}x Speed', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                InkWell(
-                  onTap: () => _openPreview(video),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF334155),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.aspect_ratio_rounded, size: 14, color: Colors.white),
-                        SizedBox(width: 4),
-                        Text('Aspect Ratio', style: TextStyle(color: Colors.white, fontSize: 11)),
-                      ],
-                    ),
-                  ),
-                ),
-                const Spacer(),
-                TextButton.icon(
-                  onPressed: () => _openVideoTrimmer(video),
-                  icon: const Icon(Icons.content_cut_rounded, size: 14, color: Color(0xFF60A5FA)),
-                  label: const Text('Trim / Audio', style: TextStyle(color: Color(0xFF60A5FA), fontSize: 11, fontWeight: FontWeight.w600)),
-                  style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 6)),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAudioJukebox() {
-    final audioFiles = _filteredFiles;
-    return Column(
-      children: [
-        // Speed, Equalizer & Sleep Controls Bar
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: const BoxDecoration(
-            color: Color(0xFFF8FAFC),
-            border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
-          ),
-          child: Row(
-            children: [
-              const Icon(Icons.speed_rounded, size: 16, color: Color(0xFF2563EB)),
-              const SizedBox(width: 4),
-              DropdownButton<double>(
-                value: _playbackSpeed,
-                isDense: true,
-                underline: const SizedBox.shrink(),
-                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
-                items: const [
-                  DropdownMenuItem(value: 0.5, child: Text('0.5x')),
-                  DropdownMenuItem(value: 0.75, child: Text('0.75x')),
-                  DropdownMenuItem(value: 1.0, child: Text('1.0x')),
-                  DropdownMenuItem(value: 1.25, child: Text('1.25x')),
-                  DropdownMenuItem(value: 1.5, child: Text('1.5x')),
-                  DropdownMenuItem(value: 2.0, child: Text('2.0x')),
-                  DropdownMenuItem(value: 2.5, child: Text('2.5x')),
-                  DropdownMenuItem(value: 3.0, child: Text('3.0x')),
-                ],
-                onChanged: (val) {
-                  if (val != null) _setPlaybackSpeed(val);
-                },
-              ),
-              const SizedBox(width: 8),
-              // Equalizer button
-              InkWell(
-                key: const Key('audio_equalizer_button'),
-                onTap: _openAudioEqualizer,
-                borderRadius: BorderRadius.circular(6),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0xFFCBD5E1)),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.graphic_eq_rounded, size: 14, color: Color(0xFF2563EB)),
-                      SizedBox(width: 4),
-                      Text('EQ', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF1D4ED8))),
-                    ],
-                  ),
-                ),
-              ),
-              const Spacer(),
-              // Sleep Timer with volume fade
-              InkWell(
-                key: const Key('audio_sleep_timer_button'),
-                onTap: _openAudioSleepTimer,
-                borderRadius: BorderRadius.circular(6),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0xFFCBD5E1)),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.bedtime_outlined, size: 14, color: Color(0xFF9333EA)),
-                      SizedBox(width: 4),
-                      Text('Sleep Fade', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF7E22CE))),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: audioFiles.isEmpty
-              ? _buildEmptyState()
-              : ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: audioFiles.length,
-            itemBuilder: (context, index) {
-              final item = audioFiles[index];
-              return Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFE5E7EB)),
-                ),
-                child: Material(
-                  color: Colors.transparent,
-                  borderRadius: BorderRadius.circular(12),
-                  child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-                    leading: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFEFF6FF),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Icon(Icons.music_note_rounded, color: Color(0xFF2563EB), size: 22),
-                    ),
-                    title: Text(
-                      item.name,
-                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Color(0xFF0F172A)),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(
-                      item.formattedSize,
-                      style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (Platform.isWindows)
-                          IconButton(
-                            key: Key('audio_reveal_explorer_$index'),
-                            icon: const Icon(Icons.folder_open_rounded, size: 18, color: Color(0xFF64748B)),
-                            tooltip: 'Reveal in File Explorer',
-                            onPressed: () => _vaultService.revealInFolder(item.path),
-                          ),
-                        IconButton(
-                          icon: const Icon(Icons.play_arrow_rounded, color: Color(0xFF2563EB)),
-                          onPressed: () {
-                            _audioService.loadFolderQueue([item.path]);
-                          },
-                        ),
-                      ],
-                    ),
-                    onTap: () {
-                      _audioService.loadFolderQueue([item.path]);
-                    },
-                    onLongPress: () {
-                      if (Platform.isWindows) {
-                        _vaultService.revealInFolder(item.path);
-                      }
-                    },
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildGenericMediaGrid() {
-    final files = _filteredFiles;
-    return ListView.builder(
-      padding: const EdgeInsets.all(12),
-      itemCount: files.length,
-      itemBuilder: (context, index) {
-        final item = files[index];
-        final icon = item.isImage
-            ? Icons.photo_outlined
-            : (item.isVideo
-                ? Icons.videocam_outlined
-                : (item.isAudio ? Icons.headphones_outlined : Icons.description_outlined));
-
-        return Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFE5E7EB)),
-          ),
-          child: Material(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
-            child: ListTile(
-              leading: Icon(icon, color: const Color(0xFF2563EB)),
-              title: Text(
-                item.name,
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              subtitle: Text(
-                '${item.extension.toUpperCase()} • ${item.formattedSize}',
-                style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
-              ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (Platform.isWindows)
-                    IconButton(
-                      key: Key('generic_reveal_explorer_$index'),
-                      icon: const Icon(Icons.folder_open_rounded, size: 18, color: Color(0xFF64748B)),
-                      tooltip: 'Reveal in File Explorer',
-                      onPressed: () => _vaultService.revealInFolder(item.path),
-                    ),
-                  const Icon(Icons.chevron_right_rounded, color: Color(0xFF94A3B8)),
-                ],
-              ),
-              onTap: () => _openPreview(item, playlist: files, index: index),
-            ),
-          ),
-        );
-      },
     );
   }
 
@@ -1207,36 +947,36 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 60,
-            height: 60,
-            decoration: BoxDecoration(
-              color: const Color(0xFFF1F5F9),
-              borderRadius: BorderRadius.circular(16),
+            padding: const EdgeInsets.all(20),
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Color(0xFFF1F5F9),
             ),
-            child: const Icon(Icons.perm_media_outlined, size: 28, color: Color(0xFF94A3B8)),
+            child: const Icon(Icons.photo_library_outlined, size: 48, color: Color(0xFF94A3B8)),
           ),
-          const SizedBox(height: 12),
-          const Text('No Media Files Found', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-          const SizedBox(height: 4),
-          Text(
-            _storageScope == MediaStorageScope.device
-                ? 'No media files found in Device Storage folders. Tap "Sync Storage" to scan.'
-                : 'Received media or photos will appear here automatically.',
-            style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
-            textAlign: TextAlign.center,
+          const SizedBox(height: 16),
+          const Text(
+            'No Media Files Found',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Add custom media folders or check your Device / Vault storage.',
+            style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: () => _refreshData(forceSystemSync: true),
+            icon: const Icon(Icons.refresh_rounded, size: 16),
+            label: const Text('Rescan Storage', style: TextStyle(fontSize: 12)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0284C7),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
           ),
         ],
       ),
-    );
-  }
-
-  void _openPreview(ReceivedFileItem file, {List<ReceivedFileItem>? playlist, int index = 0}) {
-    MediaPreviewModal.show(
-      context,
-      file,
-      onDeleted: _loadData,
-      playlist: playlist,
-      initialIndex: index,
     );
   }
 }

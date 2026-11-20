@@ -103,6 +103,16 @@ public class TransferSessionReceiver {
                         .build());
                 return;
             }
+
+            if (!trustStore.isTrusted(remotePeerId)) {
+                log.warn("Rejected offer {}: Remote peer {} is untrusted", transferId, remotePeerId);
+                sendResponse(session, TransferResponse.newBuilder()
+                        .setTransferId(transferId)
+                        .setAccepted(false)
+                        .setRejectionReason("Remote peer is not trusted. Explicit pairing required.")
+                        .build());
+                return;
+            }
         }
 
         // 3. Sender Identity Binding Invariant
@@ -117,8 +127,6 @@ public class TransferSessionReceiver {
             return;
         }
 
-        boolean isTrusted = trustStore == null || trustStore.isTrusted(remotePeerId);
-
         // 4. Enforce Receiver Consent Policy
         if (consentMode == ReceiverConsentMode.REJECT_ALL) {
             log.warn("Rejected offer {}: ReceiverConsentMode is REJECT_ALL", transferId);
@@ -130,7 +138,7 @@ public class TransferSessionReceiver {
             return;
         }
 
-        if (!isTrusted || consentMode == ReceiverConsentMode.MANUAL_PROMPT_ALL) {
+        if (consentMode == ReceiverConsentMode.MANUAL_PROMPT_ALL) {
             java.util.concurrent.CompletableFuture<Boolean> consentFuture = new java.util.concurrent.CompletableFuture<>();
             pendingConsent.put(transferId, consentFuture);
             for (ReceiverTransferEventListener l : listeners) {
@@ -156,18 +164,9 @@ public class TransferSessionReceiver {
                         .setRejectionReason("Transfer offer rejected by receiver user")
                         .build());
                 return;
-            } else {
-                if (!isTrusted && trustStore != null) {
-                    try {
-                        trustStore.addTrustedPeer(session.getRemotePeer());
-                        log.info("Peer {} trusted following explicit user consent", remotePeerId);
-                    } catch (Exception e) {
-                        log.warn("Failed to add trusted peer after consent: {}", e.getMessage());
-                    }
-                }
             }
         } else {
-            // AUTO_ACCEPT_PAIRED_TRUSTED with trusted peer
+            // AUTO_ACCEPT_PAIRED_TRUSTED
             for (ReceiverTransferEventListener l : listeners) {
                 try {
                     l.onIncomingOffer(session, offer);

@@ -25,6 +25,10 @@ import 'video_trimmer_sheet.dart';
 import 'floating_video_pip_overlay.dart';
 import 'subtitle_sync_sheet.dart';
 import 'virus_scanner_sheet.dart';
+import '../../core/media/playback_backend.dart';
+import '../../core/media/media_source_models.dart';
+import '../../features/media/professional_image_viewer.dart';
+import '../../features/media/video_theater_player.dart';
 
 /// Universal In-App File & Media Viewer Engine (Minimalist Light-Only Surface).
 /// Brings every file type to life directly inside PeerLink:
@@ -1836,82 +1840,22 @@ class _MediaPreviewModalState extends State<MediaPreviewModal> {
       lightboxIndex = imageItems.length - 1;
     }
 
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (dialogCtx) {
-          int lightboxRotation = _imageRotationQuarterTurns;
-          return StatefulBuilder(
-            builder: (ctx, setDialogState) {
-              final activeImg = imageItems[lightboxIndex];
-              return Scaffold(
-                backgroundColor: Colors.white,
-                appBar: AppBar(
-                  backgroundColor: Colors.white,
-                  elevation: 0,
-                  foregroundColor: const Color(0xFF0F172A),
-                  title: Text(
-                    imageItems.length > 1
-                        ? '${activeImg.name} (${lightboxIndex + 1}/${imageItems.length})'
-                        : activeImg.name,
-                    style: const TextStyle(fontSize: 14),
-                  ),
-                  actions: [
-                    if (imageItems.length > 1) ...[
-                      IconButton(
-                        tooltip: 'Previous Photo',
-                        icon: const Icon(Icons.chevron_left_rounded),
-                        onPressed: lightboxIndex > 0
-                            ? () => setDialogState(() {
-                                  lightboxIndex--;
-                                  lightboxRotation = 0;
-                                })
-                            : null,
-                      ),
-                      IconButton(
-                        tooltip: 'Next Photo',
-                        icon: const Icon(Icons.chevron_right_rounded),
-                        onPressed: lightboxIndex + 1 < imageItems.length
-                            ? () => setDialogState(() {
-                                  lightboxIndex++;
-                                  lightboxRotation = 0;
-                                })
-                            : null,
-                      ),
-                    ],
-                    IconButton(
-                      tooltip: 'Rotate 90°',
-                      icon: const Icon(Icons.rotate_90_degrees_cw_rounded),
-                      onPressed: () {
-                        setDialogState(() {
-                          lightboxRotation = (lightboxRotation + 1) % 4;
-                        });
-                        setState(() {
-                          _imageRotationQuarterTurns = lightboxRotation;
-                        });
-                      },
-                    ),
-                    IconButton(
-                      tooltip: 'Close Lightbox',
-                      icon: const Icon(Icons.close_rounded),
-                      onPressed: () => Navigator.of(dialogCtx).pop(),
-                    ),
-                  ],
-                ),
-                body: Center(
-                  child: InteractiveViewer(
-                    minScale: 0.5,
-                    maxScale: 8.0,
-                    child: RotatedBox(
-                      quarterTurns: lightboxRotation,
-                      child: Image.file(File(activeImg.path), fit: BoxFit.contain),
-                    ),
-                  ),
-                ),
-              );
-            },
-          );
-        },
-      ),
+    final mediaItems = imageItems.map((f) => MediaItem(
+      id: f.path,
+      name: f.name,
+      path: f.path,
+      origin: MediaOrigin.vaultStorage,
+      kind: MediaKind.photo,
+      sizeBytes: f.sizeBytes,
+      lastModified: f.lastModified,
+      dateTaken: f.lastModified,
+    )).toList();
+
+    ProfessionalImageViewer.open(
+      context,
+      playlist: mediaItems,
+      initialIndex: lightboxIndex,
+      onMediaChanged: () => setState(() {}),
     );
   }
 
@@ -2068,14 +2012,11 @@ class _MediaPreviewModalState extends State<MediaPreviewModal> {
                               key: const Key('play_video_button'),
                               borderRadius: BorderRadius.circular(40),
                               onTap: () {
-                                if (canPlayInline) {
-                                  setState(() {
-                                    _isPlayingInlineVideo = true;
-                                    _videoController.isPlaying = true;
-                                  });
-                                } else {
-                                  ReceivedFilesService.instance.openFileWithDefaultApp(item.path);
-                                }
+                                VideoTheaterPlayer.open(
+                                  context,
+                                  source: MediaSourceDescriptor.fromFilePath(item.path, title: item.name),
+                                  controller: _videoController,
+                                );
                               },
                               child: Container(
                                 width: 68,
