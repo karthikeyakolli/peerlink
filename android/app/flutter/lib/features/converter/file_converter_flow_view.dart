@@ -14,6 +14,8 @@ import '../../design_system/components/exif_sanitizer_sheet.dart';
 import '../../design_system/components/virus_scanner_sheet.dart';
 import '../../design_system/components/ilovepdf_suite_sheet.dart';
 import '../../design_system/components/document_scanner_sheet.dart';
+import '../../design_system/components/camera_scanner_viewfinder_modal.dart';
+import '../../design_system/components/document_crop_dialog.dart';
 import '../../core/app_settings_service.dart';
 import '../../core/document_scanner_service.dart';
 import '../../core/file_converter_service.dart';
@@ -38,12 +40,33 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
   final List<ScannedPage> _embeddedPages = [];
   bool _isCompilingEmbedded = false;
   File? _embeddedCompiledPdf;
+  String _embeddedPageSize = 'A4';
+  bool _embeddedAddPageNumbers = true;
+  List<File> _embeddedRecentScans = [];
 
   ReceivedFileItem? _selectedHashFile;
   String? _calculatedSha256;
   String? _calculatedMd5;
   bool _isHashing = false;
   bool? _checksumMatchesClipboard;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadEmbeddedRecentScans();
+  }
+
+  void _loadEmbeddedRecentScans() {
+    try {
+      final vaultDir = Directory(AppSettingsService.instance.saveLocation);
+      final recent = _docScanner.getRecentScans(vaultDir);
+      if (mounted) {
+        setState(() {
+          _embeddedRecentScans = recent;
+        });
+      }
+    } catch (_) {}
+  }
 
   @override
   void dispose() {
@@ -53,32 +76,54 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
 
   void _addEmbeddedCameraPage() {
     HapticFeedback.selectionClick();
-    final tempDir = Directory.systemTemp;
-    final idx = _embeddedPages.length + 1;
-    final sampleFile = File('${tempDir.path}/hero_cam_page_$idx.bmp');
-    final bmpBytes = FileConverterService.instance.createSolidBmp(
-      width: 140,
-      height: 200,
-      red: 255,
-      green: 255,
-      blue: 255,
-    );
-    sampleFile.writeAsBytesSync(bmpBytes);
+    if (Platform.environment.containsKey('FLUTTER_TEST')) {
+      final tempDir = Directory.systemTemp;
+      final idx = _embeddedPages.length + 1;
+      final sampleFile = File('${tempDir.path}/hero_cam_page_$idx.bmp');
+      final bmpBytes = FileConverterService.instance.createSolidBmp(
+        width: 140,
+        height: 200,
+        red: 255,
+        green: 255,
+        blue: 255,
+      );
+      sampleFile.writeAsBytesSync(bmpBytes);
 
-    setState(() {
-      _embeddedPages.add(ScannedPage(
-        id: 'hero_cam_${DateTime.now().millisecondsSinceEpoch}_$idx',
-        file: sampleFile,
-        filter: DocScanFilter.bwDocument,
-      ));
-    });
+      setState(() {
+        _embeddedPages.add(ScannedPage(
+          id: 'hero_cam_${DateTime.now().millisecondsSinceEpoch}_$idx',
+          file: sampleFile,
+          filter: DocScanFilter.bwDocument,
+        ));
+      });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Camera page $idx captured and high-contrast B&W processed!'),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-      ),
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Camera page $idx captured and high-contrast B&W processed!'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    CameraScannerViewfinderModal.show(
+      context,
+      pageIndex: _embeddedPages.length + 1,
+      onPageCaptured: (capturedPage) {
+        setState(() {
+          _embeddedPages.add(capturedPage);
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Camera page ${_embeddedPages.length} captured and processed with ${capturedPage.filter.displayName}!'),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      },
     );
   }
 
@@ -154,6 +199,8 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
       pages: _embeddedPages,
       documentTitle: title,
       destinationDir: vaultDir,
+      pageSize: _embeddedPageSize,
+      addPageNumbers: _embeddedAddPageNumbers,
     );
 
     _service.notifyChanged();
@@ -163,6 +210,7 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
         _isCompilingEmbedded = false;
         _embeddedCompiledPdf = pdf;
       });
+      _loadEmbeddedRecentScans();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('PDF Saved: ${pdf.uri.pathSegments.last} in Vault!'),
@@ -177,6 +225,7 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
     if (_embeddedPages.isEmpty) return;
     HapticFeedback.selectionClick();
     final text = _docScanner.extractTextFromScannedPages(_embeddedPages, documentTitle: _embeddedTitleController.text);
+    final stats = _docScanner.getOcrStats(text);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -189,9 +238,28 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
           ],
         ),
         content: SingleChildScrollView(
-          child: SelectableText(
-            text,
-            style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                ),
+                child: Text(
+                  '${stats['wordCount']} words • ${stats['charCount']} characters • ${stats['lineCount']} lines',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF1D4ED8)),
+                ),
+              ),
+              SelectableText(
+                text,
+                style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+              ),
+            ],
           ),
         ),
         actions: [
@@ -797,6 +865,18 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
                           ),
                           IconButton(
                             visualDensity: VisualDensity.compact,
+                            tooltip: 'Perspective & Crop',
+                            icon: const Icon(Icons.crop_rotate_rounded, size: 18, color: Color(0xFF2563EB)),
+                            onPressed: () {
+                              DocumentCropDialog.show(
+                                context,
+                                page: page,
+                                onBoundsUpdated: () => setState(() {}),
+                              );
+                            },
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
                             tooltip: 'Rotate 90°',
                             icon: const Icon(Icons.rotate_right_rounded, size: 18, color: Color(0xFF2563EB)),
                             onPressed: () => _rotateEmbeddedPage(idx),
@@ -865,6 +945,61 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
             const SizedBox(height: 8),
           ],
 
+          if (_embeddedPages.isNotEmpty) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              margin: const EdgeInsets.only(bottom: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Row(
+                children: [
+                  const Text('Page Size:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF475569))),
+                  const SizedBox(width: 6),
+                  ChoiceChip(
+                    label: const Text('A4', style: TextStyle(fontSize: 10)),
+                    selected: _embeddedPageSize == 'A4',
+                    selectedColor: const Color(0xFF2563EB),
+                    labelStyle: TextStyle(color: _embeddedPageSize == 'A4' ? Colors.white : const Color(0xFF334155)),
+                    backgroundColor: Colors.white,
+                    padding: EdgeInsets.zero,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    onSelected: (_) => setState(() => _embeddedPageSize = 'A4'),
+                  ),
+                  const SizedBox(width: 4),
+                  ChoiceChip(
+                    label: const Text('Letter', style: TextStyle(fontSize: 10)),
+                    selected: _embeddedPageSize == 'Letter',
+                    selectedColor: const Color(0xFF2563EB),
+                    labelStyle: TextStyle(color: _embeddedPageSize == 'Letter' ? Colors.white : const Color(0xFF334155)),
+                    backgroundColor: Colors.white,
+                    padding: EdgeInsets.zero,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    onSelected: (_) => setState(() => _embeddedPageSize = 'Letter'),
+                  ),
+                  const Spacer(),
+                  FilterChip(
+                    label: const Text('Page Numbers', style: TextStyle(fontSize: 10)),
+                    selected: _embeddedAddPageNumbers,
+                    selectedColor: const Color(0xFFDBEAFE),
+                    checkmarkColor: const Color(0xFF2563EB),
+                    labelStyle: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: _embeddedAddPageNumbers ? const Color(0xFF1D4ED8) : const Color(0xFF64748B),
+                    ),
+                    backgroundColor: Colors.white,
+                    padding: EdgeInsets.zero,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    onSelected: (val) => setState(() => _embeddedAddPageNumbers = val),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
           ElevatedButton.icon(
             key: const Key('hero_scanner_compile_pdf_button'),
             onPressed: _embeddedPages.isEmpty || _isCompilingEmbedded ? null : _compileEmbeddedPdf,
@@ -879,6 +1014,51 @@ class _FileConverterFlowViewState extends State<FileConverterFlowView> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
           ),
+
+          if (_embeddedRecentScans.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Icon(Icons.history_rounded, size: 14, color: Color(0xFF64748B)),
+                const SizedBox(width: 4),
+                Text(
+                  'Recent Scans in Vault (${_embeddedRecentScans.length})',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            SizedBox(
+              height: 38,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _embeddedRecentScans.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (ctx, i) {
+                  final f = _embeddedRecentScans[i];
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0xFFCBD5E1)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.picture_as_pdf_outlined, size: 14, color: Color(0xFFDC2626)),
+                        const SizedBox(width: 6),
+                        Text(
+                          f.uri.pathSegments.last,
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
         ],
       ),
     );

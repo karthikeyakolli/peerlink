@@ -52,6 +52,9 @@ class DocumentScannerService {
     List<ScannedPage>? pages,
     required String documentTitle,
     required Directory destinationDir,
+    String pageSize = 'A4',
+    bool addPageNumbers = false,
+    String? watermarkText,
   }) async {
     final cleanTitle = documentTitle.trim().isEmpty ? 'Scanned_Document' : documentTitle.trim();
     final safeBaseName = cleanTitle.replaceAll(RegExp(r'[^a-zA-Z0-9_\-]+'), '_');
@@ -67,7 +70,13 @@ class DocumentScannerService {
             .toList();
 
     final outFile = _resolveTargetPdfFile(destinationDir, safeBaseName);
-    final pdfBytes = _generateMultiPagePdf(cleanTitle, pageList);
+    final pdfBytes = _generateMultiPagePdf(
+      cleanTitle,
+      pageList,
+      pageSize: pageSize,
+      addPageNumbers: addPageNumbers,
+      watermarkText: watermarkText,
+    );
     outFile.writeAsBytesSync(pdfBytes, flush: true);
 
     return outFile;
@@ -154,7 +163,13 @@ class DocumentScannerService {
     return imageBytes;
   }
 
-  Uint8List _generateMultiPagePdf(String title, List<ScannedPage> pages) {
+  Uint8List _generateMultiPagePdf(
+    String title,
+    List<ScannedPage> pages, {
+    String pageSize = 'A4',
+    bool addPageNumbers = false,
+    String? watermarkText,
+  }) {
     final buffer = BytesBuilder();
     buffer.add(utf8.encode('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n'));
 
@@ -165,6 +180,8 @@ class DocumentScannerService {
     final pagesId = currentObjId++;
 
     final pageObjectIds = <int>[];
+
+    final mediaBox = pageSize == 'Letter' ? '[0 0 612 792]' : '[0 0 595 842]';
 
     for (int p = 0; p < pages.length; p++) {
       final page = pages[p];
@@ -179,13 +196,26 @@ class DocumentScannerService {
       pageStream.writeln('(${_escapePdf(title)} - Page ${p + 1}) Tj');
       pageStream.writeln('0 -30 Td');
       pageStream.writeln('(${_escapePdf(page.file.uri.pathSegments.isNotEmpty ? page.file.uri.pathSegments.last : 'scan_${p + 1}')} [${page.filter.displayName}]) Tj');
+      
+      if (addPageNumbers) {
+        pageStream.writeln('0 -700 Td');
+        pageStream.writeln('/F1 10 Tf');
+        pageStream.writeln('(Page ${p + 1} of ${pages.length}) Tj');
+      }
+
+      if (watermarkText != null && watermarkText.trim().isNotEmpty) {
+        pageStream.writeln('100 400 Td');
+        pageStream.writeln('/F1 28 Tf');
+        pageStream.writeln('(${_escapePdf(watermarkText.trim())}) Tj');
+      }
+
       pageStream.writeln('ET');
 
       final streamBytes = utf8.encode(pageStream.toString());
 
       final rotateClause = page.rotationDegrees > 0 ? '/Rotate ${page.rotationDegrees} ' : '';
       objects[pageId] =
-          '<< /Type /Page /Parent $pagesId 0 R /MediaBox [0 0 595 842] $rotateClause/Contents $contentId 0 R /Resources << /Font << /F1 5 0 R >> >> >>';
+          '<< /Type /Page /Parent $pagesId 0 R /MediaBox $mediaBox $rotateClause/Contents $contentId 0 R /Resources << /Font << /F1 5 0 R >> >> >>';
       objects[contentId] = '<< /Length ${streamBytes.length} >>\nstream\n${pageStream.toString()}endstream';
     }
 
@@ -238,5 +268,49 @@ class DocumentScannerService {
 
   String _escapePdf(String text) {
     return text.replaceAll(r'\', r'\\').replaceAll('(', r'\(').replaceAll(')', r'\)');
+  }
+
+  /// Returns recently scanned PDF documents saved in the vault directory.
+  List<File> getRecentScans(Directory dir) {
+    if (!dir.existsSync()) return [];
+    try {
+      final files = dir
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.toLowerCase().endsWith('.pdf'))
+          .toList();
+      files.sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+      return files;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Calculates text metrics from OCR output.
+  Map<String, dynamic> getOcrStats(String ocrText) {
+    if (ocrText.trim().isEmpty) {
+      return {
+        'words': 0,
+        'lines': 0,
+        'characters': 0,
+        'wordCount': 0,
+        'lineCount': 0,
+        'charCount': 0,
+        'readingSeconds': 0,
+      };
+    }
+    final words = ocrText.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+    final lines = ocrText.split('\n').length;
+    final chars = ocrText.length;
+    final estimatedReadingSeconds = (words / 3.3).round(); // ~200 wpm
+    return {
+      'words': words,
+      'lines': lines,
+      'characters': chars,
+      'wordCount': words,
+      'lineCount': lines,
+      'charCount': chars,
+      'readingSeconds': estimatedReadingSeconds,
+    };
   }
 }

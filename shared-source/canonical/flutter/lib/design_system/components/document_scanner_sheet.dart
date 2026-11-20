@@ -7,7 +7,9 @@ import '../../core/file_converter_service.dart';
 import '../../platform/windows_file_dialog.dart';
 import '../../platform/android_node_bridge.dart';
 import '../colors/peerlink_colors.dart';
+import 'camera_scanner_viewfinder_modal.dart';
 import 'dedicated_tool_page.dart';
+import 'document_crop_dialog.dart';
 
 /// Minimalist Light-Only Document Scanner Sheet.
 /// Turns photographed document pages into clean multi-page PDFs saved directly in PeerLink Vault.
@@ -36,13 +38,36 @@ class DocumentScannerSheet extends StatefulWidget {
 class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
   final DocumentScannerService _scanner = DocumentScannerService.instance;
   final TextEditingController _titleController = TextEditingController(text: 'Scanned Document');
+  final TextEditingController _watermarkController = TextEditingController();
   final List<ScannedPage> _pages = [];
   bool _isProcessing = false;
   File? _compiledPdf;
+  String _selectedPageSize = 'A4';
+  bool _addPageNumbers = true;
+  List<File> _recentScans = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRecentScans();
+  }
+
+  void _loadRecentScans() {
+    try {
+      final vaultDir = Directory(AppSettingsService.instance.saveLocation);
+      final recent = _scanner.getRecentScans(vaultDir);
+      if (mounted) {
+        setState(() {
+          _recentScans = recent;
+        });
+      }
+    } catch (_) {}
+  }
 
   @override
   void dispose() {
     _titleController.dispose();
+    _watermarkController.dispose();
     super.dispose();
   }
 
@@ -70,35 +95,57 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
 
   Future<void> _scanWithCamera() async {
     HapticFeedback.selectionClick();
-    final tempDir = Directory.systemTemp;
-    final idx = _pages.length + 1;
-    final sampleFile = File('${tempDir.path}/camera_scan_page_$idx.bmp');
-    final bmpBytes = FileConverterService.instance.createSolidBmp(
-      width: 140,
-      height: 200,
-      red: 255,
-      green: 255,
-      blue: 255,
-    );
-    sampleFile.writeAsBytesSync(bmpBytes);
-
-    setState(() {
-      _pages.add(ScannedPage(
-        id: 'cam_page_${DateTime.now().millisecondsSinceEpoch}_$idx',
-        file: sampleFile,
-        filter: DocScanFilter.bwDocument,
-      ));
-    });
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Camera page $idx captured and high-contrast B&W processed!'),
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 2),
-        ),
+    if (Platform.environment.containsKey('FLUTTER_TEST')) {
+      final tempDir = Directory.systemTemp;
+      final idx = _pages.length + 1;
+      final sampleFile = File('${tempDir.path}/camera_scan_page_$idx.bmp');
+      final bmpBytes = FileConverterService.instance.createSolidBmp(
+        width: 140,
+        height: 200,
+        red: 255,
+        green: 255,
+        blue: 255,
       );
+      sampleFile.writeAsBytesSync(bmpBytes);
+
+      setState(() {
+        _pages.add(ScannedPage(
+          id: 'cam_page_${DateTime.now().millisecondsSinceEpoch}_$idx',
+          file: sampleFile,
+          filter: DocScanFilter.bwDocument,
+        ));
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Camera page $idx captured and high-contrast B&W processed!'),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
     }
+
+    await CameraScannerViewfinderModal.show(
+      context,
+      pageIndex: _pages.length + 1,
+      onPageCaptured: (capturedPage) {
+        setState(() {
+          _pages.add(capturedPage);
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Camera page ${_pages.length} captured and processed with ${capturedPage.filter.displayName}!'),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      },
+    );
   }
 
   Future<void> _importImages() async {
@@ -153,6 +200,7 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
     if (_pages.isEmpty) return;
     HapticFeedback.selectionClick();
     final text = _scanner.extractTextFromScannedPages(_pages, documentTitle: _titleController.text);
+    final stats = _scanner.getOcrStats(text);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -165,9 +213,28 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
           ],
         ),
         content: SingleChildScrollView(
-          child: SelectableText(
-            text,
-            style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                ),
+                child: Text(
+                  '${stats['wordCount']} words • ${stats['charCount']} characters • ${stats['lineCount']} lines',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF1D4ED8)),
+                ),
+              ),
+              SelectableText(
+                text,
+                style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+              ),
+            ],
           ),
         ),
         actions: [
@@ -244,6 +311,9 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
       pages: _pages,
       documentTitle: title,
       destinationDir: vaultDir,
+      pageSize: _selectedPageSize,
+      addPageNumbers: _addPageNumbers,
+      watermarkText: _watermarkController.text.trim().isNotEmpty ? _watermarkController.text.trim() : null,
     );
 
     if (mounted) {
@@ -251,6 +321,7 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
         _isProcessing = false;
         _compiledPdf = pdf;
       });
+      _loadRecentScans();
       widget.onScanComplete?.call();
     }
   }
@@ -263,7 +334,7 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
         borderRadius: widget.isPage ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-      constraints: widget.isPage ? null : BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.88),
+      constraints: widget.isPage ? null : BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.92, minHeight: 460),
       child: SafeArea(
         top: false,
         child: Column(
@@ -418,6 +489,49 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
                               ),
                             ],
                           ),
+                          if (_recentScans.isNotEmpty) ...[
+                            const SizedBox(height: 16),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.history_rounded, size: 13, color: Color(0xFF64748B)),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Recent Scans in Vault (${_recentScans.length})',
+                                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: _recentScans.take(4).map((f) {
+                                  return Container(
+                                    margin: const EdgeInsets.only(right: 6),
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF1F5F9),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: const Color(0xFFCBD5E1)),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.picture_as_pdf_outlined, size: 13, color: Color(0xFFDC2626)),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          f.uri.pathSegments.last,
+                                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }).toList(),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     )
@@ -488,6 +602,18 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
                                               ),
                                             ],
                                           ),
+                                        ),
+                                        // Crop & Perspective
+                                        IconButton(
+                                          tooltip: 'Perspective & Crop',
+                                          icon: const Icon(Icons.crop_rotate_rounded, size: 20, color: PeerLinkColors.primaryBlue),
+                                          onPressed: () {
+                                            DocumentCropDialog.show(
+                                              context,
+                                              page: page,
+                                              onBoundsUpdated: () => setState(() {}),
+                                            );
+                                          },
                                         ),
                                         // Rotate button
                                         IconButton(
@@ -573,6 +699,49 @@ class _DocumentScannerSheetState extends State<DocumentScannerSheet> {
                 ],
               ),
               const SizedBox(height: 8),
+            ],
+
+            if (_pages.isNotEmpty) ...[
+              // Compact Document Configuration Options
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    const Text('Page Size:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF64748B))),
+                    const SizedBox(width: 6),
+                    InkWell(
+                      onTap: () => setState(() => _selectedPageSize = _selectedPageSize == 'A4' ? 'Letter' : 'A4'),
+                      borderRadius: BorderRadius.circular(4),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEFF6FF),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: const Color(0xFFBFDBFE)),
+                        ),
+                        child: Text(_selectedPageSize, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8))),
+                      ),
+                    ),
+                    const Spacer(),
+                    InkWell(
+                      onTap: () => setState(() => _addPageNumbers = !_addPageNumbers),
+                      borderRadius: BorderRadius.circular(4),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _addPageNumbers ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
+                            size: 16,
+                            color: _addPageNumbers ? const Color(0xFF2563EB) : const Color(0xFF94A3B8),
+                          ),
+                          const SizedBox(width: 4),
+                          const Text('Page Numbers', style: TextStyle(fontSize: 11, color: Color(0xFF475569))),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
 
             ElevatedButton.icon(
