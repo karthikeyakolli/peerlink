@@ -268,6 +268,7 @@ class _FileManagerHomeScreenState extends State<FileManagerHomeScreen> {
 
   Widget _buildModeButton(int index, IconData icon, String tooltip, String keyName) {
     final isSelected = _selectedMode == index;
+    final disableAnimations = MediaQuery.disableAnimationsOf(context);
     return Tooltip(
       message: tooltip,
       child: InkWell(
@@ -276,17 +277,28 @@ class _FileManagerHomeScreenState extends State<FileManagerHomeScreen> {
           HapticFeedback.selectionClick();
           setState(() => _selectedMode = index);
         },
-        borderRadius: BorderRadius.circular(7),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+        borderRadius: BorderRadius.circular(8),
+        child: AnimatedContainer(
+          duration: disableAnimations ? Duration.zero : const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
           decoration: BoxDecoration(
             color: isSelected ? Colors.white : Colors.transparent,
-            borderRadius: BorderRadius.circular(7),
+            borderRadius: BorderRadius.circular(8),
             border: isSelected ? Border.all(color: const Color(0xFFCBD5E1), width: 1) : null,
+            boxShadow: isSelected
+                ? const [
+                    BoxShadow(
+                      color: Color(0x0C000000),
+                      blurRadius: 2,
+                      offset: Offset(0, 1),
+                    ),
+                  ]
+                : null,
           ),
           child: Icon(
             icon,
-            size: 15,
+            size: 16,
             color: isSelected ? const Color(0xFF2563EB) : const Color(0xFF64748B),
           ),
         ),

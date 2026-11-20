@@ -383,6 +383,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           final quarantinedCount = QuarantineService.instance.count;
 
           return ListView(
+            physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
             children: [
               // 1. Zero-Trust Invariant Enforcement Header

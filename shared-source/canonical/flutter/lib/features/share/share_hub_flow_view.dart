@@ -152,6 +152,7 @@ class _ShareHubFlowViewState extends State<ShareHubFlowView> {
   @override
   Widget build(BuildContext context) {
     return ListView(
+      physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
       padding: const EdgeInsets.all(16),
       children: [
         // 1. Primary Elevated Send & Receive Radar Hero

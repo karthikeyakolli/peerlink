@@ -52,7 +52,7 @@ class _InteractiveGlassCardState extends State<InteractiveGlassCard>
       vsync: this,
       duration: const Duration(milliseconds: 100),
     );
-    _scaleAnimation = Tween<double>(begin: 1.0, end: 0.98).animate(
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 0.99).animate(
       CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic),
     );
   }
@@ -115,6 +115,19 @@ class _InteractiveGlassCardState extends State<InteractiveGlassCard>
             setState(() => _isPressed = false);
             _animController.reverse();
           },
+          child: cardContent,
+        ),
+      );
+    }
+
+    final disableAnimations = MediaQuery.disableAnimationsOf(context);
+
+    if (disableAnimations) {
+      return Container(
+        margin: widget.margin,
+        child: MouseRegion(
+          onEnter: (_) => setState(() => _isHovered = true),
+          onExit: (_) => setState(() => _isHovered = false),
           child: cardContent,
         ),
       );

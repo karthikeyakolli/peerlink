@@ -649,6 +649,7 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
 
     final firstVideo = videos.first;
     return ListView(
+      physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
       padding: const EdgeInsets.all(12),
       children: [
         // UC Browser-Inspired Video Theater Player Hero Card
@@ -851,27 +852,80 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
                 alignment: Alignment.center,
                 children: [
                   const Icon(Icons.movie_creation_outlined, size: 64, color: Colors.white12),
-                  Container(
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2563EB),
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(color: const Color(0xFF2563EB).withValues(alpha: 0.5), blurRadius: 16),
-                      ],
+                  Positioned.fill(
+                    child: Center(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          IconButton(
+                            tooltip: 'Rewind 10 seconds',
+                            icon: const Icon(Icons.replay_10_rounded, color: Colors.white70, size: 28),
+                            onPressed: () {
+                              HapticFeedback.selectionClick();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Rewind 10s'),
+                                  duration: Duration(milliseconds: 600),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            },
+                          ),
+                          const SizedBox(width: 14),
+                          Container(
+                            width: 56,
+                            height: 56,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF2563EB),
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(color: const Color(0xFF2563EB).withValues(alpha: 0.5), blurRadius: 16),
+                              ],
+                            ),
+                            child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 36),
+                          ),
+                          const SizedBox(width: 14),
+                          IconButton(
+                            tooltip: 'Forward 10 seconds',
+                            icon: const Icon(Icons.forward_10_rounded, color: Colors.white70, size: 28),
+                            onPressed: () {
+                              HapticFeedback.selectionClick();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Forward 10s'),
+                                  duration: Duration(milliseconds: 600),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
                     ),
-                    child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 36),
                   ),
                   Positioned(
-                    bottom: 8,
+                    bottom: 24,
+                    left: 12,
+                    right: 12,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(2),
+                      child: const LinearProgressIndicator(
+                        value: 0.35,
+                        minHeight: 3,
+                        backgroundColor: Colors.white24,
+                        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF2563EB)),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 6,
                     left: 12,
                     right: 12,
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text('↕ Left: Brightness  ↕ Right: Volume  ↔ Seek 10s', style: TextStyle(color: Colors.white60, fontSize: 10)),
-                        Text(video.formattedSize, style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold)),
+                        Text('00:42 / 02:15 • ${video.formattedSize}', style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold)),
                       ],
                     ),
                   ),
