@@ -161,8 +161,8 @@ class _FileManagerHomeScreenState extends State<FileManagerHomeScreen> {
         children: [
           _buildSpaceContextHeader(),
           Expanded(child: _buildFlowContent()),
-          if (_selectedMode == 0) ...[
-            const StashTrayDock(),
+          if (widget.showBottomNav) ...[
+            if (_selectedMode == 0) const StashTrayDock(),
             const FloatingAudioMiniPlayer(),
           ],
         ],

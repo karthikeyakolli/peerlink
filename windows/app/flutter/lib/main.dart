@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'design_system/theme/peerlink_theme.dart';
 import 'design_system/components/active_transfer_pill.dart';
 import 'design_system/components/contextual_share_sheet.dart';
+import 'design_system/components/floating_audio_mini_player.dart';
 import 'design_system/components/persistent_staged_tray.dart';
 import 'platform/android_node_bridge.dart';
 import 'platform/desktop_shell_bridge.dart';
@@ -285,6 +286,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                     child: Column(
                       children: [
                         Expanded(child: _buildAnimatedBody(context)),
+                        const FloatingAudioMiniPlayer(),
                         ActiveTransferPill(
                           onOpenActivity: () => _navigateTo(2),
                         ),
@@ -308,6 +310,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
             body: Column(
               children: [
                 Expanded(child: _buildAnimatedBody(context)),
+                const FloatingAudioMiniPlayer(),
                 ActiveTransferPill(
                   onOpenActivity: () => _navigateTo(2),
                 ),

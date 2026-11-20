@@ -257,9 +257,6 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
                       ? _buildEmptyState()
                       : _buildTabContent(),
         ),
-
-        // Sticky Audio Mini-Player
-        const FloatingAudioMiniPlayer(),
       ],
     );
   }

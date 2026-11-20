@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/ephemeral_burner_share_service.dart';
+import '../../core/file_staging_service.dart';
 import '../../core/hotspot_tether_qr_service.dart';
 import '../../core/network_diagnostic_service.dart';
 import '../../core/received_files_service.dart';
@@ -157,6 +158,9 @@ class _ShareHubFlowViewState extends State<ShareHubFlowView> {
         _buildP2PRadarCard(),
         const SizedBox(height: 14),
 
+        // 1b. Interactive Staged Files Beam Tray (Appears dynamically when files are staged)
+        _buildStagedFilesTray(),
+
         // 2. Resumable Chunk Bitmask Ledger (Active Transfers)
         _buildResumableTransfersCard(),
 
@@ -177,6 +181,142 @@ class _ShareHubFlowViewState extends State<ShareHubFlowView> {
         // 5. Expandable Network Diagnostics & Transfer Governors Accordion
         _buildNetworkAndEngineSettingsAccordion(),
       ],
+    );
+  }
+
+  Widget _buildStagedFilesTray() {
+    return StreamBuilder<List<StagedFileItem>>(
+      stream: FileStagingService.instance.stagedFilesStream,
+      initialData: FileStagingService.instance.stagedFiles,
+      builder: (context, snapshot) {
+        final staged = snapshot.data ?? [];
+        if (staged.isEmpty) return const SizedBox.shrink();
+
+        final totalBytes = FileStagingService.instance.formattedTotalBytes;
+        return Container(
+          key: const Key('share_hub_staged_files_tray'),
+          margin: const EdgeInsets.only(bottom: 14),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF0FDF4),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFBBF7D0)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFDCFCE7),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.outbox_rounded, color: Color(0xFF16A34A), size: 18),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${staged.length} Staged Item${staged.length == 1 ? '' : 's'} ($totalBytes)',
+                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF14532D)),
+                        ),
+                        const Text(
+                          'Ready for direct P2P Beam',
+                          style: TextStyle(fontSize: 11, color: Color(0xFF15803D)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  TextButton(
+                    key: const Key('share_hub_clear_staged_button'),
+                    onPressed: () {
+                      FileStagingService.instance.clear();
+                    },
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFFDC2626),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: const Text('Clear', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 32,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: staged.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 6),
+                  itemBuilder: (ctx, idx) {
+                    final item = staged[idx];
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFF86EFAC)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            item.isDirectory ? Icons.folder_rounded : Icons.description_outlined,
+                            size: 14,
+                            color: const Color(0xFF16A34A),
+                          ),
+                          const SizedBox(width: 4),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 120),
+                            child: Text(
+                              item.name,
+                              style: const TextStyle(fontSize: 11, color: Color(0xFF0F172A), fontWeight: FontWeight.w500),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          GestureDetector(
+                            onTap: () => FileStagingService.instance.removePath(item.path),
+                            child: const Icon(Icons.close_rounded, size: 14, color: Color(0xFF64748B)),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  key: const Key('share_hub_beam_staged_button'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF16A34A),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  icon: const Icon(Icons.bolt_rounded, size: 16),
+                  label: Text('Beam ${staged.length} File${staged.length == 1 ? '' : 's'} Now', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                  onPressed: () {
+                    HapticFeedback.selectionClick();
+                    ContextualShareSheet.show(
+                      context,
+                      initialPaths: staged.map((f) => f.path).toList(),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -559,7 +699,7 @@ class _ShareHubFlowViewState extends State<ShareHubFlowView> {
                   label: const Text('Receive Radar', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
                   onPressed: () {
                     HapticFeedback.selectionClick();
-                    ContextualShareSheet.show(context);
+                    ContextualShareSheet.showReceiveRadar(context);
                   },
                 ),
               ),

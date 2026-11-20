@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:crypto/crypto.dart';
 import 'package:peerlink/core/app_settings_service.dart';
+import 'package:peerlink/core/file_staging_service.dart';
 import 'package:peerlink/core/received_files_service.dart';
 import 'package:peerlink/features/files/file_manager_home_screen.dart';
 import 'package:peerlink/features/media/media_hub_flow_view.dart';
@@ -120,6 +121,70 @@ void main() {
       expect(find.text('Bi-Directional Web Portal 2.0'), findsOneWidget);
       expect(find.text('One-Time Ephemeral Burner Vault Share'), findsOneWidget);
       expect(find.byKey(const Key('share_hub_create_burner_button')), findsOneWidget);
+    });
+
+    testWidgets('Share Hub dynamically shows staged files tray and handles beam & clear', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      FileStagingService.instance.clear();
+      FileStagingService.instance.addPaths([sampleTxt.path, sampleImg.path]);
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: FileManagerHomeScreen(),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // Tap Mode 2 (Share)
+      await tester.tap(find.byKey(const Key('appbar_mode_share')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      // Verify Staged Files Tray is visible with count and beam button
+      expect(find.byKey(const Key('share_hub_staged_files_tray')), findsOneWidget);
+      expect(find.text('2 Staged Items'), findsNothing); // format is '2 Staged Items (X KB)'
+      expect(find.textContaining('2 Staged Items'), findsOneWidget);
+      expect(find.byKey(const Key('share_hub_beam_staged_button')), findsOneWidget);
+      expect(find.byKey(const Key('share_hub_clear_staged_button')), findsOneWidget);
+
+      // Tap Clear
+      await tester.tap(find.byKey(const Key('share_hub_clear_staged_button')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // Staged Files Tray should now be gone
+      expect(find.byKey(const Key('share_hub_staged_files_tray')), findsNothing);
+      expect(FileStagingService.instance.isEmpty, isTrue);
+    });
+
+    testWidgets('Share Hub Receive Radar button opens Waiting to Receive Files sheet', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: FileManagerHomeScreen(),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // Tap Mode 2 (Share)
+      await tester.tap(find.byKey(const Key('appbar_mode_share')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      // Tap Receive Radar button
+      await tester.tap(find.byKey(const Key('share_hub_receive_button')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      // Verify radar bottom sheet appears
+      expect(find.text('Waiting to Receive Files'), findsOneWidget);
+      expect(find.textContaining('Visible to nearby PeerLink devices'), findsOneWidget);
     });
 
     testWidgets('Tapping Mode 3 switches to dedicated File Conversions & Studio Flow', (tester) async {

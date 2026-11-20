@@ -3266,48 +3266,37 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
                 ],
               ),
               const SizedBox(height: 12),
+              // Operation Semantics Action Bar (SEND, ACCESS, STAGE, OPEN)
               Row(
                 children: [
-                  if (!item.isDirectory) ...[
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        icon: const Icon(Icons.open_in_new_rounded, size: 16),
-                        label: const Text('Open'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          _service.openFileWithDefaultApp(item.path);
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        icon: const Icon(Icons.share_rounded, size: 16),
-                        label: const Text('Share'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          _service.shareFile(item.path);
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                  ],
                   Expanded(
                     child: FilledButton.icon(
-                      icon: const Icon(Icons.bolt_rounded, size: 16),
-                      label: const Text('Stage'),
+                      key: const Key('file_action_send_button'),
+                      icon: const Icon(Icons.send_rounded, size: 15),
+                      label: const Text('Send Once', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                       style: FilledButton.styleFrom(
                         backgroundColor: const Color(0xFF2563EB),
+                        foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        ContextualShareSheet.show(context, initialPaths: [item.path]);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const Key('file_action_stage_button'),
+                      icon: const Icon(Icons.bolt_rounded, size: 15, color: Color(0xFFD97706)),
+                      label: const Text('Stage Beam', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFB45309))),
+                      style: OutlinedButton.styleFrom(
+                        backgroundColor: const Color(0xFFFFFBEB),
+                        side: const BorderSide(color: Color(0xFFFDE68A)),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
                       onPressed: () {
                         Navigator.pop(ctx);
@@ -3326,6 +3315,22 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
                       },
                     ),
                   ),
+                  if (!item.isDirectory) ...[
+                    const SizedBox(width: 8),
+                    OutlinedButton(
+                      key: const Key('file_action_open_button'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        side: const BorderSide(color: Color(0xFFCBD5E1)),
+                      ),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _service.openFileWithDefaultApp(item.path);
+                      },
+                      child: const Icon(Icons.open_in_new_rounded, size: 16, color: Color(0xFF334155)),
+                    ),
+                  ],
                 ],
               ),
             ],

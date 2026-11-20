@@ -49,6 +49,99 @@ class ContextualShareSheet extends StatefulWidget {
     );
   }
 
+  static void showReceiveRadar(BuildContext context) {
+    final devices = DeviceTrustService.instance.devices;
+    if (PlatformCapabilities.isAndroid) {
+      AndroidNodeBridge.instance.refreshDiscovery();
+    }
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => SizedBox(
+        height: MediaQuery.of(ctx).size.height * 0.72,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Column(
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFCBD5E1),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Waiting to Receive Files',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF0F172A),
+                ),
+              ),
+              const Text(
+                'Visible to nearby PeerLink devices on Wi-Fi',
+                style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: StreamBuilder<List<DiscoveredPeer>>(
+                  stream: AndroidNodeBridge.instance.discoveredPeersStream,
+                  initialData: AndroidNodeBridge.instance.activeDiscoveredPeers,
+                  builder: (context, snapshot) {
+                    final livePeers = snapshot.data ?? [];
+                    final peerInfos = PlatformCapabilities.isAndroid
+                        ? livePeers
+                            .map((p) => RadarPeerInfo(
+                                  id: p.peerId,
+                                  name: p.name.isNotEmpty ? p.name : p.peerId,
+                                  deviceType: p.technology.contains('WIFI_DIRECT') ? 'phone' : 'desktop',
+                                  isTrusted: DeviceTrustService.instance.devices.any((d) => d.id == p.peerId),
+                                  ip: p.host,
+                                  technology: p.technology,
+                                  routeCount: p.routes.isNotEmpty ? p.routes.length : 1,
+                                ))
+                            .toList()
+                        : devices
+                            .map((d) => RadarPeerInfo(
+                                  id: d.id,
+                                  name: d.name,
+                                  deviceType: d.deviceType,
+                                  isTrusted: d.trustLevel == DeviceTrustLevel.trustedPeer,
+                                  ip: '127.0.0.1',
+                                  technology: 'Paired',
+                                  routeCount: 1,
+                                ))
+                            .toList();
+
+                    return RadarSonarView(
+                      localDeviceName: PlatformCapabilities.isAndroid ? 'This Phone' : 'This PC',
+                      discoveredPeers: peerInfos,
+                      onPeerSelected: (_) {},
+                      onQrScanPressed: () {
+                        QrPairingSheet.show(
+                          context,
+                          deviceName: PlatformCapabilities.isAndroid ? 'Android Peer' : 'Desktop PC',
+                          peerId: NodeIpcClient.instance.currentState.peerId ?? 'peer_local',
+                          fingerprint: DeviceTrustService.instance.getLocalFingerprint('peer_local'),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   State<ContextualShareSheet> createState() => _ContextualShareSheetState();
 }
@@ -247,93 +340,7 @@ class _ContextualShareSheetState extends State<ContextualShareSheet> {
 
   void _openReceiveRadar(BuildContext parentContext) {
     Navigator.of(context).pop();
-    final devices = DeviceTrustService.instance.devices;
-    showModalBottomSheet(
-      context: parentContext,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) => SizedBox(
-        height: MediaQuery.of(ctx).size.height * 0.72,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Column(
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFCBD5E1),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'Waiting to Receive Files',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF0F172A),
-                ),
-              ),
-              const Text(
-                'Visible to nearby PeerLink devices on Wi-Fi',
-                style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: StreamBuilder<List<DiscoveredPeer>>(
-                  stream: AndroidNodeBridge.instance.discoveredPeersStream,
-                  initialData: AndroidNodeBridge.instance.activeDiscoveredPeers,
-                  builder: (context, snapshot) {
-                    final livePeers = snapshot.data ?? [];
-                    final peerInfos = Platform.isAndroid
-                        ? livePeers
-                            .map((p) => RadarPeerInfo(
-                                  id: p.peerId,
-                                  name: p.name.isNotEmpty ? p.name : p.peerId,
-                                  deviceType: p.technology.contains('WIFI_DIRECT') ? 'phone' : 'desktop',
-                                  isTrusted: DeviceTrustService.instance.devices.any((d) => d.id == p.peerId),
-                                  ip: p.host,
-                                  technology: p.technology,
-                                  routeCount: p.routes.isNotEmpty ? p.routes.length : 1,
-                                ))
-                            .toList()
-                        : devices
-                            .map((d) => RadarPeerInfo(
-                                  id: d.id,
-                                  name: d.name,
-                                  deviceType: d.deviceType,
-                                  isTrusted: d.trustLevel == DeviceTrustLevel.trustedPeer,
-                                  ip: '127.0.0.1',
-                                  technology: 'Paired',
-                                  routeCount: 1,
-                                ))
-                            .toList();
-
-                    return RadarSonarView(
-                      localDeviceName: Platform.isAndroid ? 'This Phone' : 'This PC',
-                      discoveredPeers: peerInfos,
-                      onPeerSelected: (_) {},
-                      onQrScanPressed: () {
-                        QrPairingSheet.show(
-                          context,
-                          deviceName: Platform.isAndroid ? 'Android Peer' : 'Desktop PC',
-                          peerId: NodeIpcClient.instance.currentState.peerId ?? 'peer_local',
-                          fingerprint: DeviceTrustService.instance.getLocalFingerprint('peer_local'),
-                        );
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+    ContextualShareSheet.showReceiveRadar(parentContext);
   }
 
   @override
