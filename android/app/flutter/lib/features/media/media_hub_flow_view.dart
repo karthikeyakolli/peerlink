@@ -645,144 +645,291 @@ class _MediaHubFlowViewState extends State<MediaHubFlowView> {
 
   Widget _buildVideosList() {
     final videos = _filteredFiles;
-    return ListView.builder(
+    if (videos.isEmpty) return _buildEmptyState();
+
+    final firstVideo = videos.first;
+    return ListView(
       padding: const EdgeInsets.all(12),
-      itemCount: videos.length,
-      itemBuilder: (context, index) {
-        final item = videos[index];
-        return Container(
-          margin: const EdgeInsets.only(bottom: 10),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFE5E7EB)),
+      children: [
+        // UC Browser-Inspired Video Theater Player Hero Card
+        _buildUCVideoTheaterHero(firstVideo),
+        const SizedBox(height: 14),
+
+        // Video Library List
+        ...List.generate(videos.length, (index) {
+          final item = videos[index];
+          return Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE5E7EB)),
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: () => _openPreview(item, playlist: videos, index: index),
+              onSecondaryTap: () {
+                if (Platform.isWindows) {
+                  _vaultService.revealInFolder(item.path);
+                }
+              },
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 56,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEFF6FF),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Center(
+                        child: Icon(Icons.play_circle_fill_rounded, color: Color(0xFF2563EB), size: 30),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item.name,
+                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF0F172A)),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF1F5F9),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  item.extension.toUpperCase(),
+                                  style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Color(0xFF475569)),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                item.formattedSize,
+                                style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.content_cut_rounded, size: 18, color: Color(0xFF2563EB)),
+                      tooltip: 'Trim Clip & Extract Soundtrack',
+                      onPressed: () => _openVideoTrimmer(item),
+                    ),
+                    PopupMenuButton<String>(
+                      key: Key('video_more_menu_$index'),
+                      icon: const Icon(Icons.more_vert_rounded, size: 18, color: Color(0xFF64748B)),
+                      tooltip: 'More Actions',
+                      padding: EdgeInsets.zero,
+                      onSelected: (val) {
+                        if (val == 'subtitles') _openSubtitleSync(item.name);
+                        if (val == 'virus') _openVirusScanner(item.path);
+                        if (val == 'explorer') _vaultService.revealInFolder(item.path);
+                        if (val == 'open_app') _vaultService.openFileWithDefaultApp(item.path);
+                      },
+                      itemBuilder: (context) => [
+                        const PopupMenuItem(
+                          value: 'subtitles',
+                          child: Row(
+                            children: [
+                              Icon(Icons.subtitles_outlined, size: 16, color: Color(0xFF2563EB)),
+                              SizedBox(width: 8),
+                              Text('Subtitles & Sync', style: TextStyle(fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                        PopupMenuItem(
+                          key: Key('video_virus_scan_$index'),
+                          value: 'virus',
+                          child: const Row(
+                            children: [
+                              Icon(Icons.security_rounded, size: 16, color: Color(0xFF15803D)),
+                              SizedBox(width: 8),
+                              Text('Security Audit', style: TextStyle(fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                        if (Platform.isWindows)
+                          PopupMenuItem(
+                            key: Key('video_reveal_explorer_$index'),
+                            value: 'explorer',
+                            child: const Row(
+                              children: [
+                                Icon(Icons.folder_open_rounded, size: 16, color: Color(0xFF475569)),
+                                SizedBox(width: 8),
+                                Text('Reveal in File Explorer', style: TextStyle(fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                        const PopupMenuItem(
+                          value: 'open_app',
+                          child: Row(
+                            children: [
+                              Icon(Icons.open_in_new_rounded, size: 16, color: Color(0xFF475569)),
+                              SizedBox(width: 8),
+                              Text('Open in System App', style: TextStyle(fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  Widget _buildUCVideoTheaterHero(ReceivedFileItem video) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF334155)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // UC Video Top Bar
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2563EB),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Text(
+                    'UC THEATER 4K',
+                    style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    video.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Pop-out Floating Window (PiP)',
+                  icon: const Icon(Icons.picture_in_picture_alt_rounded, size: 18, color: Colors.white),
+                  onPressed: () {
+                    HapticFeedback.selectionClick();
+                    _openPreview(video);
+                  },
+                ),
+              ],
+            ),
           ),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: () => _openPreview(item, playlist: videos, index: index),
-            onSecondaryTap: () {
-              if (Platform.isWindows) {
-                _vaultService.revealInFolder(item.path);
-              }
-            },
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
+          // Viewport Stage
+          InkWell(
+            onTap: () => _openPreview(video),
+            child: Container(
+              height: 160,
+              color: Colors.black,
+              child: Stack(
+                alignment: Alignment.center,
                 children: [
+                  const Icon(Icons.movie_creation_outlined, size: 64, color: Colors.white12),
                   Container(
                     width: 56,
                     height: 56,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFEFF6FF),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Center(
-                      child: Icon(Icons.play_circle_fill_rounded, color: Color(0xFF2563EB), size: 30),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          item.name,
-                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF0F172A)),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF1F5F9),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                item.extension.toUpperCase(),
-                                style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Color(0xFF475569)),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              item.formattedSize,
-                              style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
-                            ),
-                          ],
-                        ),
+                      color: const Color(0xFF2563EB),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(color: const Color(0xFF2563EB).withValues(alpha: 0.5), blurRadius: 16),
                       ],
                     ),
+                    child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 36),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.content_cut_rounded, size: 18, color: Color(0xFF2563EB)),
-                    tooltip: 'Trim Clip & Extract Soundtrack',
-                    onPressed: () => _openVideoTrimmer(item),
-                  ),
-                  PopupMenuButton<String>(
-                    key: Key('video_more_menu_$index'),
-                    icon: const Icon(Icons.more_vert_rounded, size: 18, color: Color(0xFF64748B)),
-                    tooltip: 'More Actions',
-                    padding: EdgeInsets.zero,
-                    onSelected: (val) {
-                      if (val == 'subtitles') _openSubtitleSync(item.name);
-                      if (val == 'virus') _openVirusScanner(item.path);
-                      if (val == 'explorer') _vaultService.revealInFolder(item.path);
-                      if (val == 'open_app') _vaultService.openFileWithDefaultApp(item.path);
-                    },
-                    itemBuilder: (context) => [
-                      const PopupMenuItem(
-                        value: 'subtitles',
-                        child: Row(
-                          children: [
-                            Icon(Icons.subtitles_outlined, size: 16, color: Color(0xFF2563EB)),
-                            SizedBox(width: 8),
-                            Text('Subtitles & Sync', style: TextStyle(fontSize: 12)),
-                          ],
-                        ),
-                      ),
-                      PopupMenuItem(
-                        key: Key('video_virus_scan_$index'),
-                        value: 'virus',
-                        child: const Row(
-                          children: [
-                            Icon(Icons.security_rounded, size: 16, color: Color(0xFF15803D)),
-                            SizedBox(width: 8),
-                            Text('Security Audit', style: TextStyle(fontSize: 12)),
-                          ],
-                        ),
-                      ),
-                      if (Platform.isWindows)
-                        PopupMenuItem(
-                          key: Key('video_reveal_explorer_$index'),
-                          value: 'explorer',
-                          child: const Row(
-                            children: [
-                              Icon(Icons.folder_open_rounded, size: 16, color: Color(0xFF475569)),
-                              SizedBox(width: 8),
-                              Text('Reveal in File Explorer', style: TextStyle(fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                      const PopupMenuItem(
-                        value: 'open_app',
-                        child: Row(
-                          children: [
-                            Icon(Icons.open_in_new_rounded, size: 16, color: Color(0xFF475569)),
-                            SizedBox(width: 8),
-                            Text('Open in System App', style: TextStyle(fontSize: 12)),
-                          ],
-                        ),
-                      ),
-                    ],
+                  Positioned(
+                    bottom: 8,
+                    left: 12,
+                    right: 12,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('↕ Left: Brightness  ↕ Right: Volume  ↔ Seek 10s', style: TextStyle(color: Colors.white60, fontSize: 10)),
+                        Text(video.formattedSize, style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
           ),
-        );
-      },
+          // UC Browser Bottom Quick Controls
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: const BoxDecoration(
+              color: Color(0xFF1E293B),
+              borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
+            ),
+            child: Row(
+              children: [
+                InkWell(
+                  onTap: () => _setPlaybackSpeed(_playbackSpeed == 2.0 ? 1.0 : _playbackSpeed + 0.25),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF334155),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text('${_playbackSpeed}x Speed', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                InkWell(
+                  onTap: () => _openPreview(video),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF334155),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.aspect_ratio_rounded, size: 14, color: Colors.white),
+                        SizedBox(width: 4),
+                        Text('Aspect Ratio', style: TextStyle(color: Colors.white, fontSize: 11)),
+                      ],
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: () => _openVideoTrimmer(video),
+                  icon: const Icon(Icons.content_cut_rounded, size: 14, color: Color(0xFF60A5FA)),
+                  label: const Text('Trim / Audio', style: TextStyle(color: Color(0xFF60A5FA), fontSize: 11, fontWeight: FontWeight.w600)),
+                  style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 6)),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 

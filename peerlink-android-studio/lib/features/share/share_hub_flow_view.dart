@@ -660,7 +660,12 @@ class _ShareHubFlowViewState extends State<ShareHubFlowView> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Direct P2P Beam & Discovery', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                    Row(
+                      children: [
+                        Text('PeerBeam: ', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: Color(0xFF2563EB))),
+                        Text('Direct P2P Beam & Discovery', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Color(0xFF0F172A))),
+                      ],
+                    ),
                     Text('Zero-config discovery over local Wi-Fi & Hotspot', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
                   ],
                 ),
@@ -678,8 +683,8 @@ class _ShareHubFlowViewState extends State<ShareHubFlowView> {
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  icon: const Icon(Icons.send_rounded, size: 16),
-                  label: const Text('Send Files', style: TextStyle(fontWeight: FontWeight.bold)),
+                  icon: const Icon(Icons.bolt_rounded, size: 16),
+                  label: const Text('Send Beam', style: TextStyle(fontWeight: FontWeight.bold)),
                   onPressed: () {
                     HapticFeedback.selectionClick();
                     ContextualShareSheet.show(context);

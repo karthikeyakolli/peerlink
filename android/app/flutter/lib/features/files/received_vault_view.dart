@@ -945,8 +945,8 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
               if (_currentSubPath.isEmpty)
                 _buildXiaomiCategoryGrid(theme, isDark),
 
-              // 5. Recent Files Horizontal Carousel
-              if (_currentSubPath.isEmpty)
+              // 5. Recent Files Horizontal Carousel (streamlined: only on default root when no category filter is active)
+              if (_currentSubPath.isEmpty && _selectedCategory == null && _files.length > 3)
                 _buildRecentFilesStrip(theme, isDark),
 
               // 6. Section Header for Files & Folders
@@ -1538,11 +1538,11 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
     final double devUsedRatio = devTotal > 0 ? (devUsed / devTotal).clamp(0.05, 0.95) : 0.5;
 
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 6),
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: const Color(0xFFE5E7EB),
           width: 1.0,
@@ -1553,11 +1553,11 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
         children: [
           // Minimalist Xiaomi Storage Scope Switcher
           Container(
-            margin: const EdgeInsets.only(bottom: 12),
-            padding: const EdgeInsets.all(3),
+            margin: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.all(2),
             decoration: BoxDecoration(
               color: const Color(0xFFF3F4F6),
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(8),
             ),
             child: Row(
               children: [
@@ -1919,17 +1919,17 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
       _CategoryMeta('All', null, Icons.grid_view_rounded, const Color(0xFF64748B)),
     ];
 
-    final tileHeight = (MediaQuery.textScalerOf(context).scale(16) + 58).clamp(76.0, 126.0);
+    final tileHeight = (MediaQuery.textScalerOf(context).scale(14) + 38).clamp(48.0, 72.0);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: GridView.builder(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 4,
-          crossAxisSpacing: 8,
-          mainAxisSpacing: 8,
+          crossAxisSpacing: 6,
+          mainAxisSpacing: 6,
           mainAxisExtent: tileHeight,
         ),
         itemCount: categories.length,
@@ -1945,7 +1945,7 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
 
           return InkWell(
             key: Key('vault_category_${cat.label.toLowerCase()}'),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(10),
             onTap: () {
               HapticFeedback.selectionClick();
               setState(() {
@@ -1970,35 +1970,27 @@ class _ReceivedVaultViewState extends State<ReceivedVaultView> {
                   ? Duration.zero
                   : const Duration(milliseconds: 180),
               curve: Curves.easeOutCubic,
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
               decoration: BoxDecoration(
                 color: isSelected
                     ? cat.color.withValues(alpha: 0.12)
                     : Colors.white,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(10),
                 border: Border.all(
                   color: isSelected ? cat.color : const Color(0xFFE5E7EB),
                   width: isSelected ? 1.5 : 1.0,
                 ),
               ),
-              child: Column(
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Container(
-                    width: 34,
-                    height: 34,
-                    decoration: BoxDecoration(
-                      color: cat.color.withValues(alpha: 0.10),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(cat.icon, color: cat.color, size: 19),
-                  ),
-                  const SizedBox(height: 5),
+                  Icon(cat.icon, color: cat.color, size: 16),
+                  const SizedBox(width: 4),
                   Flexible(
                     child: Text(
                       cat.label,
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: 10,
                         fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
                         color: isSelected ? cat.color : const Color(0xFF0F172A),
                       ),

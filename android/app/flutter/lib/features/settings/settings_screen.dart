@@ -388,7 +388,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               // 1. Zero-Trust Invariant Enforcement Header
               GlassContainer(
                 borderRadius: BorderRadius.circular(16),
-                padding: const EdgeInsets.all(14.0),
+                padding: const EdgeInsets.all(12.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -401,7 +401,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             shape: BoxShape.circle,
                           ),
                           child: const Icon(Icons.verified_rounded,
-                              color: Color(0xFF2563EB), size: 18),
+                              color: Color(0xFF2563EB), size: 16),
                         ),
                         const SizedBox(width: 8),
                         Expanded(
@@ -415,19 +415,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 4),
                     Text(
-                      'All cryptographic keys and transfer payloads remain strictly on your device. PeerLink never transmits private data to central servers.',
+                      'All cryptographic keys and transfer payloads remain strictly on your device. Autonomous self-healing and zero-touch background sync active.',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: isDark ? Colors.white60 : Colors.black54,
-                        fontSize: 11,
+                        fontSize: 10,
                       ),
                     ),
                   ],
                 ),
               ),
 
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
 
               // 2. Trust & Devices Summary
               InteractiveGlassCard(
@@ -1087,6 +1087,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
           );
         },
       ),
+    );
+  }
+
+  Widget _buildAutomatedFeatureBadge(IconData icon, String title, String subtitle) {
+    return Row(
+      children: [
+        Icon(icon, size: 14, color: const Color(0xFF15803D)),
+        const SizedBox(width: 6),
+        Text(
+          '$title: ',
+          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF166534)),
+        ),
+        Expanded(
+          child: Text(
+            subtitle,
+            style: const TextStyle(fontSize: 11, color: Color(0xFF15803D)),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
     );
   }
 
